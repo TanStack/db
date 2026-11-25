@@ -1,16 +1,25 @@
 /**
  * Receiving campaigns retain the shared Map/phase model and each original
  * public checkpoint. Five randomized builders enforce minimum-five reach.
- * Their local obligation ledger also checks fresh generated constructions:
- * the pinned framework only associates its seed-derived objects with enters.
+ * Their local obligation ledger checks each fresh constructed base against its
+ * required production states. The framework runs five bases per builder; its
+ * ordinary generated unit draws from the unmodified arbitrary.
  */
 import { eagerLiveSourceHistoryArb, reachStatesFor } from '../src'
 import {
   eagerLiveSourceVerdict,
   observeEagerLiveSourceHistory,
 } from './eager-live-source-framework-oracle'
-import type { EagerLiveSourceDriver, EagerLiveSourceHistory } from '../src'
+import type {
+  EagerLiveSourceDriver,
+  EagerLiveSourceHistory,
+  EagerLiveSourceReachState,
+} from '../src'
 import type { Observation } from '../../db/tests/oracle-property'
+import type {
+  EagerHistoryResult,
+  EagerSourceCorruption,
+} from './eager-live-source-framework-oracle'
 
 export function eagerLiveSourceCampaign(
   driver: EagerLiveSourceDriver,
@@ -18,8 +27,14 @@ export function eagerLiveSourceCampaign(
     generated: EagerLiveSourceHistory,
     salt: number,
   ) => EagerLiveSourceHistory,
+  additionalStates: ReadonlyArray<EagerLiveSourceReachState> = [],
+  receive?: (
+    history: EagerLiveSourceHistory,
+    corruption?: EagerSourceCorruption,
+    states?: ReadonlyArray<EagerLiveSourceReachState>,
+  ) => Promise<EagerHistoryResult>,
 ) {
-  const states = reachStatesFor(driver)
+  const states = [...reachStatesFor(driver), ...additionalStates]
   const required = new WeakMap<
     EagerLiveSourceHistory,
     { salt: number; states: ReadonlyArray<string> }
@@ -34,16 +49,19 @@ export function eagerLiveSourceCampaign(
     },
   }))
   const drive =
-    (corruptValues = false) =>
+    (corruption?: EagerSourceCorruption) =>
     async (
       history: EagerLiveSourceHistory,
       observe: (checkpoint: string, value: unknown) => void,
     ) => {
-      const result = await observeEagerLiveSourceHistory(
-        driver,
-        history,
-        corruptValues,
-      )
+      const result = await (receive
+        ? receive(history, corruption, additionalStates)
+        : observeEagerLiveSourceHistory(
+            driver,
+            history,
+            corruption,
+            additionalStates,
+          ))
       for (const state of result.reached) observe(`reach`, state)
       observe(`completed`, result)
     }
@@ -55,6 +73,8 @@ export function eagerLiveSourceCampaign(
       required: required.get(history)?.states ?? [],
     }),
     driver: drive(),
+    deliveryErrorIdentityDriver: drive(`delivery-errors`),
+    staleHealthDriver: drive(`stale-health`),
     check: (
       _history: EagerLiveSourceHistory,
       trace: ReadonlyArray<Observation>,
@@ -64,7 +84,7 @@ export function eagerLiveSourceCampaign(
       {
         name: `shared value judgment rejects wrong public values`,
         law: `FID-1 (values)`,
-        driver: drive(true),
+        driver: drive(`values`),
       },
       ...constructed.flatMap((_builder, salt) =>
         states.map((state) => ({

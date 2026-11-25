@@ -24,6 +24,11 @@ import {
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
 import {
+  registerSourceClaimBoundaryOracle,
+  registerSourceFifoOrderingOracle,
+  registerSourcePublicationOracle,
+} from './persisted-source-fifo-oracle'
+import {
   assertGenerationNoticeHistory,
   atPersistedOracleCheckpoint,
   cleanupPersistedOracle,
@@ -50,7 +55,6 @@ import {
   expectOpenTransactionBoundaryObservation,
   expectOwnerIsolationAdmission,
   expectRequestLocalFailureObservation,
-  expectSourceFifoOrderingObservation,
   expectedScopedSnapshot,
   expectedTargetedSnapshot,
   foldDurabilityLedger,
@@ -59,7 +63,6 @@ import {
   ownerIsolationHistory,
   persistedKeySetEvidenceStatuses,
   requestLocalFailureHistory,
-  sourceFifoOrderingHistory,
 } from './persisted-durability-model-oracle'
 import {
   assertFollowerRemoteDemandHistory,
@@ -75,7 +78,6 @@ import type {
   OwnerIsolationHistory,
   RequestLocalFailureHistory,
   RequestLocalFailureOperation,
-  SourceFifoOrderingHistory,
 } from './persisted-durability-model-oracle'
 import type { PersistedTx, PersistenceAdapter } from '../src'
 import type { Collection, LoadSubsetOptions } from '@tanstack/db'
@@ -166,148 +168,6 @@ let generatedOwnershipHistoryId = 0
 
 function sortedTodoRows(rows: Iterable<Todo>): Array<Todo> {
   return Array.from(rows).sort((left, right) => left.id.localeCompare(right.id))
-}
-
-async function runSourceFifoOrderingLaw(
-  relation: `same-key` | `disjoint`,
-  olderTitle: string,
-  newerTitle: string,
-): Promise<void> {
-  const historyId = ++generatedOwnershipHistoryId
-  const adapter = createRecordingAdapter()
-  const firstPersistenceEntered = createEventGate()
-  const releaseFirstPersistence = createEventGate()
-  const applyCommittedTx = adapter.applyCommittedTx.bind(adapter)
-  let applyCalls = 0
-  adapter.applyCommittedTx = async (...args) => {
-    applyCalls++
-    if (applyCalls === 1) {
-      firstPersistenceEntered.resolve()
-      await releaseFirstPersistence.promise
-    }
-    await applyCommittedTx(...args)
-  }
-  let sourceParams!: TodoSyncParams
-  const collection = createCollection(
-    persistedCollectionOptions<Todo, string>({
-      id: `generated-source-fifo-order-${historyId}`,
-      getKey: (row) => row.id,
-      sync: {
-        sync: (params) => {
-          sourceParams = params
-          params.markReady()
-        },
-      },
-      persistence: { adapter },
-    }),
-  )
-  const receipts: Array<Promise<void>> = []
-  let hasPrimaryFailure = false
-
-  try {
-    await atPersistedOracleCheckpoint(
-      collection.stateWhenReady(),
-      `generated source FIFO ordering ready`,
-    )
-    sourceParams.begin()
-    sourceParams.write({
-      type: `insert`,
-      value: { id: `gate`, title: `holds adapter` },
-    })
-    receipts.push(Promise.resolve(sourceParams.commit()).then(() => undefined))
-    receipts.forEach((receipt) => void receipt.catch(() => undefined))
-    await atPersistedOracleCheckpoint(
-      firstPersistenceEntered.promise,
-      `generated source FIFO ordering adapter hold`,
-    )
-
-    const olderKey = relation === `same-key` ? `shared` : `older`
-    const newerKey = relation === `same-key` ? `shared` : `newer`
-
-    sourceParams.begin()
-    sourceParams.write({
-      type: `insert`,
-      value: { id: olderKey, title: olderTitle },
-    })
-    const olderReceipt = Promise.resolve(sourceParams.commit()).then(
-      () => undefined,
-    )
-    receipts.push(olderReceipt)
-    void olderReceipt.catch(() => undefined)
-
-    sourceParams.begin()
-    sourceParams.write({
-      type: relation === `same-key` ? `update` : `insert`,
-      value: { id: newerKey, title: newerTitle },
-    })
-    const newerReceipt = Promise.resolve(sourceParams.commit()).then(
-      () => undefined,
-    )
-    receipts.push(newerReceipt)
-    void newerReceipt.catch(() => undefined)
-
-    oracleAssertion('existing comparison at 459', () =>
-      expect(
-        sortedTodoRows(Array.from(collection.values()).map(stripVirtualProps)),
-      ).toEqual(sortedTodoRows([{ id: `gate`, title: `holds adapter` }])),
-    )
-
-    releaseFirstPersistence.resolve()
-    for (const [index, receipt] of receipts.entries()) {
-      await atPersistedOracleCheckpoint(
-        receipt,
-        `generated source FIFO receipt ${index}`,
-      )
-    }
-    expectSourceFifoOrderingObservation(
-      {
-        publicRows: sortedTodoRows(
-          Array.from(collection.values()).map(stripVirtualProps),
-        ),
-        durableRows: sortedTodoRows(adapter.rows.values()),
-        status: collection.status,
-        pendingMarkers: collection._state.pendingSyncedTransactions.length,
-      },
-      sortedTodoRows(
-        expectedSourceFifoOrderingRows(
-          relation,
-          olderTitle,
-          newerTitle,
-        ).values(),
-      ),
-    )
-  } catch (error) {
-    hasPrimaryFailure = true
-    throw error
-  } finally {
-    releaseFirstPersistence.resolve()
-    await cleanupPersistedOracle(
-      [
-        ...receipts.map((receipt) => () => receipt.catch(() => undefined)),
-        () => collection.cleanup(),
-      ],
-      hasPrimaryFailure,
-    )
-  }
-}
-
-// Source FIFO ordering law: the gate write holds the adapter, then the older
-// and newer source writes commit in submission order. The final rows are the
-// gate plus both writes, and a newer write to the same key replaces the older.
-// The model takes only the relation and titles, not the production write path.
-function expectedSourceFifoOrderingRows(
-  relation: `same-key` | `disjoint`,
-  olderTitle: string,
-  newerTitle: string,
-): Map<string, Todo> {
-  const olderKey = relation === `same-key` ? `shared` : `older`
-  const newerKey = relation === `same-key` ? `shared` : `newer`
-  const expected = new Map<string, Todo>([
-    [`gate`, { id: `gate`, title: `holds adapter` }],
-  ])
-  expected.set(olderKey, { id: olderKey, title: olderTitle })
-  expected.set(newerKey, { id: newerKey, title: newerTitle })
-  return expected
 }
 
 async function runAbortRelationshipLaw(
@@ -888,18 +748,6 @@ async function runRequestLocalFailureOperationLaw(
   }
 }
 
-async function runGeneratedSourceFifoOrderingHistory(
-  history: SourceFifoOrderingHistory,
-): Promise<void> {
-  for (const relation of history.relations) {
-    await runSourceFifoOrderingLaw(
-      relation,
-      history.titles[0],
-      history.titles[1],
-    )
-  }
-}
-
 async function runGeneratedAbortGraphHistory(
   history: AbortGraphHistory,
 ): Promise<void> {
@@ -992,12 +840,10 @@ function registerGeneratedPersistenceProperty<Value>(options: {
 // needs no replay guard of its own. Its grammar and check calibrations run no
 // production and live in persisted-model-calibration.test.ts.
 describe(`generated persistence durability oracles`, () => {
-  registerGeneratedPersistenceProperty({
+  registerSourceFifoOrderingOracle({
     property: `sqlite-persistence.source-fifo-order`,
-    title: `serialized histories preserve source order and settle every receipt`,
-    arbitrary: sourceFifoOrderingHistory,
-    fixedSeed: generatedPersistenceFixedSeeds.sourceFifoOrdering,
-    run: runGeneratedSourceFifoOrderingHistory,
+    owns: [`src/persisted.ts`],
+    receivingPath: `Controlled single-process persistence adapter.`,
   })
   registerGeneratedPersistenceProperty({
     property: `sqlite-persistence.abort-graph`,
@@ -5516,16 +5362,19 @@ describe(`persistedCollectionOptions`, () => {
   )
   // The follower window: a second reservation after the owner replied.
   const reReserveHistories = Array.from({ length: 9 }, (_, commitDelay) =>
-    Array.from({ length: 13 }, (_, reserveDelay): PersistedReadHistory => ({
-      syncMode: `on-demand`,
-      route: `routed subset`,
-      operation: `insert`,
-      truncateReplay: `none`,
-      commitTiming: `open during the read`,
-      ending: `commits`,
-      followUp: `owner replies, then the source reserves again`,
-      reReserveDelays: [commitDelay, reserveDelay],
-    })),
+    Array.from(
+      { length: 13 },
+      (_reserve, reserveDelay): PersistedReadHistory => ({
+        syncMode: `on-demand`,
+        route: `routed subset`,
+        operation: `insert`,
+        truncateReplay: `none`,
+        commitTiming: `open during the read`,
+        ending: `commits`,
+        followUp: `owner replies, then the source reserves again`,
+        reReserveDelays: [commitDelay, reserveDelay],
+      }),
+    ),
   ).flat()
   oracleProperty({
     id: `persistence.persisted-read-re-reserve`,
@@ -6371,4 +6220,14 @@ describe(`persistedCollectionOptions`, () => {
       ),
     check: forwardAssertionJudgment,
   })
+})
+
+registerSourceClaimBoundaryOracle({
+  property: `sqlite-persistence.source-claim-boundary.recording`,
+  owns: [`src/persisted.ts`],
+})
+
+registerSourcePublicationOracle({
+  property: `sqlite-persistence.source-publication.recording`,
+  owns: [`src/persisted.ts`],
 })

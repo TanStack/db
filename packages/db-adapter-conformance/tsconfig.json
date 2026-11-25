@@ -17,6 +17,12 @@
       "@tanstack/db": ["../db/src"]
     }
   },
-  "include": ["src", "tests", "vite.config.ts", "vitest.neon.config.ts"],
+  "include": [
+    "src",
+    "tests",
+    "vite.config.ts",
+    "vitest.neon.config.ts",
+    "vitest.neon-browser.config.ts"
+  ],
   "exclude": ["node_modules", "dist", "tests/neon/vendor"]
 }

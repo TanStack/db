@@ -1,0 +1,524 @@
+{
+  "scope": "PR2377 saved-demand receiving follow-up; bounded startup, finite-prefix retention/source attribution, and native active-predicate union",
+  "head": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "branch": "powersync-standalone-package",
+  "runtime": {
+    "node": "v24.19.0",
+    "browser": "actual Chromium worker/OPFS"
+  },
+  "sourceAndInstrumentFiles": [
+    {
+      "path": "package.json",
+      "sha256": "e6b7ba411f2618669f7d5558316b503d9e53fc09ea0a12d3d8f57f07b06527fa"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-oracle.browser.test.ts",
+      "sha256": "fe98baf691a72ede3df16cb643803d489e928bd83d9388454e45d1bea4dbf132"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer-oracle.browser.test.ts",
+      "sha256": "c1c38c0ad6a138a813ed87bbb8f3fcf4d3253ba40e06e3bb20edcfda053edaae"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer.opfs.html",
+      "sha256": "60cb637edddd60fdd8850f17c9860976b66176358d99c548f8d2bd171882304b"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer.opfs.ts",
+      "sha256": "72595297e6eca9ceca403e790b898972f45a147495bf830aecdb775dae26213b"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand.opfs.html",
+      "sha256": "3050522213a31ca2857631aee3807a16aec8ccc58dbf9cebd6b36ea3064e7fcd"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand.opfs.ts",
+      "sha256": "25cbce03ef892e16a7b6207af96af8e40746a26ee317bb52ca03a55fd0681392"
+    },
+    {
+      "path": "packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config.ts",
+      "sha256": "b731d370f1b905b423dbe6ad95f578c1e51b9a2f36ff00577e3d648a254adca9"
+    },
+    {
+      "path": "packages/convex-db-collection/src/options.ts",
+      "sha256": "872d94be0598f4f918a02c4e617f443eed6a4b939cab2200066a8eaede8c8409"
+    },
+    {
+      "path": "packages/convex-db-collection/src/pagination.ts",
+      "sha256": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60"
+    },
+    {
+      "path": "packages/convex-db-collection/src/subscription.ts",
+      "sha256": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+    },
+    {
+      "path": "packages/convex-db-collection/tests/lazy-paging-baseline-oracle.property.test.ts",
+      "sha256": "4e5c99e7d31cba191cffc11fc9be6f11d45f048947c2d117dd920fafacbc9705"
+    },
+    {
+      "path": "packages/convex-db-collection/tests/lazy-paging-deferred-acceptance.ts",
+      "sha256": "d7c89a887dcdb1dcec6e4315f866465e2408c249251a2b63e8e3951114cfb409"
+    },
+    {
+      "path": "packages/convex-db-collection/tests/lazy-paging-driver.ts",
+      "sha256": "d423244d181701d050aac9114e996fc1b839852f540aaad6a4715a387262d4ac"
+    },
+    {
+      "path": "packages/convex-db-collection/tests/persisted-demand-source.ts",
+      "sha256": "4cefb5c38d054e6464a13563ac1bd23d34faae08cb44b146b275cef28e6134ae"
+    },
+    {
+      "path": "packages/db-adapter-conformance/package.json",
+      "sha256": "08a572a0dce3d7dbf975a3f71f84e09fb4e6eba2c4eea3b33fe73ec3a38ae19a"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-demand-peer-driver.ts",
+      "sha256": "4236f406af1831d2a7a5df99208398d142d061531d33e01f834fe3950d9810a6"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-demand-peer-oracle-suite.ts",
+      "sha256": "786106db8b649382dac207592c968c9ded9316d87f6c8e5b0a6af3eb94d42b66"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-demand-peer-oracle.test.ts",
+      "sha256": "adc52fa3af646f7612bfeedefcb9be98101955841b3044fe07134b2aaec1f061"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-demand-receiving-driver.ts",
+      "sha256": "97aca6b9a0f09c2faf02b4fb66d638e54ce556290412cf2f5d23536418c4b959"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-demand-receiving-oracle-suite.ts",
+      "sha256": "00acd4ca97b89b0a457e7bfd67564750736c72e9c7ccf67c9a5d10a5ee808561"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-demand-receiving-oracle.test.ts",
+      "sha256": "9ec8c8e5216a33dc4bf0c64007cc12b8b0cee95e2be8afddd2e8b1acd7265840"
+    },
+    {
+      "path": "packages/db-adapter-conformance/tests/persisted-demand-receiving-types.ts",
+      "sha256": "bde18843001e39e9737101dfe614954ba1d9ba1fdcfd92f237f705e021578db6"
+    },
+    {
+      "path": "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts",
+      "sha256": "3910437e91fddd5dd90f3dd9ba03057f9df613a997ea1567d906f7463e334d90"
+    },
+    {
+      "path": "packages/db/tests/oracle-config.ts",
+      "sha256": "f4a2ac5ac4cce51e459104db483c3428f897862f69342bba79eac8ec32c1cd6b"
+    },
+    {
+      "path": "packages/db/tests/oracle-replay-manifest.ts",
+      "sha256": "8c67ac6e308e2ef08d0efcf2d121e719a3bd57db70201011241b8ea381e23d81"
+    },
+    {
+      "path": "packages/electric-db-collection/tests/persisted-demand-source.ts",
+      "sha256": "7a455e3c14d176f9d9857b45568a07b8977db6c3ca2c14a8f5e585b4185efa5b"
+    },
+    {
+      "path": "packages/powersync-db-collection/src/powersync.ts",
+      "sha256": "80ce907bea803b76cb5270071aff48636122e58cb6b758ff9744dbf1a927cb55"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/demand-union-conformance-oracle.property.test.ts",
+      "sha256": "b67e32ddb21f69f0c0aed6ef17bf9751d849541f4c0df1b8abaec2768d4a7722"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/demand-union-driver.ts",
+      "sha256": "798703e56a2337de11231161963c11319020addf6d7b55fd19a353a2da814904"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/demand-union-oracle-suite.ts",
+      "sha256": "d70bed253b72c67441d477758121e3d3a87e224481b185f599eef83b662216f6"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/demand-union-oracle.ts",
+      "sha256": "73c14242059600b1032f70a8922e2fcd2f2c197bc5ff155c7ae531a01a4f4ad4"
+    },
+    {
+      "path": "packages/powersync-db-collection/tests/persisted-demand-source.ts",
+      "sha256": "e17cf3b453427ecae8f68368c2749b583d2a201ef5d6e18b4d4688721debe3f2"
+    },
+    {
+      "path": "packages/query-db-collection/tests/persisted-demand-source.ts",
+      "sha256": "84bcd55b711ce70876596972a896ce326e7f397108d7305ab8ff4f45b6bd2259"
+    },
+    {
+      "path": "packages/trailbase-db-collection/tests/persisted-demand-source.ts",
+      "sha256": "d8eb74a53aff36ef8d1d71f9b9274d64bc532a1e8ba8fd3ebb8187501d328e97"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "bba31ccbabebdf46d6a93f021c16f36e7662a835da23fa0d3006d28fa5ab3f72"
+    }
+  ],
+  "versionedEvidence": [
+    {
+      "path": "docs/contributing/oracle-reviews/2026-11-18-other-adapters-persisted-demand-pre-edit-v6-snapshot.json",
+      "sha256": "ec8780ce23f77486132c8e47fd8d48e5835f4836169dd6b3671bd1fc1c548c45"
+    },
+    {
+      "path": "docs/contributing/oracle-reviews/2026-11-18-convex-persisted-demand-peer-pre-edit-v2.json",
+      "sha256": "fe084f700f49b5dccfcfc7d4fdba46ed980895e278f0b52bd8f725309299edac"
+    },
+    {
+      "path": "docs/contributing/oracle-reviews/2026-11-18-convex-baseline-mutation-evidence.json",
+      "sha256": "aa4bc30e1b54f9be9e6ef2a9cea75df8de7811da29ee9ffd9ded7bf0d42558b4"
+    },
+    {
+      "path": "docs/contributing/oracle-reviews/2026-11-18-native-demand-union-final-evidence.json",
+      "sha256": "ef535f459a2f740d3475f1b36cfd623c93444c907f3a66a2421b2e9a5ca4cd1d"
+    },
+    {
+      "path": "docs/contributing/oracle-reviews/2026-11-17-native-demand-union-pre-edit-evidence.json",
+      "sha256": "b93aa96990b451249b98f8e4d3f4fab51d4062f8a4b3eab29b57102010439bfe"
+    },
+    {
+      "path": "docs/contributing/oracle-reviews/2026-11-18-other-adapters-persisted-demand.md",
+      "sha256": "5800729c7b97d29c9c5eef38311709d0af4ec777453d0ecaf541ef6b36718956"
+    }
+  ],
+  "runs": [
+    {
+      "name": "all five persisted-demand receivers, Node",
+      "command": "pnpm exec vitest run tests/persisted-demand-receiving-oracle.test.ts --maxWorkers=1 --coverage.enabled=false --typecheck.enabled=false --testTimeout=20000 --reporter=default --reporter=json --outputFile=../../.review-2377/final-saved-demand-all-node.json",
+      "cwd": "packages/db-adapter-conformance",
+      "exitCode": 0,
+      "passed": 150,
+      "skipped": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-all-node.log",
+        "sha256": "9a017cdf4c5118da74663700cd0853b8dd7016cf2f59c32b121a7da8d39715c7"
+      },
+      "structuredResult": {
+        "path": ".review-2377/final-saved-demand-all-node.json",
+        "sha256": "99aa708958d1da92563c327f4d5b18b0d40036db2519422d767df6661b2ac539"
+      }
+    },
+    {
+      "name": "all five persisted-demand receivers, Chromium worker/OPFS",
+      "command": "pnpm exec vitest run --config vitest.adapter-oracles.config.ts e2e/adapter-persisted-demand-oracle.browser.test.ts --coverage.enabled=false --maxWorkers=1 --reporter=default --reporter=json --outputFile=../../.review-2377/final-saved-demand-all-browser-escalated.json",
+      "cwd": "packages/browser-db-sqlite-persistence",
+      "exitCode": 0,
+      "passed": 150,
+      "skipped": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-all-browser-escalated.log",
+        "sha256": "3bfb2c66c2bb16968f375e1d5f0a288c694d5754ceeae7915571e97e203eafa1"
+      },
+      "structuredResult": {
+        "path": ".review-2377/final-saved-demand-all-browser-escalated.json",
+        "sha256": "a1700a97411842b5adc64d40bb4189adc445bd336118a03f12d931c3abf3f8f3"
+      }
+    },
+    {
+      "name": "full Convex registered oracles",
+      "command": "pnpm test:oracles --coverage.enabled=false --maxWorkers=1",
+      "cwd": "packages/convex-db-collection",
+      "exitCode": 0,
+      "passed": 1857,
+      "skipped": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-convex-oracles.log",
+        "sha256": "850341967a0656ca7f75cf4d7f2a6ccd61742af8c1d85759022ea5525db42b49"
+      }
+    },
+    {
+      "name": "primary persistence neighbors and calibrations",
+      "command": "pnpm exec vitest run tests/persisted-demand-coverage-oracle.test.ts tests/persisted-demand-coverage-campaign-oracle.test.ts tests/persisted-demand-coverage-calibration.test.ts tests/persisted-demand-coverage-campaign-calibration.test.ts --coverage.enabled=false --maxWorkers=1",
+      "cwd": "packages/db-sqlite-persistence-core",
+      "exitCode": 0,
+      "passed": 356,
+      "skipped": 1,
+      "log": {
+        "path": ".review-2377/final-saved-demand-persistence-neighbors.log",
+        "sha256": "e1c5b4bb14f03b31ea85b6c5c143beed03b7620541d19e73fb8c8b07f210031b"
+      }
+    },
+    {
+      "name": "named replay manifest",
+      "command": "pnpm exec vitest run tests/oracle-replay.test.ts --testNamePattern \"named oracle replay manifest\" --coverage.enabled=false",
+      "cwd": "packages/db",
+      "exitCode": 0,
+      "passed": 70,
+      "skipped": 54,
+      "log": {
+        "path": ".review-2377/final-saved-demand-replay-manifest-fixed.log",
+        "sha256": "97c0e9b8cafee9c0cf3ac99e4136aa02e581683a643dc06ccb841323eed0f360"
+      }
+    },
+    {
+      "name": "portfolio registry runner",
+      "command": "node --test scripts/collection-adapter-runner.test.mjs",
+      "cwd": ".",
+      "exitCode": 0,
+      "passed": 5,
+      "skipped": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-registry-runner.log",
+        "sha256": "af79b6034e44ef332492b8ea90dacc6bdd630e030c7edee0203d19ce22c602eb"
+      }
+    }
+  ],
+  "measuredReach": {
+    "adapter.query.persisted-demand.node-sqlite": {
+      "host": "node",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    },
+    "adapter.electric.persisted-demand.node-sqlite": {
+      "host": "node",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    },
+    "adapter.powersync.persisted-demand.node-sqlite": {
+      "host": "node",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    },
+    "adapter.trailbase.persisted-demand.node-sqlite": {
+      "host": "node",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    },
+    "adapter.convex.persisted-demand.node-sqlite": {
+      "host": "node",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    },
+    "adapter.query.persisted-demand.chromium-opfs": {
+      "host": "chromium",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    },
+    "adapter.electric.persisted-demand.chromium-opfs": {
+      "host": "chromium",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    },
+    "adapter.powersync.persisted-demand.chromium-opfs": {
+      "host": "chromium",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    },
+    "adapter.trailbase.persisted-demand.chromium-opfs": {
+      "host": "chromium",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    },
+    "adapter.convex.persisted-demand.chromium-opfs": {
+      "host": "chromium",
+      "counts": {
+        "changed-value late answer supplied after covered reopen": 1,
+        "closed and reopened storage": 23,
+        "covered load waits for the deadline": 2,
+        "first covered applied": 5,
+        "first empty applied": 3,
+        "first failed acquisition": 3,
+        "first never requested": 5,
+        "first overlap applied": 4,
+        "first pending acquisition": 3,
+        "restored source rows before deadline": 2,
+        "uncovered load fails with its upstream": 4,
+        "uncovered offline": 15,
+        "window covered offline": 8
+      }
+    }
+  },
+  "checks": [
+    {
+      "name": "shared TypeScript",
+      "exitCode": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-types-shared.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "browser TypeScript",
+      "exitCode": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-types-browser.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "Convex TypeScript",
+      "exitCode": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-types-convex.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "name": "scoped ESLint",
+      "exitCode": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-eslint.log",
+        "sha256": "2ce477596070d17a6fffdd549fc94ea55014c331cccce55db1b82c01ed7732b0"
+      }
+    },
+    {
+      "name": "bundle size",
+      "exitCode": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-size.log",
+        "sha256": "df835bd94c32b101c3ae752d61559ba63bb19c3bdd630c8093743abbad8fba30"
+      }
+    },
+    {
+      "name": "root oracle lint",
+      "exitCode": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-lint-changed.log",
+        "sha256": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168"
+      }
+    },
+    {
+      "name": "git diff whitespace check",
+      "exitCode": 0,
+      "log": {
+        "path": ".review-2377/final-saved-demand-diff-check.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "setupOnly": [
+    {
+      "description": "Initial Chromium aggregate attempt could not bind 127.0.0.1 in sandbox; no histories executed; permitted rerun above supplies evidence",
+      "log": {
+        "path": ".review-2377/final-saved-demand-all-browser.log",
+        "sha256": "3e35342b596c336b151a0bcbc944c9ab65b57e3729c9062af797859e99041ee5"
+      },
+      "exitCode": 1
+    }
+  ],
+  "reviewVerdicts": {
+    "convex": "Independent source/instrument/mutation approval;84 referenced hashes verified; see mutation manifest",
+    "native": "Independent source/instrument/mutation approval;42 references verified; see native final manifest"
+  },
+  "limits": [
+    "Actual peer receiver finite-prefix scope excludes exhausted-empty deletion; its public-base mutant survival remains explicit; controlled owner kills that mutant.",
+    "No-tombstone alternative permitted only within successful full-row FIFO no-metadata histories; no universal equivalence claim.",
+    "No deployed provider, arbitrary filters/cursors, retention-expiry or concurrent-tab claim.",
+    "Broader portfolio SDK release and Node22 validation blockers remain as documented.",
+    "Scoped ESLint has zero errors and one require-await warning for intentional async factory rejection semantics."
+  ]
+}

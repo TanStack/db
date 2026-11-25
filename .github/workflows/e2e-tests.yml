@@ -14,15 +14,26 @@ permissions:
 
 jobs:
   e2e-group:
-    name: E2E (${{ matrix.group }})
+    name: E2E (${{ matrix.group }}${{ matrix.shard && format(' {0}/4', matrix.shard) || '' }})
     strategy:
       fail-fast: false
       matrix:
-        group: [browser, adapter-browser, desktop, cloud-mobile]
+        group: [browser, desktop, cloud-mobile]
+        include:
+          - group: adapter-browser
+            shard: 1
+          - group: adapter-browser
+            shard: 2
+          - group: adapter-browser
+            shard: 3
+          - group: adapter-browser
+            shard: 4
     runs-on: ubuntu-latest
     # Browser runs provider, IndexedDB, OPFS and SSR suites sequentially.
     # Allow the full suite to finish on slower runners.
-    timeout-minutes: ${{ matrix.group == 'browser' && 60 || 35 }}
+    # Partition adapter files across fresh runners after repeated runner shutdowns.
+    # Every file keeps its full campaigns, five construction bases and budgets.
+    timeout-minutes: ${{ matrix.group == 'adapter-browser' && 120 || matrix.group == 'browser' && 60 || 35 }}
     steps:
       - name: Checkout code
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -153,7 +164,7 @@ jobs:
         working-directory: packages/browser-db-sqlite-persistence
         run: |
           pnpm exec playwright install --with-deps chromium
-          pnpm test:oracles:adapters-browser
+          pnpm test:oracles:adapters-browser --shard=${{ matrix.shard }}/4
 
       - name: Run Browser SQLite packaged consumer E2E tests
         if: matrix.group == 'browser'
@@ -262,7 +273,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: test-results-${{ matrix.group }}
+          name: test-results-${{ matrix.group }}${{ matrix.shard && format('-{0}', matrix.shard) || '' }}
           path: packages/db-collection-e2e/junit/
           retention-days: 7
 

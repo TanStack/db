@@ -1,5 +1,9 @@
 import { describe, expect } from 'vitest'
-import { oracleProperty } from './oracle-config'
+import { fc } from '@fast-check/vitest'
+import { createCollection } from '../src/collection/index'
+import { localOnlyCollectionOptions } from '../src/local-only'
+import { oracleProperty, pass, violation } from './oracle-config'
+import { withOracleCleanup } from './oracle-cleanup'
 import {
   forwardAssertionJudgment,
   recordAssertionJudgment,
@@ -171,4 +175,340 @@ describe(`local-only direct writes match the confirmed optimistic path`, () => {
       ),
     check: forwardAssertionJudgment,
   })
+})
+
+/**
+ * The LocalOnly guide's Mutation Handlers section promises automatic
+ * confirmation after a successful optional handler. A rejected handler rolls
+ * its optimistic mutation back. Its returned value supplies no separate
+ * confirmation policy. This is the local receiving distinction from remote
+ * handlers, whose confirmation requires an explicit provider operation.
+ *
+ * The independent model applies one authored operation to a plain row list
+ * only on fulfillment. Histories vary the operation, handler decision, ignored
+ * legacy return, row value and a disjoint peer. The driver holds the real
+ * handler, records the optimistic public rows, releases it, records inside the
+ * settlement waiter, then reloads. Reload must keep those accepted local rows:
+ * they are the only copy (LocalOnly guide, initialData). No remote replacement,
+ * simultaneous handlers, arbitrary values or callback publication is claimed.
+ */
+type LocalHandlerHistory = {
+  operation: `insert` | `update` | `delete`
+  accepted: boolean
+  legacy: `void` | `false` | `refetch` | `checkpoint`
+  peer: boolean
+  value: string
+}
+
+const localHandlerHistory = fc.record({
+  operation: fc.constantFrom(
+    `insert` as const,
+    `update` as const,
+    `delete` as const,
+  ),
+  accepted: fc.boolean(),
+  legacy: fc.constantFrom(
+    `void` as const,
+    `false` as const,
+    `refetch` as const,
+    `checkpoint` as const,
+  ),
+  peer: fc.boolean(),
+  value: fc.string({ maxLength: 8 }),
+})
+
+const localHandlerStates = ([`insert`, `update`, `delete`] as const).flatMap(
+  (operation) =>
+    [true, false].flatMap((accepted) =>
+      ([`void`, `false`, `refetch`, `checkpoint`] as const).map(
+        (legacy) =>
+          `${operation}:${accepted ? `accepted` : `rejected`}:${legacy}`,
+      ),
+    ),
+)
+const localHandlerRequired = new WeakMap<LocalHandlerHistory, string>()
+const localHandlerState = (history: LocalHandlerHistory) =>
+  `${history.operation}:${history.accepted ? `accepted` : `rejected`}:${history.legacy}`
+
+function localHandlerModel(history: LocalHandlerHistory) {
+  const initial = [
+    { id: 1, value: `initial` },
+    ...(history.peer ? [{ id: 3, value: `peer` }] : []),
+  ]
+  const optimistic =
+    history.operation === `insert`
+      ? [...initial, { id: 2, value: history.value }]
+      : history.operation === `update`
+        ? initial.map((row) =>
+            row.id === 1 ? { ...row, value: history.value } : row,
+          )
+        : initial.filter((row) => row.id !== 1)
+  const sorted = (rows: typeof initial) => [...rows].sort((a, b) => a.id - b.id)
+  return {
+    optimistic: sorted(optimistic),
+    final: sorted(history.accepted ? optimistic : initial),
+    settlement: history.accepted ? `fulfilled` : `rejected`,
+    state: history.accepted ? `completed` : `failed`,
+  }
+}
+
+type LocalHandlerObservation = {
+  held: Array<{ id: number; value: string }>
+  heldSettlement: string
+  settled: Array<{ id: number; value: string }>
+  reloaded: Array<{ id: number; value: string }>
+  settlement: string
+  state: string
+  exactFailure: boolean
+  calls: number
+}
+
+async function localHandlerDriver(
+  history: LocalHandlerHistory,
+  record: (checkpoint: string, value: unknown) => void,
+  omitConfirmation = false,
+) {
+  let release!: () => void
+  let entered!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const entry = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  const failure = new Error(`local handler failure`)
+  let calls = 0
+  const handler = async (): Promise<void> => {
+    calls++
+    entered()
+    await gate
+    if (!history.accepted) throw failure
+    const ignored: unknown =
+      history.legacy === `void`
+        ? undefined
+        : history.legacy === `false`
+          ? false
+          : history.legacy === `refetch`
+            ? { refetch: false }
+            : { checkpoint: `ignored` }
+    return ignored as void
+  }
+  const options = localOnlyCollectionOptions({
+    getKey: (row: { id: number; value: string }) => row.id,
+    initialData: [
+      { id: 1, value: `initial` },
+      ...(history.peer ? [{ id: 3, value: `peer` }] : []),
+    ],
+    onInsert: handler,
+    onUpdate: handler,
+    onDelete: handler,
+  })
+  if (omitConfirmation) {
+    const source = options.sync.sync
+    options.sync = {
+      ...options.sync,
+      sync: (params) => {
+        let initializing = true
+        const run = source({
+          ...params,
+          // Hostile adapter-boundary control: retain the actual initial load,
+          // but omit every later automatic confirmation write. Handler entry
+          // and settlement still run through the real local adapter.
+          write: (message) => {
+            if (initializing) params.write(message)
+          },
+        })
+        initializing = false
+        return run
+      },
+    }
+  }
+  const collection = createCollection(options)
+  const rows = () =>
+    [...collection.values()]
+      .map(({ id, value }) => ({ id, value }))
+      .sort((a, b) => a.id - b.id)
+  await withOracleCleanup(async () => {
+    await collection.preload()
+    const transaction =
+      history.operation === `insert`
+        ? collection.insert({ id: 2, value: history.value })
+        : history.operation === `update`
+          ? collection.update(1, (draft) => {
+              draft.value = history.value
+            })
+          : collection.delete(1)
+    let settlement = `pending`
+    let exactFailure = false
+    let settled: ReturnType<typeof rows> = []
+    const pending = transaction.when(`settled`).then(
+      () => {
+        settlement = `fulfilled`
+        settled = rows()
+      },
+      (error: unknown) => {
+        settlement = `rejected`
+        exactFailure = error === failure
+        settled = rows()
+      },
+    )
+    await entry
+    const held = rows()
+    const heldSettlement = settlement
+    release()
+    await pending
+    await collection.reload()
+    record(`local handler`, {
+      held,
+      heldSettlement,
+      settled,
+      reloaded: rows(),
+      settlement,
+      state: transaction.state,
+      exactFailure,
+      calls,
+    } satisfies LocalHandlerObservation)
+    record(`reach`, localHandlerState(history))
+  }, [() => release(), () => collection.cleanup()])
+}
+
+oracleProperty({
+  id: `local-only.handler-confirmation`,
+  owns: [`src/local-only.ts#localOnlyCollectionOptions`],
+  law: {
+    statement: `Successful local handlers automatically confirm their authored mutation, rejected handlers roll back with the same error, legacy returns are ignored, and reload retains the accepted rows.`,
+    authority: `LocalOnly Collection guide, Direct Local Mutations, Mutation Handlers and initialData; glossary optimistic state and reload.`,
+    limits: `One held insert/update/delete, one disjoint peer, short strings and four return shapes. No concurrent handlers, ambient transactions, arbitrary values or every publication.`,
+  },
+  histories: {
+    arbitrary: localHandlerHistory,
+    runs: 80,
+    fixedSeeds: [2377],
+    states: localHandlerStates,
+    constructed: ([`insert`, `update`, `delete`] as const).flatMap(
+      (operation) =>
+        [true, false].flatMap((accepted) =>
+          ([`void`, `false`, `refetch`, `checkpoint`] as const).map(
+            (legacy) => {
+              const state = localHandlerState({
+                operation,
+                accepted,
+                legacy,
+                peer: false,
+                value: ``,
+              })
+              return {
+                name: state,
+                enters: [state],
+                build: (generated: LocalHandlerHistory) => {
+                  const history = { ...generated, operation, accepted, legacy }
+                  localHandlerRequired.set(history, state)
+                  return history
+                },
+              }
+            },
+          ),
+        ),
+    ),
+  },
+  model: localHandlerModel,
+  driver: (history, record) => localHandlerDriver(history, record),
+  check: (history, observations, expected) => {
+    const actual = observations.find(
+      ({ checkpoint }) => checkpoint === `local handler`,
+    )?.value as LocalHandlerObservation | undefined
+    if (!actual)
+      return violation(
+        `local handler`,
+        `Missing handler observation`,
+        `local automatic confirmation`,
+      )
+    const same = (a: unknown, b: unknown) =>
+      JSON.stringify(a) === JSON.stringify(b)
+    const correct =
+      same(actual.held, expected.optimistic) &&
+      actual.heldSettlement === `pending` &&
+      same(actual.settled, expected.final) &&
+      same(actual.reloaded, expected.final) &&
+      actual.settlement === expected.settlement &&
+      actual.state === expected.state &&
+      actual.exactFailure === !history.accepted &&
+      actual.calls === 1
+    if (!correct)
+      return violation(
+        `local handler`,
+        `Automatic local confirmation diverged`,
+        `local automatic confirmation`,
+        { actual, expected },
+      )
+    const required = localHandlerRequired.get(history)
+    return !required ||
+      observations.some(
+        ({ checkpoint, value }) => checkpoint === `reach` && value === required,
+      )
+      ? pass
+      : violation(
+          `reach`,
+          `Missing generated local handler state ${required}`,
+          `local handler reach`,
+        )
+  },
+  calibrations: [
+    {
+      name: `adapter omits actual automatic confirmation writes`,
+      history: { constructed: `insert:accepted:void` },
+      law: `local automatic confirmation`,
+      driver: (history, record) => localHandlerDriver(history, record, true),
+    },
+    {
+      name: `successful handler loses automatically accepted row`,
+      history: { constructed: `insert:accepted:void` },
+      law: `local automatic confirmation`,
+      corrupt: (observations, history) =>
+        history.accepted && history.operation === `insert`
+          ? observations.map((entry) =>
+              entry.checkpoint === `local handler`
+                ? {
+                    ...entry,
+                    value: {
+                      ...(entry.value as LocalHandlerObservation),
+                      settled: [],
+                    },
+                  }
+                : entry,
+            )
+          : undefined,
+    },
+    {
+      name: `reload discards the only local copy`,
+      history: { constructed: `insert:accepted:void` },
+      law: `local automatic confirmation`,
+      corrupt: (observations, history) =>
+        history.accepted && history.operation === `insert`
+          ? observations.map((entry) =>
+              entry.checkpoint === `local handler`
+                ? {
+                    ...entry,
+                    value: {
+                      ...(entry.value as LocalHandlerObservation),
+                      reloaded: [],
+                    },
+                  }
+                : entry,
+            )
+          : undefined,
+    },
+    ...localHandlerStates.map((state) => ({
+      name: `missing generated local handler state ${state}`,
+      history: { constructed: state },
+      law: `local handler reach`,
+      corrupt: (
+        observations: ReadonlyArray<{ checkpoint: string; value: unknown }>,
+        history: LocalHandlerHistory,
+      ) =>
+        localHandlerRequired.get(history) === state
+          ? observations.filter(({ checkpoint }) => checkpoint !== `reach`)
+          : undefined,
+    })),
+  ],
 })

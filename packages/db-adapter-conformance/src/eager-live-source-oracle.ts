@@ -146,6 +146,7 @@
  * a driver and compares each checkpoint with the model.
  */
 import * as fc from 'fast-check'
+import { describeOracleCleanupError } from './cleanup-diagnostics'
 import type { ChangeMessage, HealthNode } from '@tanstack/db'
 
 // ---------------------------------------------------------------------------
@@ -247,6 +248,18 @@ export interface ControlledProvider {
    * times the adapter released it (unsubscribe, cancel, or reader release).
    */
   releases: () => ReadonlyArray<number>
+  /**
+   * Additional provider resources, observed where the real SDK acquires and
+   * releases them. `syncRun` is one-based, as the model's run. A subscription
+   * can own a listener and a status listener as well as its transport lease.
+   * Record every release call, including repeated calls, rather than folding
+   * the records into a set. LIFE-2/10 apply to each resource independently.
+   */
+  resources?: () => ReadonlyArray<{
+    readonly name: string
+    readonly syncRun: number
+    readonly releases: number
+  }>
   /** Delivers a complete result: every row the source holds. */
   deliverSnapshot: (rows: ReadonlyArray<ConformanceRow>) => void | Promise<void>
   /** Delivers one committed change batch that carries `txid`. */
@@ -2388,6 +2401,13 @@ export type EagerLiveSourceReachState =
   | `zero-sign-flipped`
   /** A failed attempt of each declared kind after ready. */
   | `transient:${string}`
+  /** Optional receiver obligations, measured from public observations. */
+  | `delivery-error-identities-retained`
+  | `delivery-error-recovered-with-row-change`
+  | `delivery-error-recovered-without-row-change`
+  | `transient-failure-recovered-with-row-change`
+  | `transient-failure-recovered-without-row-change`
+  | `sync-run-resources-released`
 
 const capabilityOfState: Partial<
   Record<(typeof eagerLiveSourceReachStates)[number], EagerLiveSourceCapability>
@@ -2471,13 +2491,21 @@ export function reachStatesFor(
 
 /** JSON for a message; a bigint shows as `<digits>n`, `-0` as `-0`. */
 function show(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
-    typeof item === `bigint`
-      ? `${String(item)}n`
-      : Object.is(item, -0)
-        ? `-0`
-        : item,
-  )
+  try {
+    return String(
+      JSON.stringify(value, (_key, item: unknown) =>
+        typeof item === `bigint`
+          ? `${String(item)}n`
+          : Object.is(item, -0)
+            ? `-0`
+            : item,
+      ),
+    )
+  } catch {
+    // Diagnostic serialization must not replace the law, checkpoint, or raw
+    // observation retained by ConformanceViolation.
+    return describeOracleCleanupError(value)
+  }
 }
 
 /** A law violation at one checkpoint. */
@@ -2565,6 +2593,11 @@ function lawFor(done: AcceptedStep, wasReady: boolean): string {
 export interface CheckOptions {
   /** Called when the history enters a declared state (ORC-015). */
   reach?: (state: EagerLiveSourceReachState) => void
+  /**
+   * Extra observation states a receiver declares. Their observations never
+   * change the shared judgment; older receivers retain their reach inventory.
+   */
+  additionalStates?: ReadonlyArray<EagerLiveSourceReachState>
 }
 
 /**
@@ -2574,7 +2607,7 @@ export interface CheckOptions {
 function watchDetachedFailures(driver: EagerLiveSourceDriver) {
   const found: Array<string> = []
   const onRejection = (reason: unknown) => {
-    found.push(`unhandled rejection: ${String(reason)}`)
+    found.push(`unhandled rejection: ${describeOracleCleanupError(reason)}`)
   }
   const hasProcess = typeof process !== `undefined`
   if (hasProcess) process.on(`unhandledRejection`, onRejection)
@@ -2582,7 +2615,9 @@ function watchDetachedFailures(driver: EagerLiveSourceDriver) {
   for (const level of [`error`, `warn`] as const) {
     console[level] = (...args: Array<unknown>) => {
       if (!driver.declaredDiagnostic?.(level, args)) {
-        found.push(`console.${level}: ${args.map(String).join(` `)}`)
+        found.push(
+          `console.${level}: ${args.map(describeOracleCleanupError).join(` `)}`,
+        )
       }
     }
   }
@@ -2608,6 +2643,9 @@ export async function checkEagerLiveSourceHistory(
   options: CheckOptions = {},
 ): Promise<{ accepted: number; skipped: number }> {
   const reach = options.reach ?? (() => {})
+  const reachAdditional = (state: EagerLiveSourceReachState) => {
+    if (options.additionalStates?.includes(state)) reach(state)
+  }
   const listenBeforeFetch = driver.capabilities.has(`listen-before-fetch`)
   const modelOptions: ModelOptions = {
     changeCommits: driver.changeCommits,
@@ -2663,6 +2701,11 @@ export async function checkEagerLiveSourceHistory(
   const { collection, provider } = fixture
   const state = initialModel(seedFrom(0))
   const failures: Array<Error> = []
+  // A reported delivery error is a distinct open failure, unlike a later
+  // optional report of the same retry outage. Its identity remains mandatory
+  // even when the SDK constructs the Error value from a transport message.
+  const deliveryFailures = new Set<number>()
+  const transientFailures = new Set<number>()
   const failureCounter = { next: 0 }
   const waits: Array<{ current: Settlement }> = []
   const syncWaits: Array<{ current: Settlement }> = []
@@ -2744,6 +2787,30 @@ export async function checkEagerLiveSourceHistory(
     driver.matchesFailure
       ? driver.matchesFailure(reported, index)
       : reported === failure(index)
+  const resourceViolation = (
+    stepIndex: number,
+    currentEnded: boolean | undefined,
+  ): ConformanceViolation | undefined => {
+    const resources = provider.resources?.() ?? []
+    const incorrect = resources.filter((resource) => {
+      const ended = resource.syncRun < state.run || currentEnded === true
+      return (
+        resource.syncRun < 1 ||
+        resource.syncRun > state.run ||
+        resource.releases > 1 ||
+        (ended && resource.releases !== 1) ||
+        (!ended && currentEnded === false && resource.releases !== 0)
+      )
+    })
+    return incorrect.length > 0
+      ? violation(
+          `LIFE-2/LIFE-10 (provider resources)`,
+          stepIndex,
+          `one release per retired resource; no release of an active resource`,
+          incorrect,
+        )
+      : undefined
+  }
   const compare = async (
     stepIndex: number,
     law: string,
@@ -2842,7 +2909,7 @@ export async function checkEagerLiveSourceHistory(
           reasons.every((cause, index) => matchesEntry(cause, want[index]!)) &&
           (want.length === 0 || health.failureReason?.cause === reasons.at(-1)),
         want.map(describeEntry),
-        reasons.map(String),
+        reasons.map(describeOracleCleanupError),
       )
     } else {
       // Client-created values: the outage shows the attempt that crossed
@@ -2850,15 +2917,17 @@ export async function checkEagerLiveSourceHistory(
       // attempts after it, in order. RETRY-1: a later attempt does not
       // replace that first failure.
       const want = expected.failureReason
-      if (want.length > 0 && !matchesEntry(reasons[0], want[0]!)) {
+      const first = want[0]
+      if (first !== undefined && !matchesEntry(reasons[0], first)) {
         throw violation(
           reasons.length > 0 &&
+            (first === `adapter` || !deliveryFailures.has(first)) &&
             want.slice(1).some((i) => matchesEntry(reasons[0], i))
             ? `RETRY-1 (health failureReason)`
             : `${reasonLaw} (health failureReason)`,
           stepIndex,
-          describeEntry(want[0]!),
-          reasons.map(String),
+          describeEntry(first),
+          reasons.map(describeOracleCleanupError),
         )
       }
       let next = 0
@@ -2870,8 +2939,30 @@ export async function checkEagerLiveSourceHistory(
             return next++ < want.length
           }),
         want.map(describeEntry),
-        reasons.map(String),
+        reasons.map(describeOracleCleanupError),
       )
+      // HEALTH-1/2's frame retains every still-open delivery error. The
+      // retry policy above permits omitting later attempts of an outage;
+      // that freedom does not permit dropping a different delivery error.
+      const requiredDeliveries = want.filter(
+        (entry) => entry !== `adapter` && deliveryFailures.has(entry),
+      )
+      checkReason(
+        requiredDeliveries.every((entry) =>
+          reasons.some((cause) => matchesEntry(cause, entry)),
+        ) &&
+          (reasons.length === 0 ||
+            health.failureReason?.cause === reasons.at(-1)),
+        requiredDeliveries.map(describeEntry),
+        reasons.map(describeOracleCleanupError),
+      )
+    }
+    if (
+      [...deliveryFailures].filter((index) =>
+        reasons.some((cause) => matches(cause, index)),
+      ).length > 1
+    ) {
+      reachAdditional(`delivery-error-identities-retained`)
     }
     const want = expected.preload
     const got = preload.current
@@ -2883,7 +2974,9 @@ export async function checkEagerLiveSourceHistory(
             (want.rejectedWith === `adapter` ||
               matches(got.rejected, want.rejectedWith)),
       want,
-      typeof got === `object` ? { rejected: String(got.rejected) } : got,
+      typeof got === `object`
+        ? { rejected: describeOracleCleanupError(got.rejected) }
+        : got,
     )
     expected.syncWaits.forEach((wantWait, index) => {
       const settled = syncWaits[index]!.current
@@ -2939,6 +3032,13 @@ export async function checkEagerLiveSourceHistory(
     const releases = provider.releases()
     const open = releases.filter((count) => count === 0).length
     const failed = state.phase === `loading-error` || state.phase === `stopped`
+    const resourceFailure = resourceViolation(
+      stepIndex,
+      expected.openSubscriptions === undefined
+        ? undefined
+        : expected.openSubscriptions === 0,
+    )
+    if (resourceFailure) throw resourceFailure
     if (
       expected.openSubscriptions !== undefined &&
       open !== expected.openSubscriptions
@@ -2993,7 +3093,18 @@ export async function checkEagerLiveSourceHistory(
     let prompt: { index: number; afterFailure: boolean } | undefined
     for (const [index, step] of history.entries()) {
       const wasReady = state.phase === `ready`
+      const rowsBefore = observedRows(collection)
+      const deliveryErrorsBefore =
+        collection.health.failureReason?.errors.filter((entry) =>
+          [...deliveryFailures].some((failureIndex) =>
+            matches(entry.cause, failureIndex),
+          ),
+        ).length ?? 0
       const phaseBefore = state.phase
+      const reportedTransientBefore =
+        collection.health.failureReason?.errors.some((entry) =>
+          [...transientFailures].some((index) => matches(entry.cause, index)),
+        ) ?? false
       const transientBefore = state.transient.length
       // Support is decided before the model moves, so a skipped step leaves
       // the model unchanged.
@@ -3122,6 +3233,7 @@ export async function checkEagerLiveSourceHistory(
             `conformance transient failure ${done.failure}`,
           )
           failures[done.failure] = error
+          transientFailures.add(done.failure)
           await provider.transientFailure!(error, done.variant)
           const kind = driver.transientVariants?.[done.variant]
           if (wasReady && kind !== undefined) reach(`transient:${kind}`)
@@ -3155,6 +3267,7 @@ export async function checkEagerLiveSourceHistory(
         case `delivery-error`: {
           const error = new Error(`conformance delivery error ${done.failure}`)
           failures[done.failure] = error
+          deliveryFailures.add(done.failure)
           await provider.deliveryError!(error)
           reach(`delivery-error-reported`)
           open.add(`delivery-error`)
@@ -3223,6 +3336,32 @@ export async function checkEagerLiveSourceHistory(
         lawFor(done, wasReady),
         done.kind === `snapshot` || done.kind === `changes`,
       )
+      // Reach follows actual public recovery and actual row observations.
+      // Merely requesting an empty batch does not establish an unchanged-row
+      // recovery, and merely delivering a healthy checkpoint does not prove
+      // that the Collection cleared the earlier errors.
+      if (
+        (done.kind === `snapshot` || done.kind === `changes`) &&
+        deliveryErrorsBefore > 0 &&
+        collection.health.failureReason === null
+      ) {
+        reachAdditional(
+          sameRows(rowsBefore, observedRows(collection))
+            ? `delivery-error-recovered-without-row-change`
+            : `delivery-error-recovered-with-row-change`,
+        )
+      }
+      if (
+        (done.kind === `snapshot` || done.kind === `changes`) &&
+        reportedTransientBefore &&
+        collection.health.failureReason === null
+      ) {
+        reachAdditional(
+          sameRows(rowsBefore, observedRows(collection))
+            ? `transient-failure-recovered-without-row-change`
+            : `transient-failure-recovered-with-row-change`,
+        )
+      }
       if (done.kind !== `restart`) {
         checkPublications(
           index,
@@ -3266,6 +3405,11 @@ export async function checkEagerLiveSourceHistory(
       primary = retiredWaitViolation(state, waits, history)
     }
     const releases = provider.releases()
+    if (primary === undefined) {
+      primary = resourceViolation(history.length, true)
+      if (primary === undefined && (provider.resources?.().length ?? 0) > 0)
+        reachAdditional(`sync-run-resources-released`)
+    }
     if (primary === undefined && !releases.every((count) => count === 1)) {
       primary = violation(
         `LIFE-2/LIFE-10 (releases per subscription)`,

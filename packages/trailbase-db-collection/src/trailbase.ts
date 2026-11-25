@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import { Store } from '@tanstack/store'
 import {
   LoadSubsetOperationAbortedError,
   validateSyncPersistenceCapability,
@@ -141,35 +140,57 @@ export function trailBaseCollectionOptions<
   const serialIns = (item: TItem) =>
     convert<TItem, TRecord>(config.serialize, item)
 
-  const seenIds = new Store(new Map<string, number>())
-
   const internalSyncMode = config.syncMode ?? `eager`
   let fullSyncCompleted = false
 
-  const awaitIds = (
-    ids: Array<string>,
-    timeout: number = 120 * 1000,
-  ): Promise<void> => {
-    const completed = (value: Map<string, number>) =>
-      ids.every((id) => value.has(id))
-    if (completed(seenIds.state)) {
-      return Promise.resolve()
+  // Each sync run owns its confirmation collectors. A handler captures that
+  // run before HTTP, so a replacement run cannot confirm an older request.
+  let confirmations!: {
+    controller: AbortController
+    collectors: Set<(id: string) => void>
+  }
+  // Handler settlement drops optimism. Wait for HTTP and a fresh run-local
+  // event, without awaiting the applied receipt that the handler can hold.
+  async function confirmMutation(perform: () => Promise<Array<string>>) {
+    const { controller, collectors } = confirmations
+    const { signal } = controller
+    signal.throwIfAborted()
+    // Inserts learn their IDs from HTTP. Collect candidate events until then,
+    // retaining established proof even if the run ends while HTTP is pending.
+    const seen = new Set<string>()
+    let receive = (id: string) => {
+      seen.add(id)
     }
-
-    return new Promise<void>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        sub.unsubscribe()
-        reject(new TimeoutWaitingForIdsError(ids.toString()))
-      }, timeout)
-
-      const sub = seenIds.subscribe((value) => {
-        if (completed(value)) {
-          clearTimeout(timeoutId)
-          sub.unsubscribe()
-          resolve()
+    const collect = (id: string) => receive(id)
+    collectors.add(collect)
+    let releaseWait: (() => void) | undefined
+    try {
+      const ids = await perform()
+      const missing = new Set(ids.filter((id) => !seen.has(id)))
+      if (missing.size === 0) return
+      signal.throwIfAborted()
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => reject(signal.reason)
+        const timer = setTimeout(
+          () => reject(new TimeoutWaitingForIdsError(ids.toString())),
+          120 * 1000,
+        )
+        signal.addEventListener(`abort`, onAbort, { once: true })
+        releaseWait = () => {
+          clearTimeout(timer)
+          signal.removeEventListener(`abort`, onAbort)
+        }
+        // After HTTP, keep only missing IDs rather than unrelated event history.
+        seen.clear()
+        receive = (id) => {
+          missing.delete(id)
+          if (missing.size === 0) resolve()
         }
       })
-    })
+    } finally {
+      releaseWait?.()
+      collectors.delete(collect)
+    }
   }
 
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
@@ -192,15 +213,14 @@ export function trailBaseCollectionOptions<
           ? null
           : validateSyncPersistenceCapability(params.metadata.persistence)
       let cancelled = false
-      let periodicCleanupTask: ReturnType<typeof setInterval> | undefined
+      const controller = new AbortController()
+      const collectors = new Set<(id: string) => void>()
+      confirmations = { controller, collectors }
       const cleanup = () => {
         cancelled = true
+        controller.abort()
         settleListener()
         cancelEventReader()
-        if (periodicCleanupTask !== undefined) {
-          clearInterval(periodicCleanupTask)
-          periodicCleanupTask = undefined
-        }
       }
 
       // TrailBase cursors are opaque. Cache a cursor by its last fetched key
@@ -396,6 +416,9 @@ export function trailBaseCollectionOptions<
             return
           }
 
+          // Publication can synchronously start a handler through a public
+          // change callback. This older event cannot confirm that new request.
+          const eventCollectors = [...collectors]
           begin()
           let value: TItem | undefined
           if (`Insert` in event) {
@@ -418,11 +441,8 @@ export function trailBaseCollectionOptions<
             ++eventSequence
             if (loadsInFlight > 0)
               eventSequenceByKey.set(getKey(value), eventSequence)
-            seenIds.setState((curr: Map<string, number>) => {
-              const newIds = new Map(curr)
-              newIds.set(String(getKey(value)), Date.now())
-              return newIds
-            })
+            for (const collect of eventCollectors)
+              collect(String(getKey(value)))
           }
         }
       }
@@ -438,11 +458,11 @@ export function trailBaseCollectionOptions<
         if (streamEnded && !closed)
           console.error(`TrailBase subscription failed`, error)
         streamEnded = true
+        controller.abort(error)
         fail(error)
       }
 
       async function start() {
-        let reader: ReadableStreamDefaultReader<Event> | undefined
         try {
           const eventStream = await config.recordApi.subscribe(`*`)
           if (cancelled) {
@@ -450,7 +470,10 @@ export function trailBaseCollectionOptions<
             return
           }
           const subscribedReader = eventStream.getReader()
-          reader = eventReader = subscribedReader
+          eventReader = subscribedReader
+          // listen() owns drain ordering and reports read errors. Observe the
+          // separate closed promise without retiring buffered confirmation.
+          void subscribedReader.closed.catch(() => undefined)
 
           // Start listening for subscriptions first. Otherwise, we'd risk a gap
           // between the initial fetch and starting to listen.
@@ -493,37 +516,6 @@ export function trailBaseCollectionOptions<
           reportStreamEnd(error, true)
           return
         }
-
-        // Lastly, start a periodic cleanup task that will be removed when the
-        // reader closes.
-        if (cancelled || !reader) return
-
-        periodicCleanupTask = setInterval(() => {
-          seenIds.setState((curr) => {
-            const now = Date.now()
-            let anyExpired = false
-
-            const notExpired = Array.from(curr.entries()).filter(([_, v]) => {
-              const expired = now - v > 300 * 1000
-              anyExpired = anyExpired || expired
-              return !expired
-            })
-
-            if (anyExpired) {
-              return new Map(notExpired)
-            }
-            return curr
-          })
-        }, 120 * 1000)
-
-        const clearCleanupTask = () => {
-          if (periodicCleanupTask !== undefined) {
-            clearInterval(periodicCleanupTask)
-            periodicCleanupTask = undefined
-          }
-        }
-        // listen() reports read errors. Observe this separate promise too.
-        void reader.closed.then(clearCleanupTask, clearCleanupTask)
       }
 
       void start()
@@ -561,59 +553,39 @@ export function trailBaseCollectionOptions<
     ...collectionConfig,
     sync,
     getKey,
-    onInsert: async (params: InsertMutationFnParams<TItem, TKey>) => {
-      const ids = await config.recordApi.createBulk(
-        params.transaction.mutations.map((tx) => {
-          const { type, modified } = tx
-          if (type !== `insert`) {
-            throw new ExpectedInsertTypeError(type)
-          }
-          return serialIns(modified)
-        }),
-      )
-
-      // The optimistic mutation overlay is removed on return, so at this point
-      // we have to ensure that the new record was properly added to the local
-      // DB by the subscription.
-      await awaitIds(ids.map((id) => String(id)))
-    },
-    onUpdate: async (params: UpdateMutationFnParams<TItem, TKey>) => {
-      const ids: Array<string> = await Promise.all(
-        params.transaction.mutations.map(async (tx) => {
-          const { type, changes, key } = tx
-          if (type !== `update`) {
-            throw new ExpectedUpdateTypeError(type)
-          }
-
-          await config.recordApi.update(key, serialUpd(changes))
-
-          return String(key)
-        }),
-      )
-
-      // The optimistic mutation overlay is removed on return, so at this point
-      // we have to ensure that the new record was properly updated in the local
-      // DB by the subscription.
-      await awaitIds(ids)
-    },
-    onDelete: async (params: DeleteMutationFnParams<TItem, TKey>) => {
-      const ids: Array<string> = await Promise.all(
-        params.transaction.mutations.map(async (tx) => {
-          const { type, key } = tx
-          if (type !== `delete`) {
-            throw new ExpectedDeleteTypeError(type)
-          }
-
-          await config.recordApi.delete(key)
-          return String(key)
-        }),
-      )
-
-      // The optimistic mutation overlay is removed on return, so at this point
-      // we have to ensure that the new record was properly updated in the local
-      // DB by the subscription.
-      await awaitIds(ids)
-    },
+    onInsert: (params: InsertMutationFnParams<TItem, TKey>) =>
+      confirmMutation(async () => {
+        const ids = await config.recordApi.createBulk(
+          params.transaction.mutations.map((tx) => {
+            const { type, modified } = tx
+            if (type !== `insert`) throw new ExpectedInsertTypeError(type)
+            return serialIns(modified)
+          }),
+        )
+        return ids.map(String)
+      }),
+    onUpdate: (params: UpdateMutationFnParams<TItem, TKey>) =>
+      confirmMutation(() =>
+        Promise.all(
+          params.transaction.mutations.map(async (tx) => {
+            const { type, changes, key } = tx
+            if (type !== `update`) throw new ExpectedUpdateTypeError(type)
+            await config.recordApi.update(key, serialUpd(changes))
+            return String(key)
+          }),
+        ),
+      ),
+    onDelete: (params: DeleteMutationFnParams<TItem, TKey>) =>
+      confirmMutation(() =>
+        Promise.all(
+          params.transaction.mutations.map(async (tx) => {
+            const { type, key } = tx
+            if (type !== `delete`) throw new ExpectedDeleteTypeError(type)
+            await config.recordApi.delete(key)
+            return String(key)
+          }),
+        ),
+      ),
     utils: {
       cancel: cancelEventReader,
     },

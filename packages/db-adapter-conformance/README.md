@@ -7,6 +7,82 @@ adapter's public behavior with the model at each checkpoint.
 
 The package is private while its first oracle settles.
 
+The [cross-adapter receiving review](../../docs/contributing/oracle-reviews/2026-11-17-cross-adapter-shared.md)
+records the new laws' receiving paths across adapters, rejected transfers,
+actual Node/browser results, independent reviews and remaining repairs. A
+Direct stream API is not a universal adapter policy: key projection, cached
+readiness, decoder recovery, automatic confirmation and row scope retain each
+adapter's public contract. Existing primary owners receive those distinctions.
+
+## Running the receiving portfolio
+
+From the repository root, run `pnpm test:collection-adapters:oracles` for the
+Node portfolio and `pnpm test:collection-adapters:oracles:browser` for actual
+Chromium receiving paths. The browser command requires the installed Playwright
+Chromium runtime and localhost access; persisted paths use worker/OPFS.
+Each command attempts every group in sequence and exits nonzero if any group
+fails, including setup failures or child signals. Known SDK defects remain
+failures in these commands.
+
+Recorded Direct SDK 0.1.1 receiving runs use Node 26 because that SDK calls a
+Map API missing from Node 24. The repository keeps its maintained-Node policy;
+the [SDK compatibility proposal](../../docs/contributing/oracle-reviews/2026-11-17-powersync-sdk-node-map-compatibility.md)
+passes isolated tests on Node 24 and 26. Node 22 validation and an upstream
+release remain open. Installed dependencies are unchanged.
+
+Append `--list` to either command to print its command manifest without running
+campaigns. Adapter package `test:oracles` scripts name their Node owners;
+Neon uses its explicit `vitest.neon.config.ts`, because the package's default
+configuration excludes Neon receiving tests. The browser command selects each
+package's dedicated browser configuration. The older root `test:oracles`
+command retains its core/query/persistence scope; use the receiving portfolio
+commands when changing shared adapter laws.
+
+## Direct PowerSync receiving portfolio
+
+The Direct adapter now receives the eager lifecycle, complete-result reload,
+initial-gate failure, decode/refusal, on-demand stream ownership, persisted
+startup and shared-client composition laws. Mutation confirmation reuses the
+core shared judgment. Node and actual Chromium receive the same models and
+comparisons; persisted paths include controlled storage, Node SQLite and
+Chromium worker/OPFS where the affected contract crosses durability.
+
+Decode/refusal runs in eager and on-demand mode. The on-demand stream family
+also varies equal/distinct parameters, single-stream priority forwarding,
+empty mappers, mapper failures and peer-preserving retry. Persisted stream-health
+checks do not establish saved-demand coverage or durable offline reopen. A
+separate primary-model receiver now exposes a saved-demand reset defect through
+real disk SQLite and worker/OPFS. Its repair and adjacent refresh histories now
+have independent approval. The decoder receiver also covers cold/cached startup,
+ordinary/unprintable thrown values and legal readiness orderings. The coverage
+map and receiving reviews retain the exact evidence and limits.
+
+The shared persisted-demand receiver also runs Query, Electric, native
+PowerSync, TrailBase and lazy Convex through physical storage close/reopen on
+Node SQLite and Chromium worker/OPFS. It reuses the primary persistence model
+for exact/empty coverage, unfinished/failed/overlapping demand, per-load waits,
+early source failure and identical or changed-value late answers. A separate
+Convex peer receiver checks that a finite provider prefix preserves an
+accepted but unapplied wider persisted demand, including a tied boundary.
+RxDB, Neon and local adapters
+use eager acquisition and retain their startup/reload receiving profiles.
+The [cross-adapter saved-demand review](../../docs/contributing/oracle-reviews/2026-11-18-other-adapters-persisted-demand.md)
+records the scope and broader receiving obligations separately.
+
+These are separate judgments. A passing startup replacement does not establish
+on-demand stream ownership or mutation confirmation. The
+[coverage map](../../docs/contributing/oracle-coverage.md#direct-powersync-receiving-portfolio)
+names each owner and observation boundary. Versioned review records linked there
+retain the pre-production results, review corrections and exact replay routes.
+
+The [request-fixture correction](../../docs/contributing/oracle-reviews/2026-11-23-powersync-request-fixtures.md)
+supersedes the earlier SDK checkpoint-event dependency claim. Subscription
+arguments resolve once per HTTP request; changing their errors on one response
+was an invalid receiving premise. Direct now exercises transport interruption
+and changed/unchanged successor checkpoints. The shared-client family separately
+checks request-scoped stream rejection, healthy-peer table changes and recovery.
+Generic result-error coverage remains in the reference and Convex receivers.
+
 ## Eager live-source oracle
 
 `src/eager-live-source-oracle.ts` checks an eager Collection whose provider
@@ -170,14 +246,19 @@ map and [migration log](MIGRATION.md) retain the remaining work.
   an outage-threshold variant, and 45 hostile mutants of the adapter, each of which the check must reject
   with its law.
   It runs in the default `pnpm test`.
-- **Neon Realtime** (`tests/neon/`): `@neon/realtime-tanstack` 0.1.1, vendored
-  unchanged from `neondatabase/neon-pkgs` at
-  `7ac55e3e7b9e491cc53fa6225bab29d700b729e2` (Apache-2.0, see
-  `tests/neon/vendor/LICENSE`), except a `@ts-nocheck` header because it
-  targets the TanStack DB 0.9 sync API. It runs on this workspace's TanStack
-  DB with a controlled raw live-query subscription. It is expected to fail
-  until the adapter is updated, so it has its own config:
-  `pnpm --filter @tanstack/db-adapter-conformance test:neon`.
+- **Neon Realtime** (`tests/neon/`): the `@neon/realtime-tanstack`0.1.1 source
+  from `neondatabase/neon-pkgs@7ac55e3e` is vendored under Apache-2.0 (see
+  `tests/neon/vendor/LICENSE`) with a local adapter repair proposal. Controlled
+  raw subscriptions and the installed `@neon/realtime`0.2 SDK over controlled
+  v2 WebSocket frames receive the shared eager, reload, exact-query isolation,
+  initial receipt cleanup and idempotent removal judgments. Node and actual
+  Chromium run the same owners. The installed SDK remains RED on retained
+  transaction proof after terminal close; isolated upstream SDK proposals pass
+  all538 Node and413 Chromium checks. No installed dependency was modified.
+  Upstream adapter/SDK patch artifacts, original RED gates, calibrated mutants
+  and limits are in the [Neon review](../../docs/contributing/oracle-reviews/2026-11-17-cross-adapter-neon.md).
+  These tests make no deployed-service claim. Run `pnpm --filter
+@tanstack/db-adapter-conformance test:neon` and `test:oracles:neon-browser`.
 
 - **Convex** (`packages/convex-db-collection/tests/conformance-driver.ts`):
   the published adapter in eager mode over the real Convex JavaScript
@@ -193,6 +274,11 @@ map and [migration log](MIGRATION.md) retain the remaining work.
   the published adapter in eager mode over a real local PowerSync database,
   with per-batch commits and a declared propagation step (`settle`). It runs
   in that package's default `pnpm test`.
+- **PowerSync (Direct)** (`packages/powersync-direct-collection/tests/conformance-driver.ts`):
+  the adapter in eager mode over the real `@powersync/standalone-client`,
+  through a fake sync service that writes the protocol's lines, with
+  per-batch commits and `retry-policy` (a failed response body). It runs in
+  that package's default `pnpm test`.
 - **TrailBase** (`packages/trailbase-db-collection/tests/conformance-driver.ts`):
   the published adapter in eager mode over a controlled `RecordApi`, with
   per-change commits, `duplicate-key-delivery` (a paged list can return one

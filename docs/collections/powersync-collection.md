@@ -1,8 +1,12 @@
 ---
-title: PowerSync Collection
+title: PowerSync SQLite Collection
 ---
 
 PowerSync collections provide seamless integration between TanStack DB and [PowerSync](https://powersync.com), enabling automatic synchronization between your in-memory TanStack DB collections and PowerSync's SQLite database. This gives you offline-ready persistence, real-time sync capabilities, and powerful conflict resolution.
+
+> [!TIP]
+> This documents `@tanstack/powersync-db-collection`, which is based on a full PowerSync SDK with SQLite.
+> If offline-ready persistence isn't necessary, the [PowerSync in-memory collection](./powersync-direct-collection.md) is more lightweight.
 
 ## Overview
 
@@ -16,12 +20,13 @@ The `@tanstack/powersync-db-collection` package allows you to create collections
 - Use PowerSync's efficient SQLite-based storage engine
 - Work with PowerSync's real-time sync features for offline-first scenarios
 - Leverage PowerSync's built-in conflict resolution and data consistency guarantees
-- Enable real-time synchronization with PostgreSQL, MongoDB and MySQL backends
+- Enable real-time synchronization with PostgreSQL, MongoDB, MySQL or SQL Server backends
 
 ## 1. Installation
 
 Install the PowerSync collection package along with your preferred framework integration.
-PowerSync currently works with Web, React Native and Node.js. The examples below use the Web SDK.
+The collection works with any [PowerSync JavaScript SDK](https://docs.powersync.com/client-sdks/overview), including Web, React Native, Node.js, Capacitor and Tauri.
+The examples below use the Web SDK.
 See the PowerSync quickstart [docs](https://docs.powersync.com/installation/quickstart-guide) for more details.
 
 ```bash
@@ -401,7 +406,17 @@ task.due_date.getTime() // OK - TypeScript knows this is a Date
 
 ### Optimistic Updates
 
-Updates to the collection are applied optimistically to the local state first, then synchronized with PowerSync and the backend. If an error occurs during sync, the changes are automatically rolled back.
+Updates first apply optimistically. The built-in handlers write to PowerSync's
+local SQLite database and wait for the Collection to observe the changes. If a
+handler rejects, its optimistic state rolls back.
+
+If decoding fails and stops the Collection's sync run, its unconfirmed built-in
+mutations reject. Cleanup also rejects outstanding confirmations owned by the
+retired run. Their optimistic state rolls back. Writes that SQLite already
+committed remain committed.
+
+After restart, the new sync run must observe a mutation before its handler fulfills.
+A peer watching the same table cannot fulfill that obligation.
 
 ### Metadata Tracking
 

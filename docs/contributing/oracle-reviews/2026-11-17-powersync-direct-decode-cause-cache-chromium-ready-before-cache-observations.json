@@ -1,0 +1,765 @@
+[
+  {
+    "cell": "on-demand:cached-initial-valid",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "valid",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12018,
+      "epoch": 413969947350,
+      "flag": false
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 2,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [
+          {
+            "id": "row-12018-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947350
+          },
+          {
+            "id": "row-12018-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 413969947351
+          },
+          {
+            "id": "row-12018-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947352
+          }
+        ],
+        "queryStatus": "loading",
+        "queryLoad": "pending",
+        "queryRows": [
+          {
+            "id": "row-12018-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947350
+          },
+          {
+            "id": "row-12018-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 413969947351
+          },
+          {
+            "id": "row-12018-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947352
+          }
+        ]
+      },
+      "query": {
+        "before": [],
+        "rows": [
+          {
+            "id": "row-12018-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947350
+          },
+          {
+            "id": "row-12018-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 413969947351
+          },
+          {
+            "id": "row-12018-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947352
+          }
+        ],
+        "readySnapshots": [
+          [
+            {
+              "id": "row-12018-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 413969947350
+            },
+            {
+              "id": "row-12018-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 413969947351
+            },
+            {
+              "id": "row-12018-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 413969947352
+            }
+          ]
+        ],
+        "publications": [
+          [
+            {
+              "id": "row-12018-shared-0",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 413969947350
+            },
+            {
+              "id": "row-12018-shared-1",
+              "flagType": "boolean",
+              "flag": true,
+              "whenType": "Date",
+              "epoch": 413969947351
+            },
+            {
+              "id": "row-12018-shared-2",
+              "flagType": "boolean",
+              "flag": false,
+              "whenType": "Date",
+              "epoch": 413969947352
+            }
+          ]
+        ],
+        "status": "ready",
+        "load": "fulfilled",
+        "rejection": null,
+        "sourceStatus": "ready",
+        "sourceErrorPresent": false,
+        "sourceError": null
+      },
+      "before": [],
+      "rows": [
+        {
+          "id": "row-12018-shared-0",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 413969947350
+        },
+        {
+          "id": "row-12018-shared-1",
+          "flagType": "boolean",
+          "flag": true,
+          "whenType": "Date",
+          "epoch": 413969947351
+        },
+        {
+          "id": "row-12018-shared-2",
+          "flagType": "boolean",
+          "flag": false,
+          "whenType": "Date",
+          "epoch": 413969947352
+        }
+      ],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [
+        [
+          {
+            "id": "row-12018-shared-0",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947350
+          },
+          {
+            "id": "row-12018-shared-1",
+            "flagType": "boolean",
+            "flag": true,
+            "whenType": "Date",
+            "epoch": 413969947351
+          },
+          {
+            "id": "row-12018-shared-2",
+            "flagType": "boolean",
+            "flag": false,
+            "whenType": "Date",
+            "epoch": 413969947352
+          }
+        ]
+      ],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": null,
+      "errorPresent": false,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener",
+        "status-listener",
+        "stream-lease"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "status-listener",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": true
+        },
+        {
+          "kind": "stream-lease",
+          "releases": 0,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": true,
+      "parsed": [
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2",
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2",
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2",
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2"
+      ],
+      "causesThrown": [],
+      "cachedInput": [
+        "row-12018-shared-0",
+        "row-12018-shared-1",
+        "row-12018-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-valid",
+        "on-demand:initial-valid",
+        "on-demand:source-ready-query-pending"
+      ],
+      "browserErrors": []
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-changed-id",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "changed-id",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12019,
+      "epoch": 0,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "PowerSync collection is not syncing"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": true,
+        "sourceError": "invalid-row-id"
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "invalid-row-id",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12019-shared-0",
+        "row-12019-shared-1"
+      ],
+      "causesThrown": [],
+      "cachedInput": [
+        "row-12019-shared-0",
+        "row-12019-shared-1",
+        "row-12019-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-changed-id",
+        "on-demand:initial-changed-id",
+        "on-demand:refusal-middle",
+        "on-demand:initial-changed-id-middle"
+      ],
+      "browserErrors": []
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-throw-error",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "error",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12020,
+      "epoch": 958735332908,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "PowerSync collection is not syncing"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": true,
+        "sourceError": "refused-12020-1"
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "refused-12020-1",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12020-shared-0",
+        "row-12020-shared-1"
+      ],
+      "causesThrown": [
+        "error"
+      ],
+      "cachedInput": [
+        "row-12020-shared-0",
+        "row-12020-shared-1",
+        "row-12020-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-throw-error",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle"
+      ],
+      "browserErrors": []
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-throw-null-prototype",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "null-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12021,
+      "epoch": 627286631769,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "PowerSync collection is not syncing"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": true,
+        "sourceError": "Collection is in an error state"
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "Collection is in an error state",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12021-shared-0",
+        "row-12021-shared-1"
+      ],
+      "causesThrown": [
+        "null-prototype"
+      ],
+      "cachedInput": [
+        "row-12021-shared-0",
+        "row-12021-shared-1",
+        "row-12021-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-throw-null-prototype",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle"
+      ],
+      "browserErrors": []
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-throw-throwing-conversion",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "throwing-conversion",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": false,
+      "coordinate": 12022,
+      "epoch": 38,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "PowerSync collection is not syncing"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": true,
+        "sourceError": "Collection is in an error state"
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "Collection is in an error state",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12022-shared-0",
+        "row-12022-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-conversion"
+      ],
+      "cachedInput": [
+        "row-12022-shared-0",
+        "row-12022-shared-1",
+        "row-12022-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-throw-throwing-conversion",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle"
+      ],
+      "browserErrors": []
+    },
+    "violations": [],
+    "browserErrors": []
+  },
+  {
+    "cell": "on-demand:cached-initial-throw-throwing-prototype",
+    "history": {
+      "mode": "on-demand",
+      "startup": "cached",
+      "throwCause": "throwing-prototype",
+      "retireDemand": false,
+      "phase": "initial",
+      "outcome": "throw",
+      "count": 3,
+      "refusalIndex": 1,
+      "overlap": true,
+      "coordinate": 12023,
+      "epoch": 40,
+      "flag": true
+    },
+    "raw": {
+      "mode": "on-demand",
+      "subsetRequests": 0,
+      "atDemand": {
+        "sourceStatus": "ready",
+        "sourceLoad": "fulfilled",
+        "sourceRows": [],
+        "queryStatus": "error",
+        "queryLoad": "rejected",
+        "queryRows": []
+      },
+      "query": {
+        "before": [],
+        "rows": [],
+        "readySnapshots": [],
+        "publications": [],
+        "status": "error",
+        "load": "rejected",
+        "rejection": {
+          "name": "Error",
+          "message": "PowerSync collection is not syncing"
+        },
+        "sourceStatus": "ready",
+        "sourceErrorPresent": true,
+        "sourceError": "Collection is in an error state"
+      },
+      "before": [],
+      "rows": [],
+      "readySnapshots": [
+        []
+      ],
+      "publications": [],
+      "status": "ready",
+      "load": "fulfilled",
+      "error": "Collection is in an error state",
+      "errorPresent": true,
+      "admissionErrors": [],
+      "boundaryEvents": [
+        "source ready",
+        "parser refusal"
+      ],
+      "failureReason": null,
+      "requiredResourceKinds": [
+        "table-listener"
+      ],
+      "resources": [
+        {
+          "kind": "table-listener",
+          "releases": 1,
+          "prematureReleases": 0,
+          "coreReleased": false
+        }
+      ],
+      "providerActive": false,
+      "parsed": [
+        "row-12023-shared-0",
+        "row-12023-shared-1"
+      ],
+      "causesThrown": [
+        "throwing-prototype"
+      ],
+      "cachedInput": [
+        "row-12023-shared-0",
+        "row-12023-shared-1",
+        "row-12023-shared-2"
+      ],
+      "cachedStartup": {
+        "clientState": "idle",
+        "providerOpen": false
+      },
+      "reached": [
+        "on-demand:cached-initial-throw-throwing-prototype",
+        "on-demand:initial-throw",
+        "on-demand:refusal-middle",
+        "on-demand:initial-throw-middle"
+      ],
+      "browserErrors": []
+    },
+    "violations": [],
+    "browserErrors": []
+  }
+]

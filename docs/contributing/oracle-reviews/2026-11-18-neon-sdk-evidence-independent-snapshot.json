@@ -1,0 +1,185 @@
+{
+  "base": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "node": "24.19.0",
+  "patchSha256": "b966c730ef65f3bc442398d9b7ca818c35f78feb7ac6e23fe224bc234347ba64",
+  "phase": "Narrow retained-proof independent approval and applied-proof pre-edit comparisons",
+  "sha256": {
+    "docs/contributing/oracle-reviews/2026-11-17-neon-sdk-retained-evidence.patch": "b966c730ef65f3bc442398d9b7ca818c35f78feb7ac6e23fe224bc234347ba64",
+    ".review-2377/neon-upstream-transaction-tracker.ts": "c99d8fcdf27fc4477be0d11428b0eb29381ec18a0123218381688d11361dc657",
+    ".review-2377/neon-upstream-transaction-tracker-fixed.ts": "5124cb7b749d826b416bb896238db3984e3b17703ceb95b674ae3a58c1b49aa9",
+    ".review-2377/neon-sdk-retained-evidence/dist/client/transaction-tracker.js": "59474afb3204aa86482a52b521ac231fedddfef8ede63ac092793f6a99efebfb",
+    "packages/db-adapter-conformance/node_modules/@neon/realtime/dist/client/transaction-tracker.js": "1b85e960b2d50602dea59bfdb887eb5143fa2f255561a26eb527e3eea166c899",
+    ".review-2377/neon-retained-evidence-independent.ts": "21c74b0add635c3100edffa2a69beb5be407a5a364c89446a9b50ee24d617df1",
+    ".review-2377/neon-retained-evidence-independent.test.ts": "6b4375394cc35fb99df1b8080c3af9025d3ba2d019aa6c0f798e6cb3254c7d21",
+    ".review-2377/neon-retained-evidence-independent.vitest.config.mts": "7ab44f8a4c92d10b8c8c99337e3d04118746d1430e8ed5273348e5dc7774da25",
+    ".review-2377/neon-retained-evidence-independent-browser.test.ts": "f388cedfe0be8f210142d31ba708befe0de4feea624aba04b105ac640077ff02",
+    ".review-2377/neon-retained-evidence-independent-browser.vitest.config.mts": "8acc0dc869ab7a2d8a355689184a06337cfac1c45686c263e6f8680210125c73",
+    ".review-2377/neon-retained-evidence-independent-node.log": "39c0d06790926233470676e3fc41477637a233203e52d0d55c291d3d5e2b63fe",
+    ".review-2377/neon-retained-evidence-independent-node.json": "18141bcd962e322377f767f957f4e732ae8320cf108502b90bcb81154385d0c7",
+    ".review-2377/neon-retained-evidence-independent-browser.log": "0b5f64993cbc1f571110a8da1606ec6d515e62747e02ffbb34b183b283d98896",
+    ".review-2377/neon-retained-evidence-independent-browser.json": "bbf8919e2acab4f24956469fe59b4f4096c88afffb335a340607a7b19aacee6d",
+    ".review-2377/neon-retained-evidence-independent-original-browser.log": "ab27b9234a29b939ef0f83b29129d267ae6e90759ef15612f69f565b188c6d73",
+    ".review-2377/neon-retained-evidence-independent-original-browser.json": "934ebab93e52b9635539f67e3183152a4e346d8fc52fc67efbc4619871b2237a",
+    ".review-2377/neon-retained-evidence-original-independent.log": "df65c6f241c05ea7d12e879f037d32e869b3bc5a63c6595bbe70fe5590fabf0a",
+    ".review-2377/neon-retained-evidence-reentrant-node.json": "9b9a7b71c8f71be62448993b3109445695b8d1f112eb4c29539f6233423c908e",
+    ".review-2377/neon-applied-proof-independent.ts": "8450d681d6ce811be98b1ab8e3a26ce098173ff259624e3786e225dfa76baa81",
+    ".review-2377/neon-applied-proof-independent.test.ts": "03a760e2d90c769b4f2a5a14ca767faaff2564f422b85f47a29242a70d1f1d61",
+    ".review-2377/neon-applied-proof-independent.vitest.config.mts": "9d32224cbb86857e75e4ce256da100e4a8d78b62b8886de26b9ce28879376c46",
+    ".review-2377/neon-applied-proof-independent-browser.test.ts": "9d731df9b3f705fd7f79e738f6a7798568c83f1f3ec9a9c1859efc1af00731fb",
+    ".review-2377/neon-applied-proof-independent-browser.vitest.config.mts": "ca7a24c277a71b8a5745cf562dd2bb5caccbbed642824ddcf8b36ffc876c9586",
+    ".review-2377/neon-applied-proof-independent-before-node.log": "46b5806dc5a2f4b3a9844e272c4242240e71b83665fdb150d405af56e33f607b",
+    ".review-2377/neon-applied-proof-independent-before-node.json": "e1255429e639d295372f769250afbf106714e45055179ee6754495a352afe4fc",
+    ".review-2377/neon-applied-proof-independent-before-browser.log": "17a82286fc9345a3f9da784c647efbf54c4817425f519491fda5dd9a68582f78",
+    ".review-2377/neon-applied-proof-independent-before-browser.json": "e1255429e639d295372f769250afbf106714e45055179ee6754495a352afe4fc"
+  },
+  "results": {
+    "narrowProposalNode": {
+      "exit": 0,
+      "tests": 2,
+      "checks": 15
+    },
+    "narrowProposalChromium": {
+      "exit": 0,
+      "tests": 1,
+      "checks": 15
+    },
+    "installedNodeDiagnostic": {
+      "exit": 1,
+      "classification": "assertion failure at intended post-failure known-proof comparison"
+    },
+    "installedChromiumPublicComparisons": {
+      "exit": 1,
+      "classification": "three public retained-proof comparison failures; internal tracker controls still use isolated narrow proposal"
+    },
+    "appliedProofBeforeNode": {
+      "exit": 1,
+      "classification": "three reentrant-close comparison failures and three neighboring passes"
+    },
+    "appliedProofBeforeChromium": {
+      "exit": 1,
+      "classification": "same three reentrant-close comparison failures and three neighboring passes"
+    }
+  },
+  "limits": [
+    "Controlled v2 WebSocket transport, not a deployed Neon service.",
+    "Finite diagnostic histories and direct tracker checks supplement the shared eager owner; no generated-history closure claim.",
+    "The narrow patch preserves already-recorded proof only. Reentrant callback closure remains a reachable counterexample at this phase.",
+    "Only the isolated copy transaction-tracker.js differs from installed dist. Installed dependencies remain unchanged."
+  ],
+  "phases": [
+    {
+      "name": "Additive proof installation ordering: independent GREEN",
+      "patchSha256": "7a590e7ba6f3ebe92f0f150e130de4c1cf76dd64d69fd54d6dc9ce1abcb659e1",
+      "verdict": "Approved for six finite public receiving histories in Node and Chromium, preserving fifteen retention checks and the original reentrant trace. No generated-history or installed-SDK closure claim.",
+      "sha256": {
+        "docs/contributing/oracle-reviews/2026-11-17-neon-sdk-applied-proof-order.patch": "7a590e7ba6f3ebe92f0f150e130de4c1cf76dd64d69fd54d6dc9ce1abcb659e1",
+        ".review-2377/neon-upstream-subscription-applied-proof.ts": "1d6e4789bd5ea8ae00c1aa720b86a8a7d1bf54626acfa59741348f210fcf50d4",
+        ".review-2377/neon-sdk-applied-proof/dist/client/subscription.js": "79799cea5c43b469d159b6e8ad8e2ee929fe2d60355a7cfc3bc357743e920c50",
+        ".review-2377/neon-sdk-applied-proof/dist/client/transaction-tracker.js": "59474afb3204aa86482a52b521ac231fedddfef8ede63ac092793f6a99efebfb",
+        ".review-2377/neon-applied-proof-independent.ts": "8450d681d6ce811be98b1ab8e3a26ce098173ff259624e3786e225dfa76baa81",
+        ".review-2377/neon-applied-proof-independent.test.ts": "03a760e2d90c769b4f2a5a14ca767faaff2564f422b85f47a29242a70d1f1d61",
+        ".review-2377/neon-applied-proof-independent.vitest.config.mts": "9d32224cbb86857e75e4ce256da100e4a8d78b62b8886de26b9ce28879376c46",
+        ".review-2377/neon-retained-evidence-independent.vitest.config.mts": "7ab44f8a4c92d10b8c8c99337e3d04118746d1430e8ed5273348e5dc7774da25",
+        ".review-2377/neon-applied-proof-independent-browser.test.ts": "9d731df9b3f705fd7f79e738f6a7798568c83f1f3ec9a9c1859efc1af00731fb",
+        ".review-2377/neon-applied-proof-independent-browser.vitest.config.mts": "ca7a24c277a71b8a5745cf562dd2bb5caccbbed642824ddcf8b36ffc876c9586",
+        ".review-2377/neon-applied-proof-independent-after-node.log": "0070681270ba6dc7c8cea0f940fb4a5d81f20820313fd3c7849e2a4af0aa321a",
+        ".review-2377/neon-applied-proof-independent-after-node.json": "b6ef2dc758ce2fcffd05da8345d5202627c6981912fa37558ca00b7a934d0287",
+        ".review-2377/neon-applied-proof-independent-after-browser.log": "1fa249bc2ab99f800d2a5be7c66519e1eeb76502aa1944c78990be3b1b79e2da",
+        ".review-2377/neon-applied-proof-independent-after-browser.json": "b6ef2dc758ce2fcffd05da8345d5202627c6981912fa37558ca00b7a934d0287",
+        ".review-2377/neon-applied-proof-retention-independent.test.ts": "3f21f6e991ff20f4c66e8c48663105e2e4823bddd85b5256d6583bfe7302fd63",
+        ".review-2377/neon-applied-proof-retention-independent.vitest.config.mts": "8d3ad689f3776e6dfa6e79395e98469377df452873352945d114e747bf8698a9",
+        ".review-2377/neon-applied-proof-retention-independent-browser.test.ts": "eab4efdd55c1b1bd2db4ce306e2501a0673dfa18ef533aecb2d9f6ae0fcdb52c",
+        ".review-2377/neon-applied-proof-retention-independent-browser.vitest.config.mts": "d9168c04907f7c03d6f9d88219d32a4a7aec488b444e55b4cb9b140159e45b7e",
+        ".review-2377/neon-applied-proof-retention-independent-node.log": "58866ee19051b55caa55ee67efc694a0a415ffa3648d94be7cc44b30bebae59e",
+        ".review-2377/neon-applied-proof-retention-independent-node.json": "b41f66716eb6a77ce5fede3f4dd9a698a8d9ee215224c0794c32a3cc89c92b74",
+        ".review-2377/neon-applied-proof-retention-independent-browser.log": "f25c3b8e54258c784bbb169a5ca37405a50d19dc3aaea56047e64a976b1804b1",
+        ".review-2377/neon-applied-proof-retention-independent-browser.json": "b41f66716eb6a77ce5fede3f4dd9a698a8d9ee215224c0794c32a3cc89c92b74",
+        "packages/db-adapter-conformance/tests/neon/neon-sdk-driver.ts": "28631518d0b2cdafc021efabb8ae0eecd371bdfb31c1e39f992ebbd8e51f5add"
+      },
+      "runs": [
+        {
+          "environment": {
+            "NEON_REVIEW_APPLIED": "1"
+          },
+          "command": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            ".review-2377/neon-applied-proof-independent.vitest.config.mts",
+            "--coverage.enabled=false",
+            "--typecheck.enabled=false",
+            "--maxWorkers=1"
+          ],
+          "exit": 0,
+          "resultFile": ".review-2377/neon-applied-proof-independent-after-node.json",
+          "log": ".review-2377/neon-applied-proof-independent-after-node.log"
+        },
+        {
+          "environment": {
+            "NEON_REVIEW_APPLIED": "1"
+          },
+          "command": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            ".review-2377/neon-applied-proof-independent-browser.vitest.config.mts",
+            "--coverage.enabled=false",
+            "--typecheck.enabled=false",
+            "--maxWorkers=1"
+          ],
+          "exit": 0,
+          "resultFile": ".review-2377/neon-applied-proof-independent-after-browser.json",
+          "log": ".review-2377/neon-applied-proof-independent-after-browser.log"
+        },
+        {
+          "environment": {
+            "NEON_REVIEW_APPLIED": "1"
+          },
+          "command": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            ".review-2377/neon-applied-proof-retention-independent.vitest.config.mts",
+            "--coverage.enabled=false",
+            "--typecheck.enabled=false",
+            "--maxWorkers=1"
+          ],
+          "exit": 0,
+          "resultFile": ".review-2377/neon-applied-proof-retention-independent-node.json",
+          "log": ".review-2377/neon-applied-proof-retention-independent-node.log"
+        },
+        {
+          "environment": {
+            "NEON_REVIEW_APPLIED": "1"
+          },
+          "command": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--config",
+            ".review-2377/neon-applied-proof-retention-independent-browser.vitest.config.mts",
+            "--coverage.enabled=false",
+            "--typecheck.enabled=false",
+            "--maxWorkers=1"
+          ],
+          "exit": 0,
+          "resultFile": ".review-2377/neon-applied-proof-retention-independent-browser.json",
+          "log": ".review-2377/neon-applied-proof-retention-independent-browser.log"
+        }
+      ],
+      "instrumentChanges": {
+        "unchangedDriverAndComparison": ".review-2377/neon-applied-proof-independent.ts",
+        "configurationChanges": "Added NEON_REVIEW_APPLIED to select the second isolated SDK copy and separate after-result filenames; comparison semantics unchanged."
+      },
+      "lintChanged": {
+        "command": "pnpm lint:changed",
+        "exit": 0,
+        "log": ".review-2377/neon-independent-lint-changed-final.log",
+        "logSha256": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168"
+      }
+    }
+  ]
+}

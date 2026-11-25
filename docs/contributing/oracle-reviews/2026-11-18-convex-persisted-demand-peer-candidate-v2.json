@@ -1,0 +1,46 @@
+{
+  "phase": "repaired candidate, before mutant gate",
+  "pre_edit_snapshot": {
+    "path": "docs/contributing/oracle-reviews/2026-11-18-convex-persisted-demand-peer-pre-edit-v2.json",
+    "sha256": "fe084f700f49b5dccfcfc7d4fdba46ed980895e278f0b52bd8f725309299edac"
+  },
+  "sources": {
+    "packages/convex-db-collection/src/options.ts": "690a8ed37770199efcd0bf008a4814fdb3e2ce9ae6878ffd026b44ef3bbd1556",
+    "packages/convex-db-collection/tests/persisted-demand-source.ts": "4cefb5c38d054e6464a13563ac1bd23d34faae08cb44b146b275cef28e6134ae",
+    "packages/db-adapter-conformance/tests/persisted-demand-peer-driver.ts": "4236f406af1831d2a7a5df99208398d142d061531d33e01f834fe3950d9810a6",
+    "packages/db-adapter-conformance/tests/persisted-demand-peer-oracle-suite.ts": "786106db8b649382dac207592c968c9ded9316d87f6c8e5b0a6af3eb94d42b66",
+    "packages/db-adapter-conformance/tests/persisted-demand-peer-oracle.test.ts": "adc52fa3af646f7612bfeedefcb9be98101955841b3044fe07134b2aaec1f061",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-driver.ts": "97aca6b9a0f09c2faf02b4fb66d638e54ce556290412cf2f5d23536418c4b959",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-types.ts": "bde18843001e39e9737101dfe614954ba1d9ba1fdcfd92f237f705e021578db6",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer.opfs.ts": "72595297e6eca9ceca403e790b898972f45a147495bf830aecdb775dae26213b",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer.opfs.html": "60cb637edddd60fdd8850f17c9860976b66176358d99c548f8d2bd171882304b",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer-oracle.browser.test.ts": "c1c38c0ad6a138a813ed87bbb8f3fcf4d3253ba40e06e3bb20edcfda053edaae",
+    "packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config.ts": "b731d370f1b905b423dbe6ad95f578c1e51b9a2f36ff00577e3d648a254adca9",
+    "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts": "3910437e91fddd5dd90f3dd9ba03057f9df613a997ea1567d906f7463e334d90",
+    "packages/db-sqlite-persistence-core/src/persisted.ts": "96d8ed9ff3ef38e9c8862ff576e8bc16c8977daef492778e1a102eaddd542f04",
+    "packages/db/tests/oracle-cleanup.ts": "e3ed6efa8961252cd17bfe49e9675101f8211abe9a164244990563821d4a4af9",
+    "packages/db/tests/oracle-config.ts": "5431d81480a8b81d1a68a5bcdd1645e2cf2b77bcf14ecba2ccae9b8d69741ae7",
+    "packages/db-adapter-conformance/package.json": "08a572a0dce3d7dbf975a3f71f84e09fb4e6eba2c4eea3b33fe73ec3a38ae19a",
+    "packages/convex-db-collection/src/pagination.ts": "1328c4bfffc03a5d729bc18277b43c47808b81eec391aa3c7729db8bb1852f60",
+    "packages/convex-db-collection/src/subscription.ts": "375baafa00f8982f5f1c6d609481d7f463b8662c226506ffd994eecdee9fc5cd"
+  },
+  "logs": {
+    ".review-2377/convex-demand-peer-node-final-candidate-v2.log": "950e8876fc4ed2ac3a8cee9580125798aff602631f172c48d02675311b33be99",
+    ".review-2377/convex-demand-peer-browser-final-candidate-v2.log": "80a843218581d1646daffbfbc97403de7ac1cd2c3679abc5bde87a854a4ebbce",
+    ".review-2377/convex-demand-peer-lint-changed-v2.log": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168"
+  },
+  "results": {
+    "node": "12/12 GREEN",
+    "chromium_opfs": "12/12 GREEN"
+  },
+  "reach_per_host": {
+    "large online demand durably covered": 8,
+    "large saved suffix accepted and unapplied": 8,
+    "large raw acquisition waits behind restore": 8,
+    "finite small prefix consumed before large raw acquisition": 8,
+    "large offline deadline observed without provider answer": 8,
+    "saved suffix shares finite prefix boundary rank": 4
+  },
+  "calibrations": "Both clean baselines GREEN; corrupted source suffix and durable suffix rejected under their intended primary-model comparisons.",
+  "limits": "Two ordered live queries, limit2 and limit5, source8/9, unchanged/changed prefix, distinct/tied prefix boundary; real Convex SDK over controlled WebSocket, actual closed/reopened Node SQLite and Chromium worker/OPFS; primary unchanged model. Parent coordinates separate sequential source mutants; no final class closure claimed by this candidate snapshot."
+}

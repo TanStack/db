@@ -147,18 +147,31 @@ export type SourceFifoOrderingObservation = {
   durableRows: Array<Todo>
   status: string
   pendingMarkers: number
+  publicMetadata?: unknown
+  durableMetadata?: unknown
+  durableOrder?: Array<Array<string | number>>
 }
 
 export function expectSourceFifoOrderingObservation(
   actual: SourceFifoOrderingObservation,
   expectedRows: ReadonlyArray<Todo>,
+  checkpoint = `source FIFO settled`,
+  expectedMetadata?: unknown,
+  expectedOrder?: Array<Array<string | number>>,
 ): void {
-  oracleAssertion('existing comparison at 279', () =>
+  oracleAssertion(checkpoint, () =>
     expect(actual).toEqual({
       publicRows: expectedRows,
       durableRows: expectedRows,
       status: `ready`,
       pendingMarkers: 0,
+      ...(expectedOrder === undefined ? {} : { durableOrder: expectedOrder }),
+      ...(expectedMetadata === undefined
+        ? {}
+        : {
+            publicMetadata: expectedMetadata,
+            durableMetadata: expectedMetadata,
+          }),
     }),
   )
 }
@@ -278,7 +291,19 @@ export type GeneratedPersistenceGrammar = {
   witness: GeneratedPersistenceHistory
 }
 
-export const sourceFifoOrderingAxes = [`same-key`, `disjoint`] as const
+export const sourceFifoOrderingAxes = [
+  `same-key`,
+  `disjoint`,
+  `delete-reinsert`,
+  `hydration-delete-reinsert`,
+  `failed-hydration-partial`,
+  `hydration-independent-abort`,
+  `hydration-baseline-read-abort`,
+  `hydration-loaded-partial`,
+  `failed-hydration-ordinary-partial`,
+  `failed-hydration-multi-key-partial`,
+  `failed-hydration-appended-partial`,
+] as const
 export const abortGraphAxes = [`independent`, `same-key`] as const
 export const ownerIsolationAxes = [`write`, `commit`, `truncate`] as const
 export const openTransactionBoundaryAxes = [
@@ -308,10 +333,19 @@ export const generatedPersistenceGrammars: ReadonlyArray<GeneratedPersistenceGra
       axisContribution: {
         [`same-key`]: `the later source value wins in source order`,
         disjoint: `both unrelated values and receipts survive`,
+        [`delete-reinsert`]: `a later value equal to the public baseline restores a key after its queued deletion`,
+        [`hydration-delete-reinsert`]: `a source commit during hydration cannot overtake an older normal commit`,
+        [`failed-hydration-partial`]: `failed hydration with an older disjoint commit retains unseen fields of a later partial update`,
+        [`hydration-independent-abort`]: `an aborted independent successor keeps the Collection ready and the predecessor intact`,
+        [`hydration-baseline-read-abort`]: `cancellation during the awaited baseline read rejects before acceptance`,
+        [`hydration-loaded-partial`]: `a complete restored row remains complete under a partial source update`,
+        [`failed-hydration-ordinary-partial`]: `an earlier ordinary partial update establishes the later recovery baseline`,
+        [`failed-hydration-multi-key-partial`]: `one transaction reconstructs every unseen partial-update key`,
+        [`failed-hydration-appended-partial`]: `a transaction appended during recovery receives its own FIFO baseline`,
       },
       titleCount: 2,
       witness: {
-        axes: [`same-key`, `disjoint`],
+        axes: [...sourceFifoOrderingAxes],
         titles: [`older`, `newer`],
       },
     },
@@ -409,8 +443,9 @@ export function fullAxisOrder<Axis extends string>(
 export const generatedTitle = fc.string({ maxLength: generatedTitleMaxLength })
 
 export type SourceFifoOrderingHistory = {
-  relations: Array<`same-key` | `disjoint`>
+  relations: Array<(typeof sourceFifoOrderingAxes)[number]>
   titles: [string, string]
+  unrelatedRowCount: number
 }
 
 export type AbortGraphHistory = {
@@ -440,6 +475,7 @@ export const sourceFifoOrderingHistory: fc.Arbitrary<SourceFifoOrderingHistory> 
   fc.record({
     relations: fullAxisOrder(sourceFifoOrderingAxes),
     titles: fc.tuple(generatedTitle, generatedTitle),
+    unrelatedRowCount: fc.integer({ min: 0, max: 32 }),
   })
 
 export const abortGraphHistory: fc.Arbitrary<AbortGraphHistory> = fc.record({

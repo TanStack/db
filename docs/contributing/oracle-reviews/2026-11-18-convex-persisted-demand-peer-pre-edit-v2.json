@@ -1,0 +1,51 @@
+{
+  "version": 2,
+  "phase": "pre-edit",
+  "production": "first attempt, unchanged during peer witness authoring and execution",
+  "sources": {
+    "packages/convex-db-collection/src/options.ts": "3f9a9a2f16a613897dab4eea4dedc72b66515bd38f523c9eae2659fae7d2b317",
+    "packages/convex-db-collection/tests/persisted-demand-source.ts": "4cefb5c38d054e6464a13563ac1bd23d34faae08cb44b146b275cef28e6134ae",
+    "packages/db-adapter-conformance/tests/persisted-demand-peer-driver.ts": "4236f406af1831d2a7a5df99208398d142d061531d33e01f834fe3950d9810a6",
+    "packages/db-adapter-conformance/tests/persisted-demand-peer-oracle-suite.ts": "786106db8b649382dac207592c968c9ded9316d87f6c8e5b0a6af3eb94d42b66",
+    "packages/db-adapter-conformance/tests/persisted-demand-peer-oracle.test.ts": "adc52fa3af646f7612bfeedefcb9be98101955841b3044fe07134b2aaec1f061",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-driver.ts": "97aca6b9a0f09c2faf02b4fb66d638e54ce556290412cf2f5d23536418c4b959",
+    "packages/db-adapter-conformance/tests/persisted-demand-receiving-types.ts": "bde18843001e39e9737101dfe614954ba1d9ba1fdcfd92f237f705e021578db6",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer.opfs.ts": "72595297e6eca9ceca403e790b898972f45a147495bf830aecdb775dae26213b",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer.opfs.html": "60cb637edddd60fdd8850f17c9860976b66176358d99c548f8d2bd171882304b",
+    "packages/browser-db-sqlite-persistence/e2e/adapter-persisted-demand-peer-oracle.browser.test.ts": "c1c38c0ad6a138a813ed87bbb8f3fcf4d3253ba40e06e3bb20edcfda053edaae",
+    "packages/browser-db-sqlite-persistence/vitest.adapter-oracles.config.ts": "b731d370f1b905b423dbe6ad95f578c1e51b9a2f36ff00577e3d648a254adca9",
+    "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts": "3910437e91fddd5dd90f3dd9ba03057f9df613a997ea1567d906f7463e334d90",
+    "packages/db-sqlite-persistence-core/src/persisted.ts": "96d8ed9ff3ef38e9c8862ff576e8bc16c8977daef492778e1a102eaddd542f04",
+    "packages/db/tests/oracle-cleanup.ts": "e3ed6efa8961252cd17bfe49e9675101f8211abe9a164244990563821d4a4af9",
+    "packages/db/tests/oracle-config.ts": "ee3ef528e6e514a6b9df6e39bda31ffe8d66673aeed42d04ddc0e8bfa324fc2f",
+    "packages/db-adapter-conformance/package.json": "08a572a0dce3d7dbf975a3f71f84e09fb4e6eba2c4eea3b33fe73ec3a38ae19a"
+  },
+  "logs": {
+    ".review-2377/convex-demand-peer-node-pre-edit-v2.log": "7f6552093ab910ca03f54e7284b855f982ad97465fc69087eaaeae1662ae83de",
+    ".review-2377/convex-demand-peer-browser-pre-edit-v2.log": "e646d36a89839958855bcb932159f067769d8de700fc8d19e6fb43c6e28a7879",
+    ".review-2377/convex-demand-peer-types-v2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".review-2377/convex-demand-peer-browser-types-v2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".review-2377/convex-demand-peer-eslint-v2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "results": {
+    "node": {
+      "semantic_row_loss_failures": 8,
+      "derivative_calibration_failures": 2,
+      "framework_checks_passed": 2
+    },
+    "chromium_opfs": {
+      "semantic_row_loss_failures": 8,
+      "derivative_calibration_failures": 2,
+      "framework_checks_passed": 2
+    }
+  },
+  "reach": {
+    "large online demand durably covered": 8,
+    "large saved suffix accepted and unapplied": 8,
+    "large raw acquisition waits behind restore": 8,
+    "finite small prefix consumed before large raw acquisition": 8,
+    "large offline deadline observed without provider answer": 8,
+    "saved suffix shares finite prefix boundary rank": 4
+  },
+  "scope": "Two ordered live queries, limit2 and limit5, source8/9, unchanged/changed prefix, distinct/tied prefix boundary; real Convex SDK over controlled WebSocket, actual closed/reopened Node SQLite and Chromium worker/OPFS; primary unchanged model; no production edit or closure claim."
+}

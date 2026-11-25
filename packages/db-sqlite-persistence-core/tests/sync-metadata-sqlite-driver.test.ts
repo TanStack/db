@@ -9,13 +9,13 @@ describe.each([`transaction`, `transactionWithDriver`] as const)(
   (entry) => {
     registerSQLiteFixtureConformance(() => {
       const database = new DatabaseSync(`:memory:`)
-      const { driver, drained } = createMetadataSQLiteDriver(database)
+      const { driver, dispose } = createMetadataSQLiteDriver(database)
       if (entry === `transactionWithDriver`)
         driver.transaction = driver.transactionWithDriver!
       return Promise.resolve({
         driver,
         cleanup: async () => {
-          await drained()
+          await dispose()
           database.close()
         },
       })

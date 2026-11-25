@@ -538,6 +538,8 @@ export interface PersistenceAdapter {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      /** Optional materialization hint; adapters may return additional rows. */
+      rowKeys?: ReadonlyArray<string | number>
       cacheGenerationClaimId?: string
     },
   ) => Promise<{
@@ -2766,7 +2768,7 @@ class PersistedCollectionRuntime<
           await this.runInHydrationScope(async (adapter) => {
             if (this.recoverQueuedAfterLocalLoadFailure) {
               this.recoverQueuedAfterLocalLoadFailure = false
-              await this.recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
+              await this.applyBufferedTransactionsWithBaselineUnsafe(
                 lifecycleGeneration,
                 adapter,
               )
@@ -3417,7 +3419,25 @@ class PersistedCollectionRuntime<
     if (failure) return Promise.reject(failure.error)
     transaction.admittedStorageCollectionId = this.storageCollectionId
     return this.applyMutex.run(async () => {
-      await this.applyBufferedSyncTransactionUnsafe(transaction)
+      if (transaction.hydrationSequence === undefined) {
+        await this.applyBufferedSyncTransactionUnsafe(transaction)
+      } else {
+        // The read may have failed before installing the partial update's
+        // baseline. Reconstruct it at this transaction's actual FIFO turn,
+        // after every older source write, using the existing replay rule.
+        try {
+          this.throwIfTerminal()
+          await this.runInHydrationScope((adapter) =>
+            this.applyBufferedTransactionsWithBaselineUnsafe(
+              transaction.lifecycleGeneration,
+              adapter,
+              [transaction],
+            ),
+          )
+        } catch (error) {
+          throw this.classifyBufferedTransactionFailure(transaction, error)
+        }
+      }
     })
   }
 
@@ -3997,7 +4017,7 @@ class PersistedCollectionRuntime<
         // FIFO cut instead of treating the snapshot as a successful load.
         this.hydratingGeneration = config.lifecycleGeneration
         try {
-          await this.recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
+          await this.applyBufferedTransactionsWithBaselineUnsafe(
             config.lifecycleGeneration,
             adapter,
           )
@@ -4026,21 +4046,28 @@ class PersistedCollectionRuntime<
     return true
   }
 
-  private async recoverBufferedTransactionsAfterLocalLoadFailureUnsafe(
+  private async applyBufferedTransactionsWithBaselineUnsafe(
     lifecycleGeneration: number,
     adapter: HydrationPersistenceAdapter,
+    transactions = this.queuedHydrationTransactions,
   ): Promise<void> {
-    let snapshotRows:
-      Map<TKey, { key: TKey; value: T; metadata?: unknown }> | undefined
     type RecoveryPresence = `present` | `absent` | `unknown`
     const recoveredPresence = new Map<TKey, RecoveryPresence>()
     let snapshotInvalidatedByTruncate = false
 
-    while (this.queuedHydrationTransactions.length > 0) {
-      const transaction = this.queuedHydrationTransactions.shift()
-      if (!transaction) continue
+    // Taking the next queue item also admits work appended during an await.
+    for (
+      let transaction = transactions.shift();
+      transaction;
+      transaction = transactions.shift()
+    ) {
+      // Recovery can receive another transaction during an awaited read. Each
+      // transaction reads its own complete key projection at its FIFO turn.
+      let snapshotRows:
+        Map<TKey, { key: TKey; value: T; metadata?: unknown }> | undefined
 
       try {
+        this.throwIfTerminal()
         this.throwIfLifecycleReplaced(lifecycleGeneration)
         const baselineRows = new Map<
           TKey,
@@ -4084,6 +4111,11 @@ class PersistedCollectionRuntime<
                       requiredIndexSignatures:
                         this.getRequiredIndexSignatures(),
                       includeRows: true,
+                      rowKeys: Array.from(
+                        transaction.partialUpdateOperationIndexes,
+                        (operationIndex) =>
+                          transaction.operations[operationIndex]!.key,
+                      ),
                       cacheGenerationClaimId:
                         this.cacheGenerationClaim?.claimId,
                     })
@@ -4139,11 +4171,20 @@ class PersistedCollectionRuntime<
           }
         }
       } catch (error) {
+        // A baseline read may reach SQLite after its initially live claim
+        // expires. Established loss aborts this old commit and schedules the
+        // same private recovery as ordinary admission. A live-claim I/O error
+        // still follows the durability failure policy.
+        if (
+          this.hasExpiredCacheClaim() &&
+          !this.isBufferedSyncTransactionCurrent(transaction)
+        )
+          continue
         transaction.rejectApplied?.(error)
-        for (const abandoned of this.queuedHydrationTransactions) {
+        for (const abandoned of transactions) {
           abandoned.rejectApplied?.(error)
         }
-        this.queuedHydrationTransactions.length = 0
+        transactions.length = 0
         throw error
       }
     }
@@ -4428,40 +4469,13 @@ class PersistedCollectionRuntime<
     return operationFailure
   }
 
-  private async applyBufferedSyncTransactionUnsafe(
+  private rejectBufferedSyncTransaction(
     transaction: BufferedSyncTransaction<T, TKey>,
-    scopedAdapter?: HydrationPersistenceAdapter,
-  ): Promise<{
-    applied: boolean
-    hydrationFailure?: { reason: unknown }
-  }> {
-    this.throwIfTerminal()
-    this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
-    if (
-      transaction.admittedStorageCollectionId !== undefined &&
-      transaction.admittedStorageCollectionId !== this.storageCollectionId
-    ) {
-      const error = new SyncTransactionAbortedError()
-      if (!transaction.rejectApplied) throw error
-      transaction.rejectApplied(error)
-      return { applied: false }
-    }
-    if (!transaction.internal && this.scopedRecoveryPending) {
-      const error = new SyncTransactionAbortedError()
-      if (!transaction.rejectApplied) throw error
-      transaction.rejectApplied(error)
-      return { applied: false }
-    }
-    if (
-      !transaction.internal &&
-      this.cacheGenerationClaim &&
-      (scopedAdapter ?? this.persistence.adapter).renewCacheGenerationClaim &&
-      !(await this.renewCacheClaim(scopedAdapter ?? this.persistence.adapter))
-    ) {
-      const error = new SyncTransactionAbortedError()
-      // Recovery needs this apply mutex, so start it after the rejected
-      // transaction has released its turn. Its new source snapshots use a
-      // fresh cache generation; this commit must never be replayed into it.
+    recover: boolean,
+  ): false {
+    if (recover) {
+      // Recovery needs this apply mutex. Start it after the abandoned turn;
+      // the old transaction must never replay into the new cache generation.
       queueMicrotask(() => {
         if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
         if (this.scopedRecoveryPending) return
@@ -4469,10 +4483,64 @@ class PersistedCollectionRuntime<
           this.markTerminalFailure(failure, transaction.lifecycleGeneration)
         })
       })
-      if (!transaction.rejectApplied) throw error
-      transaction.rejectApplied(error)
-      return { applied: false }
     }
+    const error = new SyncTransactionAbortedError()
+    if (!transaction.rejectApplied) throw error
+    transaction.rejectApplied(error)
+    return false
+  }
+
+  // Check synchronously at the application boundary: renewal may return
+  // before a paused run's continuation observes expiry or scoped recovery.
+  private isBufferedSyncTransactionCurrent(
+    transaction: BufferedSyncTransaction<T, TKey>,
+  ): boolean {
+    this.throwIfTerminal()
+    this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
+    const expired = !transaction.internal && this.hasExpiredCacheClaim()
+    if (
+      (transaction.admittedStorageCollectionId !== undefined &&
+        transaction.admittedStorageCollectionId !== this.storageCollectionId) ||
+      (!transaction.internal && this.scopedRecoveryPending) ||
+      expired
+    )
+      return this.rejectBufferedSyncTransaction(transaction, expired)
+    return true
+  }
+
+  private async admitBufferedSyncTransactionUnsafe(
+    transaction: BufferedSyncTransaction<T, TKey>,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<boolean> {
+    if (!this.isBufferedSyncTransactionCurrent(transaction)) return false
+    if (
+      !transaction.internal &&
+      this.cacheGenerationClaim &&
+      (scopedAdapter ?? this.persistence.adapter).renewCacheGenerationClaim &&
+      !(await this.renewCacheClaim(scopedAdapter ?? this.persistence.adapter))
+    )
+      return this.rejectBufferedSyncTransaction(transaction, true)
+    return true
+  }
+
+  private async applyBufferedSyncTransactionUnsafe(
+    transaction: BufferedSyncTransaction<T, TKey>,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<{
+    applied: boolean
+    hydrationFailure?: { reason: unknown }
+  }> {
+    // An idle source without a cache claim enters core in this turn. Only a
+    // managed claim can require asynchronous renewal before application.
+    if (
+      (this.cacheGenerationClaim &&
+        !(await this.admitBufferedSyncTransactionUnsafe(
+          transaction,
+          scopedAdapter,
+        ))) ||
+      !this.isBufferedSyncTransactionCurrent(transaction)
+    )
+      return { applied: false }
     const abortedBeforeApplication = transaction.signal?.aborted === true
     let abortedDuringApplication = false
     let applicationReturned = false
@@ -6252,7 +6320,13 @@ function createWrappedSyncConfig<
       ) => {
         // A transaction binds to a storage read when it commits (decision 12).
         if (transaction.internal || !runtime.isHydratingNow()) return
-        transaction.queuedBecauseHydrating = true
+        // A commit cannot replay inside a read ahead of an older source
+        // commit already waiting for its ordinary mutex turn. Keep the read
+        // binding so a diverted partial update still receives its baseline.
+        transaction.queuedBecauseHydrating =
+          !pendingPublicationTransactions.some(
+            (older) => !older.queuedBecauseHydrating,
+          )
         transaction.hydrationSequence = runtime.getHydrationSequence()
       }
       const assertHydrationSequenceCurrent = (

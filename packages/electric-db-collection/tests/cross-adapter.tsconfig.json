@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "cross-adapter-*.ts",
+    "../vitest.cross-adapter.config.ts",
+    "../../browser-db-sqlite-persistence/src/vite-env.d.ts"
+  ],
+  "exclude": ["../node_modules", "../dist"]
+}

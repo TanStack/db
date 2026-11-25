@@ -1,0 +1,487 @@
+{
+  "head": "92a1493e0f45dbfd1fc3a51460ccb9228d8f787d",
+  "branch": "powersync-standalone-package",
+  "capturedAt": "2026-11-18T00:16:47.727091+00:00",
+  "runtime": "Node 24.19.0; Vitest --maxWorkers=1",
+  "scope": "Eight shared semantic/test files independently approved in explicit scopes, with cleanup failure-fidelity approval retracted at62e then superseded by final exported formatter15317 and11ordinary controls. Receiving normal runs retain their actual historical helper hashes; only reviewed exception-formatting amendment carries them. Supporting registry fingerprints remain informational.",
+  "sharedSemanticAndTestFiles": {
+    "packages/db-adapter-conformance/tests/eager-reload-driver.ts": "3e178cd5823a690646f98301701fb84b4eee8fb6cbd7cde0f8b2a70ba6e96b0e",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle.ts": "f77417e0111a8db3716208061dce81cdc53dff63096b12bde71ba79bc1fda3cb",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle-suite.ts": "fea78064cacbb60db6e8668fb04350cd9723618e64b125f3dd0aff6c1dc4cf6c",
+    "packages/db-adapter-conformance/tests/eager-reload-projection.test.ts": "ca4e5e61f34266ce2933801c074d09e9aae87242a8bf3d2f78cb5dc1b2563355",
+    "packages/db/tests/oracle-cleanup.ts": "15317e3871120de3840160b070d902e765989fe070112fbbf3d14d87b84bf6bc",
+    "packages/db/tests/oracle-cleanup.test.ts": "3b9d62134f58bea524f1d0bba1ed89aa2a54ad606f3c0846d0f02a8a598cfb22",
+    "packages/powersync-direct-collection/tests/initial-receipt-oracle.ts": "c75895abae5fe1e8485b8bcae83e25681cfddcce8f8883ba3b1b281cec79b4c1",
+    "packages/powersync-direct-collection/tests/initial-receipt-oracle-suite.ts": "5dad5ea2a99124612e3399c5b0e71ecb350c151ef275b7ae521238a85876489e"
+  },
+  "supportingFiles": {
+    "packages/db-adapter-conformance/tests/persisted-startup-driver.ts": "c4c5d558cbf28ce34ac9bc552648975918a5ee85e103d6bae406b9f95bfe1e36",
+    "packages/db-adapter-conformance/tests/persisted-startup-oracle.ts": "847d65f8fe99d12591662989804c6b52b98145966cf802e96cdf3bd1bcc8892e",
+    "packages/db/tests/oracle-config.ts": "3741c67abbe4412209f3cbd15b07d60f6573ff1cad16a6a72b00525f90a42f26"
+  },
+  "receiverBarriersInspected": {
+    "packages/query-db-collection/tests/eager-reload-driver.ts": "3d0801a4020ec9b92a05e3e9c99dc5abc4ca481a9b4eb70580978c8d0ce72d00",
+    "packages/convex-db-collection/tests/eager-reload-driver.ts": "061dc0f09bfadc3f169d2cf6d032613b19db8391131a6368adce8da6a0a2320e",
+    "packages/electric-db-collection/tests/cross-adapter-reload-driver.ts": "c6509dfb27eba0416380aa66577470b0994d8b0b67e9cfec18875e170ae1dc90",
+    "packages/powersync-direct-collection/tests/eager-reload-driver.ts": "e4b6264e327795d3481035141e4a915b3104fdb676d524765c147cb506a8b965",
+    "packages/rxdb-db-collection/tests/eager-reload-driver.ts": "5ea628e11c42c622c0d95d8e785929148556e9257e340f5fc8b7b79924a56b84"
+  },
+  "recorderRed": {
+    "classification": "ordinary recorder control fails at old premise wait; not semantic product RED",
+    "oldDriverSha256": "c7ecabfb9981254872362ec73af663c828fa2827c603ae1712318855c1c29327",
+    "failed": 1,
+    "passed": 28
+  },
+  "recorderGreen": {
+    "passed": 29,
+    "command": "node ../../node_modules/vitest/vitest.mjs run tests/eager-reload-projection.test.ts --coverage.enabled=false --typecheck.enabled=false --maxWorkers=1 --reporter=dot",
+    "finalFrozenControlsRun": {
+      "passed": 29,
+      "durationSeconds": 0.74,
+      "log": ".review-2377/shared-reload-empty-completion-final-green.log"
+    }
+  },
+  "runs": {
+    "query": {
+      "log": ".review-2377/shared-reload-final-independent-query.log",
+      "passed": 133,
+      "executedBy": "runtime_sync after authored shared recorder repair",
+      "generatedReach": [
+        {
+          "campaign": "adapter.query.complete-result-reload fixed seed 2367",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 14,
+            "fresh": 21,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 22,
+            "persisting-mutation": 46,
+            "reload-empty": 28,
+            "reload-empty-held": 13,
+            "reload-retained": 31,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter.query.complete-result-reload random seed",
+          "counts": {
+            "changed-overlap": 18,
+            "empty-result": 17,
+            "fresh": 22,
+            "fresh-held": 13,
+            "no-mutation": 29,
+            "omitted-row": 24,
+            "persisting-mutation": 51,
+            "reload-empty": 25,
+            "reload-empty-held": 18,
+            "reload-retained": 33,
+            "reload-retained-held": 20
+          }
+        },
+        {
+          "campaign": "adapter.query.initial-gate fixed seed 2377",
+          "counts": {
+            "queryFn:fresh": 12,
+            "queryFn:fresh:recovery": 4,
+            "queryFn:reload": 18,
+            "queryFn:reload:recovery": 11
+          }
+        },
+        {
+          "campaign": "adapter.query.initial-gate random seed",
+          "counts": {
+            "queryFn:fresh": 15,
+            "queryFn:fresh:recovery": 8,
+            "queryFn:reload": 15,
+            "queryFn:reload:recovery": 6
+          }
+        }
+      ],
+      "freshSeedCoordinates": [
+        {
+          "property": "adapter.query.complete-result-reload",
+          "seed": 819199224
+        },
+        {
+          "property": "adapter.query.initial-gate",
+          "seed": 1023743216
+        }
+      ]
+    },
+    "convex": {
+      "log": ".review-2377/shared-reload-final-independent-convex.log",
+      "passed": 318,
+      "executedBy": "runtime_sync after authored shared recorder repair",
+      "generatedReach": [
+        {
+          "campaign": "adapter.convex.eager-reload.javascript fixed seed 2367",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 14,
+            "fresh": 21,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 22,
+            "persisting-mutation": 46,
+            "reload-empty": 28,
+            "reload-empty-held": 13,
+            "reload-retained": 31,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter.convex.eager-reload.javascript random seed",
+          "counts": {
+            "changed-overlap": 22,
+            "empty-result": 15,
+            "fresh": 23,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 25,
+            "persisting-mutation": 46,
+            "reload-empty": 27,
+            "reload-empty-held": 16,
+            "reload-retained": 30,
+            "reload-retained-held": 16
+          }
+        },
+        {
+          "campaign": "adapter.convex.eager-reload.react fixed seed 2367",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 14,
+            "fresh": 21,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 22,
+            "persisting-mutation": 46,
+            "reload-empty": 28,
+            "reload-empty-held": 13,
+            "reload-retained": 31,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter.convex.eager-reload.react random seed",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 18,
+            "fresh": 28,
+            "fresh-held": 21,
+            "no-mutation": 31,
+            "omitted-row": 28,
+            "persisting-mutation": 49,
+            "reload-empty": 19,
+            "reload-empty-held": 10,
+            "reload-retained": 33,
+            "reload-retained-held": 18
+          }
+        },
+        {
+          "campaign": "adapter.convex.eager-reload.wrapped fixed seed 2367",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 14,
+            "fresh": 21,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 22,
+            "persisting-mutation": 46,
+            "reload-empty": 28,
+            "reload-empty-held": 13,
+            "reload-retained": 31,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter.convex.eager-reload.wrapped random seed",
+          "counts": {
+            "changed-overlap": 19,
+            "empty-result": 17,
+            "fresh": 21,
+            "fresh-held": 13,
+            "no-mutation": 36,
+            "omitted-row": 23,
+            "persisting-mutation": 44,
+            "reload-empty": 25,
+            "reload-empty-held": 15,
+            "reload-retained": 34,
+            "reload-retained-held": 16
+          }
+        }
+      ],
+      "freshSeedCoordinates": [
+        {
+          "property": "adapter.convex.eager-reload.javascript",
+          "seed": -675295465
+        },
+        {
+          "property": "adapter.convex.eager-reload.react",
+          "seed": 1363528594
+        },
+        {
+          "property": "adapter.convex.eager-reload.wrapped",
+          "seed": -1909308246
+        }
+      ]
+    },
+    "rxdb": {
+      "log": ".review-2377/shared-reload-source-only-final-independent-rxdb.log",
+      "passed": 106,
+      "durationSeconds": 14.87,
+      "executedBy": "runtime_sync after authored shared recorder repair; final isolated adapter-only storage barrier",
+      "generatedReach": [
+        {
+          "campaign": "adapter.rxdb.eager-reload fixed seed 2367",
+          "counts": {
+            "changed-overlap": 17,
+            "empty-result": 14,
+            "fresh": 21,
+            "fresh-held": 14,
+            "no-mutation": 34,
+            "omitted-row": 22,
+            "persisting-mutation": 46,
+            "reload-empty": 28,
+            "reload-empty-held": 13,
+            "reload-retained": 31,
+            "reload-retained-held": 19
+          }
+        },
+        {
+          "campaign": "adapter.rxdb.eager-reload random seed",
+          "counts": {
+            "changed-overlap": 16,
+            "empty-result": 18,
+            "fresh": 26,
+            "fresh-held": 16,
+            "no-mutation": 31,
+            "omitted-row": 20,
+            "persisting-mutation": 49,
+            "reload-empty": 27,
+            "reload-empty-held": 16,
+            "reload-retained": 27,
+            "reload-retained-held": 17
+          }
+        }
+      ],
+      "freshSeedCoordinates": [
+        {
+          "property": "adapter.rxdb.eager-reload",
+          "seed": 2026618395
+        }
+      ]
+    }
+  },
+  "preliminaryRxDB": {
+    "passed": 106,
+    "driverSha256": "ff29699e3701fa65098b9826645f6a4567f351937702541df43daf0bfb1ff6b7",
+    "status": "superseded by final adapter-source-only query barrier; final106GREEN and Chromium24 histories plus missing-callback control"
+  },
+  "logs": {
+    ".review-2377/shared-reload-independent-missing-ready-controls.log": "2b3312b8ef850d0d640341e876c6ac1985eff07d8c463f9543692a74a1a0b19a",
+    ".review-2377/shared-reload-empty-completion-red.log": "6baf78eaecffaca022f5e365a1fb02b695c6a71e5fb45f3d6b2dc15cc301ed44",
+    ".review-2377/shared-reload-empty-completion-green.log": "deaa10051ef06082eacb4f686bd6e7cbe4ef12868887d195de9428e2a22cb14a",
+    ".review-2377/shared-reload-empty-completion-scoped-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".review-2377/shared-reload-final-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".review-2377/shared-reload-final-independent-query.log": "2362d6b968e1f6d5e73c4529121582aa0d4157ca8650aab0c1062ba4512d840f",
+    ".review-2377/shared-reload-final-independent-convex.log": "46a8fb56f0ec8560a68656cfc95bfafe39c6ffc99c342db4352a5c9c0cdf9654",
+    ".review-2377/cross-electric-empty-liveness-browser.log": "f325ace6edbf618c38c707ad6fe2cdf48639fc2a5951248204f5acb2bb1a75d7",
+    ".review-2377/cross-electric-empty-liveness-clean-browser.log": "1014b52197f3711250a43ef203b699fb6607f4e0152ff7699b91a059b42b5e41",
+    ".review-2377/cross-electric-empty-liveness-clean-node.log": "c1eedfaf7f5a08730dd4dbbb1a2b6d19bf0cb3d4c95fb59b7c84cb2d225b1ef4",
+    ".review-2377/cross-electric-empty-liveness-node.log": "323a5d5b992db08666eecafd397ceaf6f3d80185bc60da774b62febeec82a9fa",
+    ".review-2377/shared-reload-source-only-final-independent-rxdb.log": "ec5bacdcfab84ab66e9281164e53c10a60624d6afcea5b807d987ee921ad442a",
+    ".review-2377/shared-reload-rxdb-final-browser.log": "6017bfa7543c610debef531d36cffbf11967ae49b329a5bd38605a212a8ef54b",
+    ".review-2377/shared-reload-empty-completion-final-green.log": "74b9ce081ec70597ef36d2aed3fa4e567a7a525b5b4bb7e6cc6acc2ce6910c2a",
+    ".review-2377/shared-reload-final-lint-changed.log": "89d7da780deb04850db632f478bc4155d23659849c0e5bec6d114c74dc9d5168",
+    ".review-2377/reload-provider-barrier-controls.log": "39491e5364ce700750f53350baf98498d32e6afdaf8b3910d92b88197dcdd166",
+    ".review-2377/enforcement-electric-empty-liveness-node.log": "6da803c0a7cc2ab367a1544b43026a36dbaa528b6fb25e0af70db26ba62ec5c6",
+    ".review-2377/enforcement-electric-empty-liveness-browser.log": "f50890927cd3b48474dcc280c337147f5f2c905c00f5f31e4bff0b75ed65448b",
+    ".review-2377/enforcement-shared-cleanup-four.log": "bc841a7dcf40b5187c0250929d213badf124a87ad2e5dd35f2379f9a49c08f8e",
+    ".review-2377/enforcement-shared-receipt-applied-control.log": "a1eb79e6b44f8ca135a950ea6a9a2fed94311f622af2006b3360a4b919779c60",
+    ".review-2377/enforcement-shared-cleanup-undescribable.log": "d14355b7bb0b0d18bae0cdaa6bd4b54813e185fb427769a3801660911a4489f7",
+    ".review-2377/shared-cleanup-total-format-red.log": "183005112883a165b6119c429fd32de000743118775938c63fa09f875f603f43",
+    ".review-2377/shared-cleanup-total-format-final-green.log": "c8843cf6642d4a89f74da64be4cdb450fc0cf70239a18cbfa4aa408a91c392c6",
+    ".review-2377/shared-cleanup-total-format-reload-controls.log": "f6d04a84327fe0b4341fe12a4d400aea13a85940a5e24926a3d2592b400fe590",
+    ".review-2377/shared-cleanup-export-final-green.log": "44f0c14f052ab0f9602f5dc82abb9e929edf1509198b215b586008496926decb",
+    ".review-2377/shared-cleanup-export-final-scoped-lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    ".review-2377/enforcement-shared-cleanup-total-format-green.log": "f0d5ae61c8fe990a64f6232c8282f06644b1709797c65e5c821b331cfd3e7009",
+    ".review-2377/enforcement-shared-cleanup-total-format-hostile.log": "f8fa6603204005410ebc8f7e010bbf406956d463d72592c7fc97d5a2dbb1036a",
+    ".review-2377/enforcement-shared-cleanup-export-final-green.log": "8d76756fed57fae42d6dcc632e9fbe05d54736fc6401b53dae0381a6b416e781"
+  },
+  "globalLintChanged": {
+    "command": "pnpm lint:changed",
+    "exitCode": 0,
+    "log": ".review-2377/shared-reload-final-lint-changed.log"
+  },
+  "supportingFileAmendments": {
+    "packages/db/tests/oracle-config.ts": {
+      "duringReceivingRunsSha256": "dfec855bd6dda63e0e940e8657bfe4f4b9a96ee14f2d49beaf70f72f8acb24eb",
+      "capturedFinalSha256": "3741c67abbe4412209f3cbd15b07d60f6573ff1cad16a6a72b00525f90a42f26",
+      "scope": "central replay registry supporting changes; outside reload semantic approval"
+    }
+  },
+  "rxdbChromiumReceiving": {
+    "log": ".review-2377/shared-reload-rxdb-final-browser.log",
+    "executedBy": "runtime_sync",
+    "testsPassed": 1,
+    "sharedHistoriesCompared": 24,
+    "durationSeconds": 3.12,
+    "pageErrors": [],
+    "allSharedComparisonsPassed": true,
+    "missingBoth": {
+      "raw": {
+        "before": [],
+        "beforeStatus": "loading",
+        "settledBeforeSource": false,
+        "settledAfterSource": false,
+        "submittedRows": 0,
+        "submittedCommits": 0,
+        "sourceReadyCalls": 0,
+        "acceptedCommits": 0,
+        "atFulfillment": [],
+        "mutationReleasedBeforeFulfillment": false,
+        "mutationSettledBeforeFulfillment": false,
+        "final": []
+      },
+      "violations": [
+        "load pending after complete source application",
+        "complete source submission not reached"
+      ]
+    }
+  },
+  "receiverControls": {
+    "log": ".review-2377/reload-provider-barrier-controls.log",
+    "executedBy": "registry_integration; independently source-reviewed by oracle_enforcement",
+    "pairedControlsPassed": 6,
+    "durationSeconds": 1.99,
+    "paths": [
+      "convex-javascript",
+      "convex-react",
+      "convex-wrapped",
+      "rxdb",
+      "trailbase-sdk",
+      "local-storage"
+    ],
+    "classification": "Clean complete empty provider passes; actual adapter callbacks commit+markReady suppressed returns raw pending and shared semantic violations"
+  },
+  "scratchReceivingSources": {
+    ".review-2377/shared-reload-rxdb-final-browser.html": "7c807c4cc11b36964066a4d789be7642397ded2cd248082af05f139aaedf22c0",
+    ".review-2377/shared-reload-rxdb-final-browser.ts": "411245a4f8be8f8a1a7e941f9ff59bda437280c7b154b2c0801111baaaeb6f48",
+    ".review-2377/shared-reload-rxdb-final-browser.test.ts": "59dad1deae198a3e23277b7242c916a6bfabed300e6f81ed805e110a568b3dfd",
+    ".review-2377/shared-reload-rxdb-final-browser.vitest.config.ts": "4c8e28d6ba440b2c09c56eebd696b16e96436a95ed7532df97fa34df22aec501",
+    ".review-2377/reload-provider-barrier-controls.test.ts": "87525e3cea1c6edfd9885c7e966b8f824b2a1c9de205f3da8b55751b1ab86af0",
+    ".review-2377/reload-provider-barrier.vitest.config.ts": "28164082058de4594c88a0921c21b901615f31c5d60d291710ebb0226903acaa"
+  },
+  "reportSha256": "f0c9afcc8dc766ca5c5714c898a693b0b5307ac6cb4b515ae459e0407ef658b3",
+  "independentReviewApprovals": [
+    {
+      "reviewer": "oracle_diff_enforcement",
+      "verdict": "APPROVED",
+      "scope": "Shared reload driver/model/suite and ordinary recorder controls; provider-specific final barriers retain separate receiving evidence",
+      "files": {
+        "packages/db-adapter-conformance/tests/eager-reload-driver.ts": "3e178cd5823a690646f98301701fb84b4eee8fb6cbd7cde0f8b2a70ba6e96b0e",
+        "packages/db-adapter-conformance/tests/eager-reload-oracle.ts": "f77417e0111a8db3716208061dce81cdc53dff63096b12bde71ba79bc1fda3cb",
+        "packages/db-adapter-conformance/tests/eager-reload-oracle-suite.ts": "fea78064cacbb60db6e8668fb04350cd9723618e64b125f3dd0aff6c1dc4cf6c",
+        "packages/db-adapter-conformance/tests/eager-reload-projection.test.ts": "ca4e5e61f34266ce2933801c074d09e9aae87242a8bf3d2f78cb5dc1b2563355"
+      }
+    },
+    {
+      "reviewer": "oracle_diff_enforcement",
+      "verdict": "PARTIALLY SUPERSEDED",
+      "scope": "Cleanup helper failure fidelity, declared applied/rejected initial-receipt outcome model, and comparison ordering. No new production receipt mutation claim.",
+      "files": {
+        "packages/db/tests/oracle-cleanup.ts": "62e00759270c5376ffadcde8eefb8a68763e5c79ca66729268aad9eea3802e61",
+        "packages/db/tests/oracle-cleanup.test.ts": "f60d1977d555723a96fe35f0ce4fc31979ac2f7b8b4286ae3653eb85243a5ac5",
+        "packages/powersync-direct-collection/tests/initial-receipt-oracle.ts": "c75895abae5fe1e8485b8bcae83e25681cfddcce8f8883ba3b1b281cec79b4c1",
+        "packages/powersync-direct-collection/tests/initial-receipt-oracle-suite.ts": "5dad5ea2a99124612e3399c5b0e71ecb350c151ef275b7ae521238a85876489e"
+      },
+      "actualHelperTests": {
+        "passed": 3,
+        "durationSeconds": 0.483,
+        "log": ".review-2377/enforcement-shared-cleanup-four.log"
+      },
+      "appliedReceiptCalibration": {
+        "classification": "model/checker calibration; not production-driver fault",
+        "history": "held receipt with empty source",
+        "expectedModel": "initialReceiptModel(history, applied)",
+        "otherwiseMatchingRaw": {
+          "receiptRejected": false,
+          "receiptSettled": "absent"
+        },
+        "violationsWithoutSettlement": [
+          "receiptSettled"
+        ],
+        "violationsWithReceiptSettledTrue": [],
+        "log": ".review-2377/enforcement-shared-receipt-applied-control.log"
+      },
+      "supersession": "Cleanup helper failure-fidelity approval at62e retracted after arbitrary unprintable reason erased completedraw; initial-receipt model/suite c758/5dad remain approved. Final helper/test approval is recorded separately."
+    },
+    {
+      "reviewer": "oracle_diff_enforcement",
+      "verdict": "APPROVED",
+      "scope": "Exception-safe secondary cleanup diagnostic formatting with cycle/depth protection and ordinary AggregateError expansion; final one-argument export extraction exact-source reviewed. Normalprovider/reload/receipt evidence may carry across this formatting-only amendment with final dependency hash. Distinct receiving retainer/caller adoption remains separately owned.",
+      "files": {
+        "packages/db/tests/oracle-cleanup.ts": "15317e3871120de3840160b070d902e765989fe070112fbbf3d14d87b84bf6bc",
+        "packages/db/tests/oracle-cleanup.test.ts": "3b9d62134f58bea524f1d0bba1ed89aa2a54ad606f3c0846d0f02a8a598cfb22"
+      },
+      "independentTests": {
+        "passed": 11,
+        "log": ".review-2377/enforcement-shared-cleanup-export-final-green.log"
+      },
+      "independentHostileControl": {
+        "log": ".review-2377/enforcement-shared-cleanup-total-format-hostile.log",
+        "observed": "wrongraw and prior diagnostics retained, null-prototype/cyclic aggregate diagnostics separate, later release true"
+      },
+      "approvedIntermediateHelperSha256": "23497e2b680f5a7be09d51944cd75cceb745aa9d57ac948079c5e2dedde3490b"
+    }
+  ],
+  "supportingFingerprintsStatus": "Informational captures; central oracle-config registration work can continue. Final root manifest supersedes supporting registry fingerprints.",
+  "semanticSnapshotAtPriorApproval": {
+    "packages/db-adapter-conformance/tests/eager-reload-driver.ts": "3e178cd5823a690646f98301701fb84b4eee8fb6cbd7cde0f8b2a70ba6e96b0e",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle.ts": "f77417e0111a8db3716208061dce81cdc53dff63096b12bde71ba79bc1fda3cb",
+    "packages/db-adapter-conformance/tests/eager-reload-oracle-suite.ts": "fea78064cacbb60db6e8668fb04350cd9723618e64b125f3dd0aff6c1dc4cf6c",
+    "packages/db-adapter-conformance/tests/eager-reload-projection.test.ts": "ca4e5e61f34266ce2933801c074d09e9aae87242a8bf3d2f78cb5dc1b2563355",
+    "packages/db/tests/oracle-cleanup.ts": "62e00759270c5376ffadcde8eefb8a68763e5c79ca66729268aad9eea3802e61",
+    "packages/db/tests/oracle-cleanup.test.ts": "f60d1977d555723a96fe35f0ce4fc31979ac2f7b8b4286ae3653eb85243a5ac5",
+    "packages/powersync-direct-collection/tests/initial-receipt-oracle.ts": "c75895abae5fe1e8485b8bcae83e25681cfddcce8f8883ba3b1b281cec79b4c1",
+    "packages/powersync-direct-collection/tests/initial-receipt-oracle-suite.ts": "5dad5ea2a99124612e3399c5b0e71ecb350c151ef275b7ae521238a85876489e"
+  },
+  "cleanupDiagnosticFormattingRepair": {
+    "authority": "ORC-010 failure fidelity and cleanup; completed raw product observation must survive secondary diagnostic formatting and every teardown must be attempted",
+    "oldHelperSha256": "62e00759270c5376ffadcde8eefb8a68763e5c79ca66729268aad9eea3802e61",
+    "red": {
+      "failed": 7,
+      "passed": 4,
+      "log": ".review-2377/shared-cleanup-total-format-red.log",
+      "classification": "recorder failures or diagnostic-limit assertion failures; not product semantic mutant kills"
+    },
+    "green": {
+      "helperTestsPassed": 11,
+      "log": ".review-2377/shared-cleanup-export-final-green.log",
+      "reloadRecorderTestsPassed": 29,
+      "reloadLog": ".review-2377/shared-cleanup-total-format-reload-controls.log"
+    },
+    "controls": [
+      "null-prototype thrown object",
+      "throwing primitive conversion proxy",
+      "throwing prototype lookup proxy",
+      "throwing AggregateError.errors getter",
+      "self-containing AggregateError",
+      "40-deep aggregate",
+      "ordinary nested aggregate",
+      "aggregate with unprintable child"
+    ],
+    "perControlObservations": [
+      "same wrong raw rows retained",
+      "prior diagnostics retained without mutating original",
+      "later cleanup error separate",
+      "all three teardown calls executed"
+    ],
+    "formatterExport": "describeOracleCleanupError(reason: unknown): string",
+    "nestingDepthLimit": 32,
+    "limits": "Test machinery only; no product/API/model/history/budget changes. Diagnostic nesting beyond32 is summarized. Receiving custom retainers and nested cleanup loops require their own adoption/ordinary controls; oracle_contract owns bounded caller audit.",
+    "finalHelperSha256": "15317e3871120de3840160b070d902e765989fe070112fbbf3d14d87b84bf6bc",
+    "finalTestsSha256": "3b9d62134f58bea524f1d0bba1ed89aa2a54ad606f3c0846d0f02a8a598cfb22"
+  }
+}

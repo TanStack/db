@@ -29,10 +29,10 @@ export type HandlerEnding =
     }
   | { outcome: `reject-before-write` | `reject-after-write`; returned: `void` }
 export type MutationConfirmationHistory = HandlerEnding & {
-  adapter: `query` | `electric`
+  adapter: `query` | `electric` | `powersync-direct`
   operation: MutationOperation
   peer: boolean
-  confirmation: `none` | `refetch` | `write` | `txid`
+  confirmation: `none` | `refetch` | `write` | `txid` | `checkpoint`
   // A collaborator can commit its write and reject before returning to the
   // handler. Its authored outcome then makes confirmation unreachable. The
   // default preserves the original histories: their rejection follows ack.
@@ -193,7 +193,10 @@ export function expectedMutationConfirmation(
       : requested
         ? `pending`
         : `not-requested`,
-    providerRequests: 0,
+    // Direct PowerSync confirmation makes one explicit checkpoint POST.
+    // Query and Electric's original refresh-work observations remain zero.
+    providerRequests:
+      history.adapter === `powersync-direct` && requested ? 1 : 0,
     fetches:
       history.adapter === `query`
         ? 1 +

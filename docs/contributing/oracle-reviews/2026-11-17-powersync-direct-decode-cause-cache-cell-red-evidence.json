@@ -1,0 +1,100 @@
+{
+  "at": "2026-11-18T02:32:14.444605+00:00",
+  "stage": "Exact input-cell RED gate before production change; named generated units may shrink across cells, so each listed cell has its own retained authored history, actual SDK raw observation and unchanged shared judgment. canonical source unchanged.",
+  "source": {
+    "packages/powersync-direct-collection/src/index.ts": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1",
+    "packages/powersync-direct-collection/src/subsets.ts": "20f8ed310b98099604fd05ae32a269b6554b87b937e31300f8dca3ac3a019da3"
+  },
+  "hosts": {
+    "node": {
+      "observations": "docs/contributing/oracle-reviews/2026-11-17-powersync-direct-decode-cause-cache-node-red-observations.json",
+      "sha256": "c0d37d6028ff6fb50f4281507e06a5178ed1658acffad3591c7e578389d87dd4",
+      "semanticRedCells": [
+        "eager:cold-initial-throw-null-prototype",
+        "eager:cold-initial-throw-throwing-conversion",
+        "eager:cold-initial-throw-throwing-prototype",
+        "eager:cold-live-throw-null-prototype",
+        "eager:cold-live-throw-throwing-conversion",
+        "eager:cold-live-throw-throwing-prototype",
+        "eager:cached-initial-throw-null-prototype",
+        "eager:cached-initial-throw-throwing-conversion",
+        "eager:cached-initial-throw-throwing-prototype",
+        "on-demand:cold-initial-throw-null-prototype",
+        "on-demand:cold-initial-throw-throwing-conversion",
+        "on-demand:cold-initial-throw-throwing-prototype",
+        "on-demand:cold-live-throw-null-prototype",
+        "on-demand:cold-live-throw-throwing-conversion",
+        "on-demand:cold-live-throw-throwing-prototype",
+        "on-demand:cached-initial-changed-id",
+        "on-demand:cached-initial-throw-error",
+        "on-demand:cached-initial-throw-null-prototype",
+        "on-demand:cached-initial-throw-throwing-conversion",
+        "on-demand:cached-initial-throw-throwing-prototype"
+      ],
+      "greenNeighbors": [
+        "eager:cached-initial-valid",
+        "eager:cached-initial-changed-id",
+        "eager:cached-initial-throw-error",
+        "on-demand:cached-initial-valid",
+        "eager:cold-initial-ordinary-valid",
+        "eager:cold-initial-ordinary-throw",
+        "eager:cold-initial-ordinary-changed-id",
+        "eager:cold-live-ordinary-valid",
+        "eager:cold-live-ordinary-throw",
+        "eager:cold-live-ordinary-changed-id",
+        "on-demand:cold-initial-ordinary-valid",
+        "on-demand:cold-initial-ordinary-throw",
+        "on-demand:cold-initial-ordinary-changed-id",
+        "on-demand:cold-live-ordinary-valid",
+        "on-demand:cold-live-ordinary-throw",
+        "on-demand:cold-live-ordinary-changed-id"
+      ],
+      "allDeclaredCellsReached": true
+    },
+    "chromium": {
+      "observations": "docs/contributing/oracle-reviews/2026-11-17-powersync-direct-decode-cause-cache-chromium-red-observations.json",
+      "sha256": "84e68f4da8200460d7be16784d8e4b3ba23495b3536ed84feaa426842b00761e",
+      "semanticRedCells": [
+        "eager:cold-initial-throw-null-prototype",
+        "eager:cold-initial-throw-throwing-conversion",
+        "eager:cold-initial-throw-throwing-prototype",
+        "eager:cold-live-throw-null-prototype",
+        "eager:cold-live-throw-throwing-conversion",
+        "eager:cold-live-throw-throwing-prototype",
+        "eager:cached-initial-throw-null-prototype",
+        "eager:cached-initial-throw-throwing-conversion",
+        "eager:cached-initial-throw-throwing-prototype",
+        "on-demand:cold-initial-throw-null-prototype",
+        "on-demand:cold-initial-throw-throwing-conversion",
+        "on-demand:cold-initial-throw-throwing-prototype",
+        "on-demand:cold-live-throw-null-prototype",
+        "on-demand:cold-live-throw-throwing-conversion",
+        "on-demand:cold-live-throw-throwing-prototype",
+        "on-demand:cached-initial-changed-id",
+        "on-demand:cached-initial-throw-error",
+        "on-demand:cached-initial-throw-null-prototype",
+        "on-demand:cached-initial-throw-throwing-conversion",
+        "on-demand:cached-initial-throw-throwing-prototype"
+      ],
+      "greenNeighbors": [
+        "eager:cached-initial-valid",
+        "eager:cached-initial-changed-id",
+        "eager:cached-initial-throw-error",
+        "on-demand:cached-initial-valid",
+        "eager:cold-initial-ordinary-valid",
+        "eager:cold-initial-ordinary-throw",
+        "eager:cold-initial-ordinary-changed-id",
+        "eager:cold-live-ordinary-valid",
+        "eager:cold-live-ordinary-throw",
+        "eager:cold-live-ordinary-changed-id",
+        "on-demand:cold-initial-ordinary-valid",
+        "on-demand:cold-initial-ordinary-throw",
+        "on-demand:cold-initial-ordinary-changed-id",
+        "on-demand:cold-live-ordinary-valid",
+        "on-demand:cold-live-ordinary-throw",
+        "on-demand:cold-live-ordinary-changed-id"
+      ],
+      "allDeclaredCellsReached": true
+    }
+  }
+}

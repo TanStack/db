@@ -21,7 +21,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
-    "test:oracles": "vitest run tests/lifecycle-oracle.property.test.ts tests/eager-live-source-conformance-oracle.property.test.ts tests/persisted-startup-conformance-oracle.property.test.ts",
+    "test:oracles": "vitest run --coverage.enabled=false tests/eager-live-source-conformance-oracle.property.test.ts tests/lifecycle-oracle.property.test.ts tests/mutation-events-sdk-oracle.property.test.ts tests/persisted-startup-conformance-oracle.property.test.ts tests/sdk-eager-gate-conformance-oracle.property.test.ts tests/sdk-eager-live-source-conformance-oracle.property.test.ts tests/sdk-eager-reload-conformance-oracle.property.test.ts tests/sdk-persisted-startup-conformance-oracle.property.test.ts",
     "test:e2e": "vitest --run --config vitest.e2e.config.ts"
   },
   "type": "module",
@@ -49,7 +49,6 @@
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.11.2",
     "debug": "^4.4.3",
     "trailbase": "^0.14.3"
   },

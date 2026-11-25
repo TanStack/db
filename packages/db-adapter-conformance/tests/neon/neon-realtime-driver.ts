@@ -54,6 +54,7 @@ class ControlledRawSubscription implements RawLiveQuerySubscription<NeonRow> {
   readonly listenerErrors: Array<unknown> = []
   unsubscribed = false
   unsubscribes = 0
+  readonly listenerResources: Array<{ name: string; releases: number }> = []
   private state: LiveQueryState = { status: `connecting`, error: undefined }
   private readonly updates = new Set<
     (update: RawLiveQueryUpdate<NeonRow>) => void
@@ -69,12 +70,22 @@ class ControlledRawSubscription implements RawLiveQuerySubscription<NeonRow> {
 
   onUpdate = (listener: (update: RawLiveQueryUpdate<NeonRow>) => void) => {
     this.updates.add(listener)
-    return () => this.updates.delete(listener)
+    const resource = { name: `update listener`, releases: 0 }
+    this.listenerResources.push(resource)
+    return () => {
+      resource.releases++
+      this.updates.delete(listener)
+    }
   }
 
   onStateChange = (listener: (state: LiveQueryState) => void) => {
     this.states.add(listener)
-    return () => this.states.delete(listener)
+    const resource = { name: `state listener`, releases: 0 }
+    this.listenerResources.push(resource)
+    return () => {
+      resource.releases++
+      this.states.delete(listener)
+    }
   }
 
   // As the interface documents: a timeout rejects a wait that has no evidence.
@@ -170,6 +181,7 @@ function rawChange(change: ProviderChange): LiveQueryChange<NeonRow> {
 
 class NeonProvider implements ControlledProvider {
   readonly subscriptions: Array<ControlledRawSubscription> = []
+  private readonly committed = new Set<string>()
   private pendingRefresh:
     ((query: SealedLiveQuery<NeonRow>) => void) | undefined
 
@@ -203,11 +215,29 @@ class NeonProvider implements ControlledProvider {
 
   listenerErrors = () => this.subscriptions.flatMap((s) => s.listenerErrors)
   releases = () => this.subscriptions.map((s) => s.unsubscribes)
+  resources = () =>
+    this.subscriptions.flatMap((subscription, index) => [
+      {
+        name: `raw subscription`,
+        syncRun: index + 1,
+        releases: subscription.unsubscribes,
+      },
+      ...subscription.listenerResources.map((resource) => ({
+        ...resource,
+        syncRun: index + 1,
+      })),
+    ])
   deliverSnapshot = (rows: ReadonlyArray<ConformanceRow>) => {
     this.latest().setState({ status: `live`, error: undefined })
-    this.latest().deliver({ type: `rows`, rows: rows.map(rawRow) })
+    // A new baseline is read after the backend's earlier commits. The real
+    // client's publishReset applies this MVCC proof to its transaction tracker.
+    // Grant it only with the baseline, so a new run still waits before then.
+    this.latest().deliver({ type: `rows`, rows: rows.map(rawRow) }, [
+      ...this.committed,
+    ])
   }
-  deliverChanges = (changes: ReadonlyArray<ProviderChange>, txid: string) =>
+  deliverChanges = (changes: ReadonlyArray<ProviderChange>, txid: string) => {
+    this.committed.add(txid)
     this.latest().deliver(
       {
         type: `changes`,
@@ -216,6 +246,7 @@ class NeonProvider implements ControlledProvider {
       },
       [txid],
     )
+  }
   // Neon's error state carries a code and a retry flag. They are added to
   // the oracle's failure value itself, so its identity is kept.
   fail = (error: Error) =>

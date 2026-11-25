@@ -1,0 +1,16 @@
+{
+  "packages/db-adapter-conformance/src/eager-live-source-oracle.ts": "4cf5d868ee8ec99c678b51b30c456653ebaf58e498f9735ccd2ba79c5390626d",
+  "packages/db-adapter-conformance/tests/eager-live-source-property-oracle.ts": "7ee215071e06d4181cb81034c0cbbcdcff30d154715a4308f71c9971f410ea57",
+  "packages/db-adapter-conformance/tests/eager-reload-driver.ts": "c8b75b6d43e270fd63ded495519d3ce7864dd7095c09d61dfe70b9a7138e2c55",
+  "packages/db-adapter-conformance/tests/eager-reload-oracle-suite.ts": "99d9a13aaa64943c288c4022bfe9d66951c8c5ab467475b47b6fde66fdcf62ab",
+  "packages/db-adapter-conformance/tests/eager-reload-oracle.ts": "9fb47eba5844365189bba85a3fbd6d73c94afdb32af0de6c6c3f0b9bdf47bb34",
+  "packages/db-adapter-conformance/tests/neon/neon-realtime-driver.ts": "f7128af7b7d0a305213072c481034454aeb7a331c1ae6888a66b17ebacaab25f",
+  "packages/db-adapter-conformance/tests/neon/neon-receiving.ts": "7008b4f94d9be3c14f2109a90f669ab762aaec379dbb5eaac50d8dea6ce488c9",
+  "packages/db-adapter-conformance/tests/neon/neon-reload-driver.ts": "c62ae2ac5d7ed281b1ae22511d50953e6bac5a32a1b788abac4206049b0b15fc",
+  "packages/db-adapter-conformance/tests/neon/neon-sdk-driver.ts": "131a7aa89b552729fd4c0caa0128bd262116fe6036a34c66c6361cf4376532b8",
+  "packages/db-adapter-conformance/tests/neon/vendor/collection-options.ts": "48a2da00349bdf13d705d644791740a1a23fcceb89d5017e5d8c3959447d841d",
+  "packages/db-adapter-conformance/tests/neon-realtime-oracle.property.test.ts": "354893636ff01f343d5711a4f79024056a7293284f3b71ccbafb4f7f18a74a62",
+  "packages/db-adapter-conformance/tests/neon-receiving-oracle.browser.test.ts": "a9e1af724e9b125e466f74d31a1d9ae04a0220e2fea0075c73985a847cce1ac5",
+  "packages/db-adapter-conformance/tests/neon-reload-oracle.property.test.ts": "4db8542438d0e990ab89eaee3d8877ab3376c5252022febeac56b7a4060ebd74",
+  "packages/db-adapter-conformance/tests/neon-sdk-oracle.property.test.ts": "b0e4387567ec235419716a99853773583a8383dcb6026fd779ccc9150c2dd1c7"
+}

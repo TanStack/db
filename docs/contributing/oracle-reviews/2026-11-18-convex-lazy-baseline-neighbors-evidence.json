@@ -1,0 +1,40 @@
+{
+  "purpose": "Controlled neighboring laws before second Convex production repair; no production RED or closure claim",
+  "command": "pnpm exec vitest run tests/lazy-paging-baseline-oracle.property.test.ts --coverage.enabled=false",
+  "cwd": "packages/convex-db-collection",
+  "outcome": "51 passed",
+  "properties": [
+    "convex.lazy-baseline",
+    "convex.lazy-deferred-baseline",
+    "convex.lazy-retained-omission"
+  ],
+  "fixed_seed": 20261118,
+  "random_seeds": [],
+  "generated_runs_per_campaign": 12,
+  "baselines_constructed_per_campaign": 8,
+  "deferred_constructed_per_campaign": 1,
+  "retained_constructed_per_campaign": 1,
+  "reach_controls": "Missing reach observations are rejected for each property; each generated output is checked",
+  "semantic_controls": [
+    "invented applied row",
+    "lost reinserted key after deferred handoff",
+    "stale omitted high key in contracted range callback"
+  ],
+  "limits": [
+    "controlled SDK shapes",
+    "real core but no SQLite in these three properties",
+    "unique numeric ranks",
+    "successful nonreentrant deferred acceptance",
+    "unknown saved suffix and concurrent hydration separately owned"
+  ],
+  "sha256": {
+    "packages/convex-db-collection/tests/lazy-paging-baseline-oracle.property.test.ts": "6c225af0aa9f09cabce1f915c37a861c6322a2d5fa894ae36dc05dd2727e061a",
+    "packages/convex-db-collection/tests/lazy-paging-driver.ts": "2ab9dfdb2173f7136347a287a900066fd6619a0226605306e6ff1cdbad69b7cc",
+    "packages/convex-db-collection/tests/lazy-paging-deferred-acceptance.ts": "d7c89a887dcdb1dcec6e4315f866465e2408c249251a2b63e8e3951114cfb409",
+    "packages/convex-db-collection/src/options.ts": "3f9a9a2f16a613897dab4eea4dedc72b66515bd38f523c9eae2659fae7d2b317",
+    "packages/convex-db-collection/src/pagination.ts": "0308668d07db701d1f7f891d001a4aca2798973ea29bf1d4b00931eaa0e05f1d",
+    "packages/convex-db-collection/tests/lazy-paging-model-oracle.ts": "9e4cd7d8bd5ba580e3e549eba89deb0c4b9dc8795707743df26b7e05c78040cd",
+    "packages/convex-db-collection/tests/lazy-paging-version-model-oracle.ts": "5aee0ba04f556d312e25f03c6077949d47daf6d0e4eae6cd3dad0a9fe9ce86a0",
+    ".review-2377/lazy-baseline-neighbors-first-attempt.log": "9609a8e6ce1e3533e3ed55dcb3cca167249bba63fc587f3d42d2576e1d6f59f2"
+  }
+}

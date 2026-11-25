@@ -1,9 +1,27 @@
 /** Vitest controls a real Chromium page; no browser premise is simulated. */
-import { resolve } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { createServer } from 'vite'
 import { chromium } from '@playwright/test'
-import { withOracleCleanup } from '../../db/tests/oracle-cleanup'
+import {
+  retainOracleCleanupObservation,
+  withOracleCleanup,
+} from '../../db/tests/oracle-cleanup'
 import type { PluginOption } from 'vite'
+import type { Page } from '@playwright/test'
+
+function assertBrowserStartup(errors: ReadonlyArray<string>) {
+  if (!errors.length) return
+  const failures = errors.map((message) => new Error(message))
+  throw new AggregateError(
+    failures,
+    `Browser startup failed: ${errors.join(`; `)}`,
+    {
+      cause: failures[0],
+    },
+  )
+}
 
 export async function startAdapterChromium({
   entry = `/packages/browser-db-sqlite-persistence/e2e/trailbase-lifecycle.html`,
@@ -12,51 +30,59 @@ export async function startAdapterChromium({
   plugins = [] as Array<PluginOption>,
 } = {}) {
   const root = resolve(import.meta.dirname, `../../..`)
-  const server = await createServer({
-    configFile: resolve(
-      root,
-      `packages/browser-db-sqlite-persistence/vite.opfs.config.ts`,
-    ),
-    root,
-    plugins: [
-      ...plugins,
-      {
-        name: `receiving-module-isolation`,
-        configResolved(config) {
-          // Vite's file-config merge drops inline nulls. Set this after that
-          // merge so worktree edits cannot reload an active receiving page.
-          config.server.watch = null
-        },
-      },
-    ],
-    // Discover only this receiving page's dependencies, not unrelated HTML
-    // projects elsewhere in the repository.
-    optimizeDeps: {
-      entries: [
-        entry.startsWith(`/@fs/`) ? entry.slice(4) : resolve(root, `.${entry}`),
-      ],
-    },
-    resolve: {
-      alias: {
-        '@tanstack/query-core': resolve(
-          root,
-          `packages/query-db-collection/node_modules/@tanstack/query-core`,
-        ),
-      },
-    },
-    server: {
-      host: `127.0.0.1`,
-      port: 0,
-      hmr: false,
-      fs: { allow: [root, ...allow] },
-      headers: {
-        'Cross-Origin-Opener-Policy': `same-origin`,
-        'Cross-Origin-Embedder-Policy': `require-corp`,
-      },
-    },
-  })
+  // A cached optimizer graph from another entry can discover dependencies only
+  // after navigation and request a reload. Histories disable reloads, so each
+  // host must build its own entry's graph before it starts recording.
+  const cacheDir = await mkdtemp(join(tmpdir(), `tanstack-adapter-chromium-`))
+  let server: Awaited<ReturnType<typeof createServer>> | undefined
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
   try {
+    server = await createServer({
+      cacheDir,
+      configFile: resolve(
+        root,
+        `packages/browser-db-sqlite-persistence/vite.opfs.config.ts`,
+      ),
+      root,
+      plugins: [
+        ...plugins,
+        {
+          name: `receiving-module-isolation`,
+          configResolved(config) {
+            // Vite's file-config merge drops inline nulls. Set this after that
+            // merge so worktree edits cannot reload an active receiving page.
+            config.server.watch = null
+          },
+        },
+      ],
+      // Discover only this receiving page's dependencies, not unrelated HTML
+      // projects elsewhere in the repository.
+      optimizeDeps: {
+        entries: [
+          entry.startsWith(`/@fs/`)
+            ? entry.slice(4)
+            : resolve(root, `.${entry}`),
+        ],
+      },
+      resolve: {
+        alias: {
+          '@tanstack/query-core': resolve(
+            root,
+            `packages/query-db-collection/node_modules/@tanstack/query-core`,
+          ),
+        },
+      },
+      server: {
+        host: `127.0.0.1`,
+        port: 0,
+        hmr: false,
+        fs: { allow: [root, ...allow] },
+        headers: {
+          'Cross-Origin-Opener-Policy': `same-origin`,
+          'Cross-Origin-Embedder-Policy': `require-corp`,
+        },
+      },
+    })
     await server.listen()
     const channel =
       process.env.PLAYWRIGHT_CHANNEL ?? (process.env.CI ? undefined : `chrome`)
@@ -72,28 +98,49 @@ export async function startAdapterChromium({
     if (!address || typeof address === `string`) throw new Error(`No Vite port`)
     await page.goto(`http://127.0.0.1:${address.port}${entry}`)
     await page.waitForFunction((name) => name in window, ready)
-    if (errors.length) {
-      const failures = errors.map((message) => new Error(message))
-      throw new AggregateError(
-        failures,
-        `Browser startup failed: ${errors.join(`; `)}`,
-        {
-          cause: failures[0],
-        },
-      )
-    }
+    assertBrowserStartup(errors)
     return {
       page,
       errors,
-      watchedPaths: () => server.watcher.getWatched(),
+      watchedPaths: () => server!.watcher.getWatched(),
+      async captureFreshHistory<
+        T extends { cleanupErrors?: ReadonlyArray<string> },
+      >(record: (page: Page) => Promise<T>) {
+        // Default SDK SharedWorkers can outlive database.close(). Independent
+        // histories must release their document, including after setup fails.
+        const historyContext = await browser!.newContext()
+        const historyHost = { errors: [] as Array<string> }
+        return captureBrowserHistory(historyHost, () =>
+          retainOracleCleanupObservation(async () => {
+            const freshPage = await historyContext.newPage()
+            freshPage.on(`pageerror`, (error) =>
+              historyHost.errors.push(error.message),
+            )
+            await freshPage.goto(page.url())
+            await freshPage.waitForFunction((name) => name in window, ready)
+            assertBrowserStartup(historyHost.errors)
+            return record(freshPage)
+          }, [() => historyContext.close()]),
+        )
+      },
       async close() {
-        await withOracleCleanup(() => browser!.close(), [() => server.close()])
+        await withOracleCleanup(
+          () => browser!.close(),
+          [
+            () => server!.close(),
+            () => rm(cacheDir, { recursive: true, force: true }),
+          ],
+        )
       },
     }
   } catch (error) {
     return withOracleCleanup(() => {
       throw error
-    }, [() => browser?.close(), () => server.close()])
+    }, [
+      () => browser?.close(),
+      () => server?.close(),
+      () => rm(cacheDir, { recursive: true, force: true }),
+    ])
   }
 }
 

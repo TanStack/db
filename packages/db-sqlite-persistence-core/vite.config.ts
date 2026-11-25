@@ -8,6 +8,7 @@ const config = defineConfig({
     include: [`tests/**/*.test.ts`],
     exclude: [`tests/sqlite-core-adapter-oracle.test.ts`],
     environment: `jsdom`,
+    setupFiles: [`./tests/node-web-locks-setup.ts`],
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
       enabled: true,

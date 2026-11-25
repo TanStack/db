@@ -8,6 +8,41 @@ lifecycle code execute unchanged.
 An independent Map models rows; explicit gates control subscribe/list settlement.
 The same interpreter runs a fixed corpus and generated histories.
 
+## Mutation event round-trip
+
+`mutation-events-sdk-oracle.ts` owns the built-in mutation confirmation law.
+The shared model requires both backend success and a fresh same-key event in the
+request's sync run. The event must follow handler entry, so an older event that
+starts a handler through a public change callback supplies no confirmation.
+The handler settles without waiting for the applied receipt its optimistic
+state holds. The public guide and maintainer decision of 2026-11-24 (N11)
+authorize prompt rejection once the HTTP response is available and stream
+completion makes missing confirmation impossible. This also permits refusal
+at handler entry when its run has already stopped.
+
+The installed SDK receives real controlled HTTP responses and complete SSE
+frames on Node and Chromium. The same independent two-obligation model and
+comparison observe public rows, transaction and handler settlement, HTTP
+consumption, event acceptance, source health, subscription count, replacement
+readiness, and released confirmation timers. Twenty-seven required states have
+five generated constructions each; 60-history fixed-seed and fresh campaigns
+retain seed 2377 and all prior fixed histories. Dimensions cover CRUD,
+eager/on-demand, either fact order, previous same-key events and clock identity,
+terminal EOF/error before entry or during confirmation, buffered EOF, explicit
+cleanup/restart while HTTP is held, and accepted proof across 300 seconds.
+Three states start CRUD through a public same-key change callback and compare
+before a fresh event can rescue an incorrect confirmation.
+
+Graceful EOF drains buffered events before a missing-event rejection. Accepted
+proof survives source completion, cleanup/restart and delayed HTTP. A retired
+request cannot adopt replacement events. A healthy source that never confirms
+retains its ordinary 120-second deadline. The production driver records prompt
+cuts before invoking captured timeout callbacks; it advances the clock and
+invokes any actual pruning callback without requiring a pruning cache to exist.
+These finite histories exclude concurrent handlers, a live remote service,
+persistence, arbitrary identifier allocation and in-flight HTTP cancellation or
+backend rollback guarantees.
+
 ## Laws and scope
 
 - Published inserts, updates and deletes agree with the model after each event.

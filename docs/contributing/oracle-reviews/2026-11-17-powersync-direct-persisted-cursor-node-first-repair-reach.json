@@ -1,0 +1,31 @@
+{
+  "host": "node-sqlite",
+  "passed": 115,
+  "failed": 0,
+  "calibrationsPassed": 29,
+  "campaignUnits": {
+    "fixed seed 2377": 26,
+    "random seed": 26
+  },
+  "normalCampaignReach": {
+    "fixed seed 2377": {
+      "changed cursor reopened offline": 36,
+      "confirmed cursor checkpoint after reopen": 28,
+      "same cursor reopened offline": 13,
+      "saved cursor applied": 49,
+      "saved cursor rejected after eviction": 17
+    },
+    "random seed": {
+      "changed cursor reopened offline": 38,
+      "confirmed cursor checkpoint after reopen": 28,
+      "same cursor reopened offline": 11,
+      "saved cursor applied": 49,
+      "saved cursor rejected after eviction": 16
+    }
+  },
+  "source": {
+    "index": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1",
+    "subsets": "b153929c2cd2bec9a3ca9645fd363b41bbf10a9acf357ce6b277b6bb0c591505"
+  },
+  "log": ".review-2377/direct-cursor-node-v4-first-repair-witness.log"
+}

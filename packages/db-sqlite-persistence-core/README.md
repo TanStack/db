@@ -280,6 +280,13 @@ snapshot. `includeRows: false` requests the same certification data without
 materializing rows; `requiredIndexSignatures` carries the indexes needed by a
 row-bearing snapshot.
 
+`rowKeys` optionally requests only the rows for those storage keys. The SQLite
+adapter returns that exact projection, including row metadata. Other adapters
+may return additional rows. Omit the option to read all rows; `includeRows:
+false` still reads none. This option changes row materialization only. Every
+resume metadata field and the key-set certification still describe the whole
+cache in the same atomic snapshot.
+
 The adapter's data methods require an explicit `PersistedStorageTarget`. Use
 `{ kind: 'eager', collectionId }` for an eager Collection, or
 `{ kind: 'managed', storageCollectionId, claimId }` for a claimed on-demand

@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import { eq } from '@tanstack/db'
 import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persistence-core/src'
@@ -21,6 +20,10 @@ import type {
   SourceEvent,
 } from '../../db-sqlite-persistence-core/tests/contracts/persisted-demand-coverage-receiving-contract'
 import type { QueryObservation } from '../../db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 /**
  * # Does a Svelte live query settle offline on a covered on-demand demand?

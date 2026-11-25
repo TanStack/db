@@ -1,0 +1,12 @@
+--- a/crates/assets/js/client/src/json.ts
++++ b/crates/assets/js/client/src/json.ts
+@@ -16,7 +16,8 @@
+     if (
+       typeof value === "number" &&
+       Number.isInteger(value) &&
+-      !Number.isSafeInteger(value)
++      !Number.isSafeInteger(value) &&
++      /^-?\d+$/.test(context.source)
+     ) {
+       // Ignore the value because it has already lost precision
+       return BigInt(context.source);

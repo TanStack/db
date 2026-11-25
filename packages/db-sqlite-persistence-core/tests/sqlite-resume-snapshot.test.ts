@@ -1,6 +1,5 @@
 // Ordinary tests for the SQLite resume-snapshot oracle: fixed scenarios whose
 // expectations are written out. The law owner is sqlite-resume-snapshot-oracle.test.ts.
-import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import { BasicIndex, createCollection, whenSyncAccepted } from '@tanstack/db'
 import {
@@ -19,6 +18,10 @@ import {
 } from './sqlite-resume-snapshot-support'
 import type { SQLiteDriver } from '../src'
 import type { Collection, SyncConfig } from '@tanstack/db'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
 
 describe(`SQLite resume snapshots`, () => {
   // Claim expiry is a real SQLite boundary, while source-session restart is a

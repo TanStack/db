@@ -22,6 +22,14 @@ it.each([`cleanup`, `error`, `ready`] as const)(
           return {}
         },
       },
+      utils: {
+        getMeta: () => ({
+          tableName: `rows`,
+          trackedTableName: `rows_tracking`,
+          metadataIsTracked: false,
+          serializeValue: (value: { id: string }) => value,
+        }),
+      },
     })
     collection.startSyncImmediate()
     const transaction = createTransaction({

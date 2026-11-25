@@ -6,11 +6,15 @@
  * module is ordinary: it registers no tests.
  */
 import assert from 'node:assert/strict'
-import { DatabaseSync } from 'node:sqlite'
 import { inspect } from 'node:util'
 import { IR } from '@tanstack/db'
 import { SQLiteCorePersistenceAdapter } from '../src'
 import type { SQLiteDriver } from '../src'
+
+// Node 22 omits node:sqlite from builtinModules, which Vitest uses to
+// externalize imports in jsdom. Load the real built-in directly.
+const { DatabaseSync } = process.getBuiltinModule(`node:sqlite`)
+type DatabaseSync = InstanceType<typeof DatabaseSync>
 
 export const BINDING_CAP = 999
 export type Kind = 'string' | 'number' | 'boolean' | 'date' | 'bigint'

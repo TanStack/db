@@ -1,0 +1,20 @@
+{
+  "stage": "PRE-EDIT frozen decoder unknown-cause and idle cached initial SDK receiving extension. Canonical production unchanged; initial smoke semantic RED in cold eager null-prototype and cached on-demand ordinary cause, cached valid neighbor GREEN. Complete Node/Chromium matrices running; no production repair authorized yet.",
+  "at": "2026-11-18T02:09:26.083549+00:00",
+  "files": {
+    "packages/db-adapter-conformance/tests/decode-refusal-oracle.ts": "89f8746e3724f4a81ab6f81c4fcf05d3ce175a41fd3883d98e929a4a9b70fc8c",
+    "packages/db-adapter-conformance/tests/decode-refusal-driver.ts": "3717acc577a7b3371cc9635ac57e8a76353e71954260188c93e4de6e3a91f76a",
+    "packages/db-adapter-conformance/tests/decode-refusal-oracle-suite.ts": "d918ceb6319320b285c48592d60e646e39072124e83cce0d5d9e6cf518e2260d",
+    "packages/powersync-direct-collection/tests/decode-refusal-driver.ts": "f921e71b9ad82679a2dc8384566e31b4c2113e5933095d734011a926196f1f55",
+    "packages/powersync-direct-collection/tests/decode-refusal-cleanup.test.ts": "86701483ae343dcf9ce9e3e6b983139ee50a74187c02e30701785d95941c8c08",
+    "packages/powersync-direct-collection/tests/direct-input-receiving.ts": "7c66fc31d840f38248b4605277d2b694586657776fe23f8e83ac5dc1292701f7",
+    "packages/powersync-direct-collection/tests/decode-refusal-oracle.property.test.ts": "91ceb118bcaab0c3a1acf9508c2fce96b2c669438ca46b5fb71a4ea7b5509890",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-decode-oracle.browser.test.ts": "dcd9bd11bdd049ff0ad1a1dc80afa29c83ffede472e2828111a7280a6bf44a68",
+    "packages/db/tests/oracle-cleanup.ts": "15317e3871120de3840160b070d902e765989fe070112fbbf3d14d87b84bf6bc"
+  },
+  "sources": {
+    "packages/powersync-direct-collection/src/index.ts": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1",
+    "packages/powersync-direct-collection/src/subsets.ts": "20f8ed310b98099604fd05ae32a269b6554b87b937e31300f8dca3ac3a019da3"
+  },
+  "inventory": ".review-2377/direct-decode-cause-cache-pre-edit.md"
+}

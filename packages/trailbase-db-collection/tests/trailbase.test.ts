@@ -307,8 +307,6 @@ describe(`TrailBase Integration`, () => {
 
       try {
         await collection.preload()
-        const timer = intervals.mock.results.at(-1)?.value
-        expect(timer).toBeDefined()
         const expectedRows = new Map([[1, row]])
         if (ending === `buffered-close`) {
           for (const id of [2, 3]) {
@@ -322,7 +320,9 @@ describe(`TrailBase Integration`, () => {
         await new Promise((resolve) => setTimeout(resolve, 0))
 
         expect(errors).toEqual([])
-        expect(clear).toHaveBeenCalledWith(timer)
+        for (const timer of intervals.mock.results) {
+          expect(clear).toHaveBeenCalledWith(timer.value)
+        }
         expect(stream.locked).toBe(false)
         expect(collection.status).toBe(`ready`)
         expect(stripState(collection.state)).toEqual(expectedRows)

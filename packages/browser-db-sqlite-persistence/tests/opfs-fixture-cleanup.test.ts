@@ -31,6 +31,35 @@ const receivers = [
     databaseName: `ps-query-direct-ownership.sqlite`,
     args: [directOwnershipHistories[0]!, `cleanup-calibration`],
   },
+  {
+    name: `Query select failures`,
+    entry: `query-cross-adapter-receiving.opfs.html`,
+    ready: `runQuerySelectFailures`,
+    databaseName: `query-select-0.sqlite`,
+    args: [
+      {
+        persisted: true,
+        index: 28,
+        failureStage: `select`,
+        fetches: [
+          { subset: 1, fails: `shared` },
+          { subset: 1, fails: `fresh` },
+          { subset: 2, fails: `fresh` },
+          { subset: 1, fails: `shared` },
+        ],
+      },
+    ],
+  },
+  {
+    name: `Direct persisted demand`,
+    entry: `powersync-direct-persisted-demand.opfs.html`,
+    ready: `runDirectPersistedDemand`,
+    databaseName: `ps-direct-demand-0.sqlite`,
+    args: [
+      { first: `never`, second: `held`, waitMs: 0 },
+      `cleanup-calibration`,
+    ],
+  },
   ...([`rxdb`, `powersync`] as const).map((adapter) => ({
     name: `${adapter} baseline lifecycle`,
     entry: `persisted-baseline-lifecycle.html`,
@@ -92,8 +121,91 @@ it.each(receivers)(
       expect(result.injected).toBe(1)
       expect(result.first).not.toHaveProperty(`failure`)
       expect(result.second).not.toHaveProperty(`failure`)
+      expect(result.first).not.toHaveProperty(`cleanupErrors.0`)
+      expect(result.second).not.toHaveProperty(`cleanupErrors.0`)
+      // Native handle-release timing is a teardown diagnostic. It must not
+      // change the product trace that the oracle checks for determinism.
+      if (ready === `runQuerySelectFailures`)
+        expect(result.first).toEqual(result.second)
       expect(host.errors).toEqual([])
     }, [() => host.close()])
+  },
+  120_000,
+)
+
+it.each([`completed`, `record`, `startup`] as const)(
+  `preserves the %s history result when context teardown fails`,
+  async (phase) => {
+    const host = await startAdapterChromium({
+      entry: `/packages/browser-db-sqlite-persistence/e2e/native-powersync-receiving.opfs.html`,
+      ready: `runNativePowerSyncBatchDecode`,
+    })
+    const browser = host.page.context().browser()!
+    const newContext = browser.newContext.bind(browser)
+    const primary = new Error(`injected ${phase} failure`)
+    const cleanup = new Error(`injected context close failure`)
+    let closed = 0
+    browser.newContext = async (options) => {
+      const context = await newContext(options)
+      const close = context.close.bind(context)
+      if (phase === `startup`) {
+        const newPage = context.newPage.bind(context)
+        context.newPage = async () => {
+          const page = await newPage()
+          page.goto = () => Promise.reject(primary)
+          return page
+        }
+      }
+      context.close = async () => {
+        if (phase === `completed`) {
+          const page = context.pages()[0]!
+          const event = page.waitForEvent(`pageerror`)
+          await page.evaluate(() => {
+            setTimeout(() => {
+              throw new Error(`context teardown page error`)
+            }, 0)
+          })
+          await event
+        }
+        await close()
+        closed++
+        throw cleanup
+      }
+      return context
+    }
+    await withOracleCleanup(async () => {
+      const operation = () =>
+        host.captureFreshHistory(() =>
+          phase === `record`
+            ? Promise.reject(primary)
+            : Promise.resolve({
+                marker: `completed mismatch`,
+                cleanupErrors: [],
+              }),
+        )
+      if (phase === `completed`) {
+        const result = await operation()
+        expect(result.marker).toBe(`completed mismatch`)
+        expect(result.cleanupErrors.join(` `)).toContain(cleanup.message)
+        expect(result.browserErrors).toContain(`context teardown page error`)
+      } else {
+        let failure: unknown
+        try {
+          await operation()
+        } catch (error) {
+          failure = error
+        }
+        expect(failure).toBeInstanceOf(AggregateError)
+        expect((failure as AggregateError).cause).toBe(primary)
+        expect((failure as AggregateError).errors).toEqual([primary, cleanup])
+      }
+      expect(closed).toBe(1)
+    }, [
+      () => {
+        browser.newContext = newContext
+      },
+      () => host.close(),
+    ])
   },
   120_000,
 )

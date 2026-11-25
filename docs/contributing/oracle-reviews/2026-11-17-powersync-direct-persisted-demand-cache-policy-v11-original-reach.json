@@ -1,0 +1,84 @@
+{
+  "recordedAt": "2026-11-18T00:45:13.930166+00:00",
+  "stage": "Completed v11 renewed pre-edit original-source gate. Empty-mapper cut depends only on actual mapping and neutral receipts, never load outcome. No production repair applied at this gate.",
+  "manifest": "docs/contributing/oracle-reviews/2026-11-17-powersync-direct-persisted-demand-test-snapshot-v11.json",
+  "manifestSha256": "275b56b2c26c99d2419481b07fbda0fc80b3b31d317ab50f5b3b4f17c6b719ce",
+  "productionSources": {
+    "packages/powersync-direct-collection/src/index.ts": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa",
+    "packages/powersync-direct-collection/src/subsets.ts": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+  },
+  "receivers": {
+    "node": {
+      "log": ".review-2377/direct-demand-v11-node-original-gate.log",
+      "exit": 1,
+      "tests": 48,
+      "passed": 13,
+      "semanticMismatches": 35,
+      "instrumentFailures": 0,
+      "seconds": 43.74,
+      "mismatchesByCheckpointAndLaw": {
+        "before successful provider checkpoint / persisted demand durability": 35
+      },
+      "reach": {
+        "covered offline": 9,
+        "uncovered offline": 22,
+        "covered but short of rows": 3,
+        "window covered offline": 8,
+        "window holds other rows": 3,
+        "tie-boundary load uncovered": 2,
+        "covered load waits for the deadline": 7,
+        "uncovered load fails with its upstream": 8,
+        "completed exact first load": 23,
+        "completed empty first load": 3,
+        "pending exact first load": 3,
+        "failed exact first load": 3,
+        "overlapping first load": 9,
+        "closed and reopened storage": 38,
+        "exact remote refresh omits a saved row": 4,
+        "other demand checkpoint after saved load": 4,
+        "coverage recorded twice": 2,
+        "coverage ended by a snapshot": 8,
+        "overlapping demands completed": 2,
+        "empty mapper after saved load": 2,
+        "saved demand failed after cache eviction": 2,
+        "durable observation crossed the public wait deadline": 1
+      }
+    },
+    "browser": {
+      "log": ".review-2377/direct-demand-v11-browser-original-gate.log",
+      "exit": 1,
+      "tests": 46,
+      "passed": 11,
+      "semanticMismatches": 35,
+      "instrumentFailures": 0,
+      "seconds": 60.28,
+      "mismatchesByCheckpointAndLaw": {
+        "before successful provider checkpoint / persisted demand durability": 35
+      },
+      "reach": {
+        "covered offline": 9,
+        "uncovered offline": 22,
+        "covered but short of rows": 3,
+        "window covered offline": 8,
+        "window holds other rows": 3,
+        "tie-boundary load uncovered": 2,
+        "covered load waits for the deadline": 7,
+        "uncovered load fails with its upstream": 8,
+        "completed exact first load": 23,
+        "completed empty first load": 3,
+        "pending exact first load": 3,
+        "failed exact first load": 3,
+        "overlapping first load": 9,
+        "closed and reopened storage": 38,
+        "exact remote refresh omits a saved row": 4,
+        "other demand checkpoint after saved load": 4,
+        "coverage recorded twice": 2,
+        "coverage ended by a snapshot": 8,
+        "overlapping demands completed": 2,
+        "empty mapper after saved load": 2,
+        "saved demand failed after cache eviction": 2,
+        "durable observation crossed the public wait deadline": 1
+      }
+    }
+  }
+}

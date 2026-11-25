@@ -10,36 +10,52 @@ export type PendingOperation = {
 }
 
 /**
- * Optimistic mutations have their optimistic state discarded once transactions have
- * been applied.
- * We need to ensure that an applied transaction has been observed by the sync diff trigger
- * before resolving the transaction application call.
- * This store allows registering a wait for a pending operation to have been observed.
+ * Native handlers fulfill after their own Collection stages the matching diff,
+ * so core can drop optimistic state with those synced rows. A captured run
+ * signal owns that confirmation and rejects it when the run ends.
  */
 export class PendingOperationStore {
-  private pendingOperations = new Map<PendingOperation, DeferredPromise<void>>()
+  private pendingOperations = new Map<
+    PendingOperation,
+    { deferred: DeferredPromise<void>; signal?: AbortSignal }
+  >()
 
   /**
    * Globally accessible PendingOperationStore
    */
   static GLOBAL = new PendingOperationStore()
 
-  /**
-   * @returns A promise which will resolve once the specified operation has been seen.
-   */
-  waitFor(operation: PendingOperation): Promise<void> {
+  /** Waits for the owning run's observation, or rejects when that run aborts. */
+  waitFor(operation: PendingOperation, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(signal.reason)
     const managedPromise = pDefer<void>()
-    this.pendingOperations.set(operation, managedPromise)
+    this.pendingOperations.set(operation, { deferred: managedPromise, signal })
+    if (signal) {
+      const abort = () => {
+        this.pendingOperations.delete(operation)
+        managedPromise.reject(signal.reason)
+      }
+      signal.addEventListener(`abort`, abort, { once: true })
+      const release = () => signal.removeEventListener(`abort`, abort)
+      void managedPromise.promise.then(release, release)
+    }
     return managedPromise.promise
   }
 
   /**
-   * Marks a set of operations as seen. This will resolve any pending promises.
+   * Confirms operations staged by the observing run. A native waiter must own
+   * that same signal; signal-less custom metadata keeps legacy confirmation.
    */
-  resolvePendingFor(operations: Array<PendingOperation>) {
+  resolvePendingFor(operations: Array<PendingOperation>, signal?: AbortSignal) {
     for (const operation of operations) {
-      for (const [pendingOp, deferred] of this.pendingOperations.entries()) {
+      for (const [
+        pendingOp,
+        { deferred, signal: ownerSignal },
+      ] of this.pendingOperations.entries()) {
         if (
+          // Native success belongs to the Collection that staged the operation.
+          // Signal-less custom metadata keeps its existing confirmation path.
+          (!ownerSignal || ownerSignal === signal) &&
           pendingOp.tableName == operation.tableName &&
           pendingOp.operation == operation.operation &&
           pendingOp.id == operation.id &&

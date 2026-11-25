@@ -1,0 +1,33 @@
+{
+  "stage": "v13 renewed neutral applied input ledger gate; exact32c503 helper has independently approved additive-only continue API7c66 for mapper after intentionally held application. Existing main paths never call continue. Actual storage operations/resolved adapters, exact SDK waits, source receipts and actual request revisions define input cut. Law, independent model and grammar unchanged. Original and canonical final gates renewed on both real hosts.",
+  "recordedAt": "2026-11-18T01:36:16.489046+00:00",
+  "files": {
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand-oracle.browser.test.ts": "67e3d2519f55a74b8359ad9c7d918e1072a3c4df4ba6cac5d740eb5bc24c6e9b",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand.opfs.html": "76cc563e5f028e2e83fba3cef935c99aa02f2e7ca0814d06854cbb2164c8e002",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-persisted-demand.opfs.ts": "f4d890f223f4cbf3e4a660eff43bd24d02803014109df7c4e7fa58ac90c69efc",
+    "packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts": "ac569ff5f1177e8ddace08e8298970c362f42b9f504828c345cd1a534add692c",
+    "packages/powersync-direct-collection/tests/persisted-demand-cleanup.test.ts": "f4fb3c47bfbc2322f4614c586b435866d4dbe39facd6dc1f1aa57074cc1a96ea",
+    "packages/powersync-direct-collection/tests/persisted-demand-conformance-oracle.test.ts": "85aeeb2608f9d44931d7895882bd2cdb21c3ab78819b9066fe3dc84f48af92a1",
+    "packages/powersync-direct-collection/tests/persisted-demand-driver.ts": "bc39df92df0926e71730029527340cf5048b797c87923a8e5ec5d91f2f5b72de",
+    "packages/powersync-direct-collection/tests/persisted-demand-history-oracle.ts": "2d6feb98845862d87579d34332c187945da8874f035a3ea7b98ac3b359e98882",
+    "packages/powersync-direct-collection/tests/persisted-demand-oracle-suite.ts": "261ea401c607e2b89c5239ca9fc1d6b7e7b4b90330f50fcf66cca6e4ab3e8033",
+    "docs/collections/powersync-direct-collection.md": "0cfdb2667202bbec7995594c1d10a967f28ecc18e7c931a68cd15a3879a97d84",
+    "packages/db/tests/oracle-cleanup.ts": "15317e3871120de3840160b070d902e765989fe070112fbbf3d14d87b84bf6bc",
+    "packages/powersync-direct-collection/tests/direct-input-receiving.ts": "7c66fc31d840f38248b4605277d2b694586657776fe23f8e83ac5dc1292701f7",
+    "packages/powersync-direct-collection/tests/direct-input-receiving.test.ts": "3e2063b6d30fa8bc68442b0284fd6470718a7fa4ced14bd3710df8700f1106a2"
+  },
+  "gateHelperSha256": "32c503f4380e957b85911316cb4067aed3bbbe04b615195ac870c52a8bf6c890",
+  "originalSources": {
+    "packages/powersync-direct-collection/src/index.ts": "a30e71beb96fade6c5714a300ea76628386dd0b9b1ea04ad60ccf3ee9ae074fa",
+    "packages/powersync-direct-collection/src/subsets.ts": "00fb4cb1976ec8b384d01e1fbb483768204bc40b69a3dcc19ed21b4356b3e380"
+  },
+  "productionSources": {
+    "packages/powersync-direct-collection/src/index.ts": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1",
+    "packages/powersync-direct-collection/src/subsets.ts": "20f8ed310b98099604fd05ae32a269b6554b87b937e31300f8dca3ac3a019da3"
+  },
+  "isolatedSourceLoaders": {
+    ".review-2377/direct-saved-source.config.ts": "332010ab64845f970c91359e844add3847edf3071eed4442ebef12722113ce6e",
+    ".review-2377/direct-mapper-browser-source.config.ts": "3d80db6f4ea15847470701a1a0488e07891b95171c2d3c68b5f276826d24a617",
+    ".review-2377/direct-mapper-browser-source-plugin.ts": "1c70284f4386c71316aa8c9d7233f7e4b05d5cbfd61cfe314b9014fdb6cde0be"
+  }
+}

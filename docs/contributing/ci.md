@@ -17,7 +17,7 @@ line prefixed by its entry.
 | `sqlite-core` | SQLite persistence core |
 | `sqlite-adapters` | Browser, Node, Electron, Cloudflare, React Native, Expo, Capacitor, and Tauri persistence |
 | `frameworks` | React, React Router, Preact, Solid, Vue, Svelte, and Angular |
-| `collections-1` to `collections-4` | Electric, Query, PowerSync, RxDB, TrailBase, Convex, the adapter conformance package, and the shared E2E suite container |
+| `collections-1` to `collections-5` | Electric, Query, PowerSync, PowerSync Direct, RxDB, TrailBase, Convex, the adapter conformance package, and the shared E2E suite container |
 | `lint-rules` | The oracles of the repository scripts (`scripts/*.property.test.js`) except lint scope: run budgets and the release and publish scripts. The release workflow does not run this group. |
 | `lint-scope` | The lint hooks' scope oracle, whole: its file-wide reach ledger counts the histories of one process. The release workflow does not run this group. |
 

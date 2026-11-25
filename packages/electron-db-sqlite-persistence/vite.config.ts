@@ -10,6 +10,7 @@ const config = defineConfig({
     include: [`tests/**/*.test.ts`],
     exclude: [`tests/**/*.e2e.test.ts`],
     environment: `node`,
+    setupFiles: [`../db-sqlite-persistence-core/tests/node-web-locks-setup.ts`],
     fileParallelism: !runElectronFullE2E,
     testTimeout: runElectronFullE2E ? 120_000 : undefined,
     hookTimeout: runElectronFullE2E ? 180_000 : undefined,
@@ -22,6 +23,7 @@ const config = defineConfig({
       exclude: [
         `**/node_modules/**`,
         `tests/reload-class-oracle.test.ts`,
+        `tests/reload-sql-recording-oracle.test.ts`,
         `tests/reload-class-oracle.electron.e2e.test.ts`,
       ],
     },

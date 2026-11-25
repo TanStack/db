@@ -12,6 +12,7 @@ const adapterBrowserTests = [
   `tests/trailbase-eager-live-source-oracle.test.ts`,
   `tests/trailbase-browser-fidelity.test.ts`,
   `tests/opfs-fixture-cleanup.test.ts`,
+  `tests/native-browser-context-oracle.test.ts`,
   `tests/query-rejected-write-cutoff-browser-fidelity.test.ts`,
   `tests/persisted-baseline-lifecycle-oracle.test.ts`,
 ]
@@ -104,6 +105,7 @@ const config = defineConfig({
     // These properties launch real Chromium in the dedicated browser CI group.
     exclude: [...configDefaults.exclude, ...adapterBrowserTests],
     environment: `node`,
+    setupFiles: [`../db-sqlite-persistence-core/tests/node-web-locks-setup.ts`],
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
       enabled: true,
@@ -116,6 +118,7 @@ const config = defineConfig({
         `tests/opfs-page-lifecycle-oracle.test.ts`,
         `tests/opfs-request-order-oracle.test.ts`,
         `tests/opfs-worker-diagnostics-oracle.test.ts`,
+        `tests/host-quiescence-oracle.test.ts`,
       ],
     },
   },

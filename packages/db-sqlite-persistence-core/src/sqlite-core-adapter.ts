@@ -51,6 +51,10 @@ type SqliteSupportedValue = null | number | string
 // lower binding cap use smaller chunks; each replacement row binds four values.
 const REPLACEMENT_BATCH_SIZE = 125
 
+function getBindLimit(driver: SQLiteDriver, fallback: SQLiteDriver): number {
+  return driver.maxBoundParameters ?? fallback.maxBoundParameters ?? 999
+}
+
 type CollectionTableMapping = {
   tableName: string
   tombstoneTableName: string
@@ -2325,6 +2329,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      rowKeys?: ReadonlyArray<string | number>
       cacheGenerationClaimId?: string
     },
   ) {
@@ -2338,6 +2343,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
     ctx?: {
       requiredIndexSignatures?: ReadonlyArray<string>
       includeRows?: boolean
+      rowKeys?: ReadonlyArray<string | number>
       cacheGenerationClaimId?: string
     },
   ): Promise<{
@@ -2392,9 +2398,32 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         )
       }
 
-      const rows = includeRows
-        ? await this.loadSubsetInternal(tableMapping, {}, transactionDriver)
-        : []
+      let rows: Array<InMemoryRow<string | number, Record<string, unknown>>> =
+        []
+      if (includeRows) {
+        if (ctx?.rowKeys === undefined)
+          rows = await this.loadSubsetInternal(
+            tableMapping,
+            {},
+            transactionDriver,
+          )
+        else {
+          // Encode before deduplication: storage distinguishes numeric/string
+          // keys and signed zero. The transaction driver owns the binding cap.
+          const keys = [...new Set(ctx.rowKeys.map(encodePersistedStorageKey))]
+          const cap = getBindLimit(transactionDriver, this.driver)
+          for (const batch of batches(keys, cap))
+            for (const row of decodeStoredSqliteRows(
+              await transactionDriver.query<StoredSqliteRow>(
+                `SELECT key, value, metadata, row_version
+               FROM ${quoteIdentifier(tableMapping.tableName)}
+               WHERE key IN (${batch.map(() => `?`).join(`, `)})`,
+                batch,
+              ),
+            ))
+              rows.push(row)
+        }
+      }
       const { latestRowVersion, keySet, sourceProgressCompatible } =
         await this.readResumeEvidence(collectionId, transactionDriver)
       const collectionMetadataRows = await transactionDriver.query<{
@@ -3658,10 +3687,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       queryParams.push(...orderByCompiled.params)
     }
 
-    if (
-      queryParams.length >
-      (driver.maxBoundParameters ?? this.driver.maxBoundParameters ?? 999)
-    ) {
+    if (queryParams.length > getBindLimit(driver, this.driver)) {
       sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
       queryParams.length = 0
     }

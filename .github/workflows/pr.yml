@@ -116,6 +116,7 @@ jobs:
             collections-2,
             collections-3,
             collections-4,
+            collections-5,
             lint-rules,
             lint-scope,
           ]

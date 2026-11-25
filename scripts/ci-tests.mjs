@@ -126,6 +126,12 @@ const packageJobs = {
     pkg(powersync, baseline, `fixed`), // 48
     pkg(powersync, baseline, `random`), // 40
   ],
+  // Direct is a new package on this branch. Keep its eager campaigns in
+  // separate processes, as the other costly collection receivers do.
+  'collections-5': [
+    ...parts(`@tanstack/powersync-direct-collection`, liveSource),
+    pkg(`@tanstack/powersync-direct-collection`),
+  ],
   // The repository scripts' oracles, which the lint job ran before. Their
   // histories run ESLint and Node in child processes. lint-scope runs whole
   // in a job of its own: its file-wide reach ledger (an afterAll minimum over
@@ -350,7 +356,7 @@ if (command === `check`) {
   // pnpm skips packages without a build script, but still builds their
   // dependencies. Keep its topological order for all selected packages.
   //
-  // The jobs of one family (`collections-1` to `collections-4`) build every
+  // The jobs of one family (`collections-1` to `collections-5`) build every
   // package of the family. A test type-checks against its workspace
   // dependencies' built declarations, including those of a package that it
   // reaches only through another package's test helpers.

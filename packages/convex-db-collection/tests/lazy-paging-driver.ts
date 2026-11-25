@@ -1,8 +1,18 @@
-import { BTreeIndex, IR, createCollection } from '@tanstack/db'
+import {
+  BTreeIndex,
+  IR,
+  collectionOptions,
+  createCollection,
+} from '@tanstack/db'
 import { makeFunctionReference } from 'convex/server'
 import { convexPaginatedCollectionOptions } from '../src/index'
 import { deliveredScopeComplete, ordered } from './lazy-paging-model-oracle'
-import type { LoadSubsetOptions, SyncAppliedReceipt } from '@tanstack/db'
+import type {
+  DbClient,
+  LoadSubsetOptions,
+  SyncAppliedReceipt,
+  SyncConfig,
+} from '@tanstack/db'
 import type { PaginationOptions, PaginationResult } from 'convex/server'
 import type { ConvexCollectionClient } from '../src/index'
 import type { LazyRow, LazyScope } from './lazy-paging-model-oracle'
@@ -227,6 +237,14 @@ export function lazyProvider(
       delivered.clear()
       exhausted = false
     },
+    // An SDK may reuse immutable row objects across coherent cache results.
+    // This input varies that legal representation without changing row values.
+    changeCached(rows: Array<LazyRow>) {
+      source = [...rows]
+      revision++
+      delivered.clear()
+      exhausted = false
+    },
     disconnect() {
       online = false
     },
@@ -348,6 +366,8 @@ export function lazyFixture(
   holdCleanup?: () => Promise<void>,
   kind: `javascript` | `react` = `javascript`,
   adapterReceipt?: (actual: SyncAppliedReceipt) => SyncAppliedReceipt,
+  wrapSync?: (sync: SyncConfig<LazyRow>) => SyncConfig<LazyRow>,
+  hydrationClient?: DbClient,
 ) {
   const remote = lazyProvider(rows, descending, split, short, kind)
   const mode = {
@@ -374,11 +394,28 @@ export function lazyFixture(
   const batchListeners = new Set<(batch: LazyBatch) => void>()
   let syncRun = 0
   let truncateSource!: () => SyncAppliedReceipt
-  const sync = options.sync.sync
+  let restoreRows!: (rows: ReadonlyArray<LazyRow>) => SyncAppliedReceipt
+  const sync = (wrapSync ? wrapSync(options.sync) : options.sync).sync
   options.sync = {
     ...options.sync,
     sync: (controls) => {
       const run = ++syncRun
+      // Controlled receiving input for an already accepted baseline. The
+      // persisted receiving owner supplies the real storage path separately.
+      // This uses ordinary source writes so optimistic holds and reload retain
+      // the real core acceptance/application distinction.
+      restoreRows = (restored) => {
+        const accepted = new Map(
+          controls.collection._state.acceptedSyncedEntries(),
+        )
+        controls.begin()
+        for (const row of restored)
+          controls.write({
+            type: accepted.has(row.id) ? `update` : `insert`,
+            value: { ...row },
+          })
+        return controls.commit()
+      }
       // Environment input for the core replay receiver. Native Convex does not
       // initiate same-run truncates itself; this exposes the real core boundary.
       truncateSource = () => {
@@ -441,7 +478,13 @@ export function lazyFixture(
       }
     },
   }
-  const source = createCollection(options)
+  // An explicit descriptor factory preserves this fixture's wrapped sync while
+  // registering the actual Collection with the public hydration entry point.
+  const source = hydrationClient
+    ? hydrationClient.collection(
+        collectionOptions(`lazy-receiver`, () => options),
+      )
+    : createCollection(options)
   const publications: Array<{
     rows: Array<LazyRow>
     evidence: Array<LazyRow>
@@ -462,6 +505,15 @@ export function lazyFixture(
     receipts,
     batches,
     truncateSource: () => truncateSource(),
+    restoreRows: (restored: ReadonlyArray<LazyRow>) => restoreRows(restored),
+    hydrateRows: (seeds: ReadonlyArray<LazyRow>) => {
+      if (!hydrationClient)
+        throw new Error(`lazy fixture has no hydration client`)
+      hydrationClient.applyCollectionChunk({
+        collectionId: source.id,
+        rows: seeds.map((value) => ({ key: value.id, value })),
+      })
+    },
     observeBatches: (listener: (batch: LazyBatch) => void) => {
       batchListeners.add(listener)
       for (const batch of batches) listener(batch)

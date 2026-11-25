@@ -1,4 +1,6 @@
-// @ts-nocheck -- vendored unchanged from neondatabase/neon-pkgs@7ac55e3e; it targets the TanStack DB 0.9 sync API.
+// @ts-nocheck -- vendored from neondatabase/neon-pkgs@7ac55e3e; it targets the TanStack DB 0.9 sync API.
+// Modified 2026-11-17: current terminal-failure API, exact resource cleanup,
+// ordered SDK moves, and idempotent raw removals. Original Apache-2.0 license retained.
 import {
 	type LiveQueryChange,
 	type LiveQueryState,
@@ -153,7 +155,7 @@ function createRealtimeCollectionOptions<
 				commit,
 				truncate,
 				markReady,
-				markError,
+				fail,
 			}) => {
 				let cleaned = false;
 				let rowIds = new Map<string, Key>();
@@ -164,7 +166,9 @@ function createRealtimeCollectionOptions<
 				activeSubscription = subscription;
 
 				const reportError = (error: unknown) => {
-					if (!cleaned) markError(error);
+					if (cleaned) return;
+					release();
+					fail(error);
 				};
 				const queryRefresh = new QueryRefreshController({
 					query: initialQuery,
@@ -276,13 +280,9 @@ function createRealtimeCollectionOptions<
 										value: change.row,
 									});
 								}
-							} else {
+							} else if (change.type === "remove") {
 								const key = nextRowIds.get(change.rowId);
-								if (key === undefined) {
-									throw new Error(
-										`Realtime deleted an unknown row ID: ${change.rowId}`,
-									);
-								}
+								if (key === undefined) continue;
 								nextRowIds.delete(change.rowId);
 								nextKeys.delete(key);
 								writes.push({ type: "delete", key });
@@ -301,31 +301,36 @@ function createRealtimeCollectionOptions<
 				};
 
 				const stateChanged = (state: LiveQueryState) => {
-					if (state.status === "error") markError(state.error);
+					if (state.status === "error") reportError(state.error);
 					// Initial connecting maps to loading; complete rows make the
 					// collection ready. Reconnection and stale capability states retain
 					// an already-ready collection, while closed uses normal sync cleanup.
 				};
 
 				const unsubscribeUpdate = subscription.onUpdate((update) => {
+					if (cleaned) return;
 					if (update.type === "rows") installReset(update.rows);
 					else applyBatch(update.changes);
 				});
 				const unsubscribeState =
 					subscription.onStateChange(stateChanged);
-				queryRefresh.start();
-
-				return () => {
+				const release = () => {
+					if (cleaned) return;
 					cleaned = true;
 					queryRefresh.stop();
 					unsubscribeUpdate();
 					unsubscribeState();
 					subscription.unsubscribe();
+					rowIds.clear();
+					keys.clear();
+				};
+				queryRefresh.start();
+
+				return () => {
+					release();
 					if (activeSubscription === subscription) {
 						activeSubscription = undefined;
 					}
-					rowIds.clear();
-					keys.clear();
 				};
 			},
 		},

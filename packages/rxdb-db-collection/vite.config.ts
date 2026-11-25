@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { defineConfig, mergeConfig } from 'vitest/config'
+import { configDefaults, defineConfig, mergeConfig } from 'vitest/config'
 import { tanstackViteConfig } from '@tanstack/vite-config'
 import packageJson from './package.json'
 
@@ -18,6 +18,7 @@ const config = defineConfig({
     server: { deps: { inline: [`@tanstack/oracles`] } },
     name: packageJson.name,
     dir: `./tests`,
+    exclude: [...configDefaults.exclude, `**/*-oracle.browser.test.ts`],
     environment: `jsdom`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: { enabled: true },

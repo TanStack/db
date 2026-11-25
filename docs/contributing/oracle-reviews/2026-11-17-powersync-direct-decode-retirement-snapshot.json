@@ -1,0 +1,24 @@
+{
+  "stage": "Independent resource-law correction, explicit public pending-query retirement followed by judged healthy successor. No production changes. Full campaigns before final prose/ordinary identity tightening:228Node/227Chromium; oldchecker10semanticRED; all48states measured including minimum5 newstate constructions per fixed/random campaign. Current files below add opening authority prose and strengthen ordinary cleanup identity assertion only.",
+  "at": "2026-11-18T01:57:55.350352+00:00",
+  "files": {
+    "packages/db-adapter-conformance/tests/decode-refusal-oracle.ts": "7da6cda0bd764b3c48ace08ec0b717bf3c890f86f1cc95dc7f672c5468562e76",
+    "packages/db-adapter-conformance/tests/decode-refusal-driver.ts": "c7c98b6b700478461b526957593bb3735bc049b35587bbf5cfda51ef141ddc59",
+    "packages/db-adapter-conformance/tests/decode-refusal-oracle-suite.ts": "f4dfc51d0a5c05b6ad22940022e8a8be034259d53436933f71c516d492608e79",
+    "packages/powersync-direct-collection/tests/decode-refusal-driver.ts": "5ae4e1f5c1865afd7906104cc30cb4db66eec6f96a9b9e98a84f6618a05a281a",
+    "packages/powersync-direct-collection/tests/decode-refusal-cleanup.test.ts": "86701483ae343dcf9ce9e3e6b983139ee50a74187c02e30701785d95941c8c08",
+    "packages/powersync-direct-collection/tests/direct-input-receiving.ts": "7c66fc31d840f38248b4605277d2b694586657776fe23f8e83ac5dc1292701f7",
+    "packages/powersync-direct-collection/tests/decode-refusal-oracle.property.test.ts": "91ceb118bcaab0c3a1acf9508c2fce96b2c669438ca46b5fb71a4ea7b5509890",
+    "packages/browser-db-sqlite-persistence/e2e/powersync-direct-decode-oracle.browser.test.ts": "dcd9bd11bdd049ff0ad1a1dc80afa29c83ffede472e2828111a7280a6bf44a68"
+  },
+  "productionSources": {
+    "packages/powersync-direct-collection/src/index.ts": "1ec1defd6f1584be75b647f243c820f31db0b1e03eaa7fabaf3185b27c4076c1",
+    "packages/powersync-direct-collection/src/subsets.ts": "20f8ed310b98099604fd05ae32a269b6554b87b937e31300f8dca3ac3a019da3"
+  },
+  "logs": {
+    ".review-2377/direct-decode-public-retirement-old-checker-red.log": "8304962e0aada977145e5d5b612b3ecf0d95e05988d65b62681748879d6dd1b8",
+    ".review-2377/direct-decode-retirement-frozen-node.log": "356b851000a4e6983ff8841ea52546fada9d004e8ac70caca8dd56fd2c2fb3f9",
+    ".review-2377/direct-decode-retirement-frozen-browser.log": "b0fad0434ac724701491df694581afcf0cccfcff67e6ec215f75a7ff0e88ad53",
+    ".review-2377/direct-decode-retirement-cleanup-node.log": "443162b3f6f321217fdd00cb467ea796b55f80c66be0f87662bd629ba60b73ca"
+  }
+}

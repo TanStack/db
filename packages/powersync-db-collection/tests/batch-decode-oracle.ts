@@ -1,0 +1,699 @@
+/**
+ * # Which native SQLite batches may become public after decoding refuses one?
+ *
+ * Native syncBatchSize permits successful initial pages to stream. A refusal
+ * in a later page cannot revoke those earlier publications. The refused page
+ * itself contributes no rows, and fatal deserialization ends the sync run:
+ * initial eager loading fails; an already-ready source retains its rows and
+ * records a terminal sync error. Its change watcher is released.
+ * Unlike a user onLoadSubset hook rejection, a deserialization refusal leaves
+ * the source inconsistent with SQLite; the native contract calls that fatal.
+ *
+ * Native schemas may transform IDs and scalar representations. Valid rows
+ * retain the authored application key, boolean and Date, including updates of
+ * transformed keys. A refused batch must not affect their previous values.
+ * Authority: native definitions.ts deserialization contract and syncBatchSize
+ * streaming promise; glossary loading error, sync error and publication.
+ *
+ * The model receives source SQL batches recorded at the real provider's read
+ * boundary. SQLite owes no scan order. These are input facts, not Collection
+ * writes: the independent model admits complete source pages before the first
+ * refused page. It never reads production commits, rows or error decisions.
+ * A fatal refusal remains final for that sync run. Corrected SQLite rows and
+ * new subset requests cannot resume it. Cleanup followed by an explicit
+ * restart admits a new valid source snapshot and clears the retired error.
+ * A late hydration seed still supplies rows that no accepted source page
+ * wrote. Staging part of a refused page grants no source authority. The
+ * hydration authority law is specified in docs/guides/ssr.md, Initial Data,
+ * and db-client-hydration-authority-oracle.test.ts. Admission counts below
+ * diagnose the adapter's internal staging; balanced begin/commit calls are
+ * not a public law because an open sync transaction may await run retirement.
+ * Limits: one table, initial read or one live SQL transaction, 1–6 rows,
+ * native schemas, no retained reload, persistence or local mutations.
+ */
+import fc from 'fast-check'
+import { observeDecodeRows } from '../../db-adapter-conformance/tests/decode-refusal-oracle'
+import type { DecodeValue } from '../../db-adapter-conformance/tests/decode-refusal-oracle'
+
+export type NativeDecodeHistory = {
+  mode: `eager` | `on-demand`
+  phase: `initial` | `live`
+  outcome: `valid` | `throw` | `issues`
+  count: number
+  batchSize: number
+  refusalIndex: number
+  transformKeys: boolean
+  overlap: boolean
+  coordinate: number
+  epoch: number
+  hydrateAfterRefusal?: boolean
+}
+export const nativeDecodeHistoryArb: fc.Arbitrary<NativeDecodeHistory> = fc
+  .record({
+    mode: fc.constantFrom(`eager` as const, `on-demand` as const),
+    phase: fc.constantFrom(`initial` as const, `live` as const),
+    outcome: fc.constantFrom(
+      `valid` as const,
+      `throw` as const,
+      `issues` as const,
+    ),
+    count: fc.integer({ min: 1, max: 6 }),
+    batchSize: fc.integer({ min: 1, max: 4 }),
+    refusalIndex: fc.nat({ max: 1000 }),
+    transformKeys: fc.boolean(),
+    overlap: fc.boolean(),
+    coordinate: fc.nat({ max: 100_000 }),
+    epoch: fc.integer({ min: 0, max: 2_000_000_000_000 }),
+    hydrateAfterRefusal: fc.boolean(),
+  })
+  .map(
+    (h) => ({ ...h, refusalIndex: h.refusalIndex % h.count }),
+    (h) => ({
+      ...(h as NativeDecodeHistory),
+      hydrateAfterRefusal:
+        (h as NativeDecodeHistory).hydrateAfterRefusal ?? false,
+    }),
+  )
+
+export function nativeDecodeKey(
+  h: NativeDecodeHistory,
+  index: number,
+  initial: boolean,
+) {
+  return `row-${h.coordinate}-${initial || h.overlap ? `shared` : `new`}-${index}`
+}
+export function nativeDecodeBatch(h: NativeDecodeHistory, initial: boolean) {
+  return Array.from({ length: h.count }, (_, i) => ({
+    id: nativeDecodeKey(h, i, initial),
+    flag: (i % 2 === 0) === initial,
+    when: new Date(h.epoch + i + (initial ? 0 : 10_000)),
+  }))
+}
+// A fresh application-key set distinguishes continued old-run work from a
+// valid new run. Cleanup discards the old snapshot before this restart reads.
+export function nativeDecodeRecoveryBatch(h: NativeDecodeHistory) {
+  return nativeDecodeBatch(
+    { ...h, coordinate: h.coordinate + 100_001, epoch: h.epoch + 20_000 },
+    true,
+  )
+}
+/** Changed values and one fresh key expose authority wrongly gained by staging. */
+export function nativeDecodeHydrationBatch(h: NativeDecodeHistory) {
+  return [
+    ...nativeDecodeBatch(h, h.phase === `initial`),
+    nativeDecodeRecoveryBatch(h)[0]!,
+  ].map((row) => ({
+    id: row.id,
+    flag: !row.flag,
+    when: new Date(row.when.getTime() + 30_000),
+  }))
+}
+export type NativeDecodeObservation = {
+  cleanupErrors?: ReadonlyArray<string>
+  browserErrors?: ReadonlyArray<string>
+  sourceBatches: Array<Array<string>>
+  parsed: Array<string>
+  rows: Array<DecodeValue>
+  publications: Array<Array<DecodeValue>>
+  status: string
+  load: string
+  terminalError: boolean
+  failureReason: boolean
+  rejectedCauseMatches: boolean
+  terminalCauseMatches: boolean
+  watcherReleases: Array<number>
+  reached: Array<string>
+  // Diagnostics only: no public contract requires one begin per provider page.
+  admission: { begins: number; writes: number; commits: number; open: number }
+  hydration?: {
+    rows: Array<DecodeValue>
+    publications: Array<Array<DecodeValue>>
+    acceptedBaseline: Array<DecodeValue>
+    status: string
+    causeStable: boolean
+  }
+  continuation?: {
+    sameRunRows: Array<DecodeValue>
+    sameRunStatus: string
+    sameRunTerminalError: boolean
+    sameRunCauseStable: boolean
+    sameRunDecodedRows: number
+    laterSubsetLoads: Array<{
+      empty: boolean
+      outcome: string
+      causeMatches: boolean
+    }>
+    restartRows: Array<DecodeValue>
+    restartStatus: string
+    restartTerminalError: boolean
+    restartFailureReason: boolean
+    restartLoad: string
+    restartWatcherReleases: Array<number>
+  }
+}
+
+// A batch is the provider's page, rather than the whole eager source result.
+// Authored application values are independent of the user schema under test.
+export function nativeDecodeModel(
+  h: NativeDecodeHistory,
+  sourceBatches: ReadonlyArray<ReadonlyArray<string>>,
+) {
+  const initial = h.phase === `initial`
+  const before = initial ? [] : nativeDecodeBatch(h, true)
+  const target = nativeDecodeBatch(h, initial)
+  const values = new Map(target.map((row) => [row.id, row]))
+  const rows = new Map(before.map((row) => [row.id, row]))
+  const allowedPublications: Array<Array<DecodeValue>> = [
+    observeDecodeRows(before),
+  ]
+  const refusal = nativeDecodeKey(h, h.refusalIndex, initial)
+  for (const batch of sourceBatches) {
+    if (h.outcome !== `valid` && batch.includes(refusal)) break
+    for (const key of batch) {
+      const row = values.get(key)
+      if (row) rows.set(key, row)
+    }
+    if (batch.length)
+      allowedPublications.push(observeDecodeRows([...rows.values()]))
+  }
+  return {
+    rows: observeDecodeRows([...rows.values()]),
+    allowedPublications,
+    status:
+      initial && h.mode === `eager` && h.outcome !== `valid`
+        ? `error`
+        : `ready`,
+    load: initial && h.outcome !== `valid` ? `rejected` : `fulfilled`,
+    stopped: h.outcome !== `valid`,
+  }
+}
+export function nativeDecodeViolations(
+  h: NativeDecodeHistory,
+  a: NativeDecodeObservation,
+): Array<string> {
+  const m = nativeDecodeModel(h, a.sourceBatches)
+  const errors: Array<string> = (a.browserErrors ?? []).map(
+    (message) => `browser error: ${message}`,
+  )
+  const same = (left: unknown, right: unknown) =>
+    JSON.stringify(left) === JSON.stringify(right)
+  const target = nativeDecodeBatch(h, h.phase === `initial`)
+  const delivered = new Set(a.sourceBatches.flat())
+  if (!a.sourceBatches.length)
+    errors.push(`native SQL source batch not reached`)
+  if (h.outcome === `valid` && target.some((row) => !delivered.has(row.id)))
+    errors.push(`source rows omitted before decode comparison`)
+  const refusal = nativeDecodeKey(h, h.refusalIndex, h.phase === `initial`)
+  if (
+    h.outcome !== `valid` &&
+    (!delivered.has(refusal) || !a.parsed.includes(refusal))
+  )
+    errors.push(`refusal never reached actual schema`)
+  if (!same(a.rows, m.rows)) errors.push(`accepted page rows differ`)
+  // A direct subscription can repeat its current snapshot at readiness. The
+  // contract constrains coherent cuts, not one callback per SQL page. Every
+  // recorded publication must be a complete admitted-page prefix; final rows
+  // above still require all successful pages to have applied.
+  let admittedPage = 0
+  for (const cut of a.publications) {
+    const nextPage = m.allowedPublications.findIndex(
+      (allowed, index) => index >= admittedPage && same(cut, allowed),
+    )
+    if (nextPage < 0) {
+      errors.push(
+        `publication split, regressed, or crossed a refused source batch`,
+      )
+      break
+    }
+    admittedPage = nextPage
+  }
+  if (m.rows.length && !a.publications.length && h.phase === `initial`)
+    errors.push(`accepted initial pages produced no public change`)
+  if (a.status !== m.status || a.load !== m.load)
+    errors.push(`refusal crossed the wrong loading boundary`)
+  if (a.terminalError !== m.stopped || a.failureReason)
+    errors.push(`fatal deserialization did not terminate sync health`)
+  if (m.stopped && !a.terminalCauseMatches)
+    errors.push(`fatal deserialization lost its cause`)
+  if (h.phase === `initial` && h.outcome !== `valid` && !a.rejectedCauseMatches)
+    errors.push(`loading refusal lost its cause`)
+  if (
+    !a.watcherReleases.length ||
+    a.watcherReleases.some((n) => n !== (m.stopped ? 1 : 0))
+  )
+    errors.push(`fatal run retained its change watcher`)
+  if (m.stopped) {
+    const expectedAfterHydration = nativeDecodeHydrationModel(
+      h,
+      a.sourceBatches,
+    )
+    if (h.hydrateAfterRefusal) {
+      const hydration = a.hydration
+      if (
+        !hydration ||
+        !same(hydration.rows, expectedAfterHydration) ||
+        hydration.status !== m.status ||
+        !hydration.causeStable ||
+        hydration.publications.some((cut) => !same(cut, expectedAfterHydration))
+      )
+        errors.push(`refused page gained authority over a late hydration seed`)
+      // Every hydration batch adds a fresh key. Existing subscribers must
+      // therefore observe its publication, with no exact callback-count law.
+      if (hydration?.publications.length === 0)
+        errors.push(`late hydration did not notify existing subscribers`)
+    }
+    const c = a.continuation
+    if (!c) errors.push(`fatal continuation not observed`)
+    else {
+      if (
+        !same(c.sameRunRows, expectedAfterHydration) ||
+        c.sameRunStatus !== m.status ||
+        !c.sameRunTerminalError ||
+        !c.sameRunCauseStable ||
+        c.sameRunDecodedRows !== 0
+      )
+        errors.push(`fatal sync run resumed after corrected source rows`)
+      if (
+        h.mode === `on-demand` &&
+        (c.laterSubsetLoads.length !== 2 ||
+          c.laterSubsetLoads.some(
+            (load, index) =>
+              load.empty !== (index === 1) || load.outcome !== `rejected`,
+          ))
+      )
+        errors.push(`fatal sync run admitted a later subset request`)
+      // New requests may reject with a descriptive stopped error. The exact
+      // original refusal belongs to stable source health, checked above.
+      if (
+        !same(c.restartRows, observeDecodeRows(nativeDecodeRecoveryBatch(h))) ||
+        c.restartStatus !== `ready` ||
+        c.restartTerminalError ||
+        c.restartFailureReason ||
+        c.restartLoad !== `fulfilled` ||
+        !c.restartWatcherReleases.length ||
+        c.restartWatcherReleases.some((count) => count !== 0)
+      )
+        errors.push(`explicit new sync run did not recover valid source rows`)
+    }
+  }
+  return errors
+}
+
+// Accepted source pages fix their rows. A seed supplies only the other keys;
+// source staging and the decoder's refusal position do not authorize a write.
+export function nativeDecodeHydrationModel(
+  h: NativeDecodeHistory,
+  sourceBatches: ReadonlyArray<ReadonlyArray<string>>,
+) {
+  const rows = new Map(
+    nativeDecodeModel(h, sourceBatches).rows.map((row) => [row.id, row]),
+  )
+  if (h.hydrateAfterRefusal)
+    for (const row of observeDecodeRows(nativeDecodeHydrationBatch(h)))
+      if (!rows.has(row.id)) rows.set(row.id, row)
+  return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+
+export const nativeDecodeStates = [
+  ...([`eager`, `on-demand`] as const).flatMap((mode) =>
+    ([`initial`, `live`] as const).flatMap((phase) =>
+      ([`valid`, `throw`, `issues`] as const).map(
+        (outcome) => `${mode}:${phase}:${outcome}`,
+      ),
+    ),
+  ),
+  `transformed-key`,
+  `live-overlap`,
+  `live-fresh`,
+  `refusal-first`,
+  `refusal-last`,
+  `accepted-earlier-page`,
+  `corrected-source-after-refusal`,
+  `restart-after-refusal`,
+  `empty-subset-after-refusal`,
+  ...([`eager`, `on-demand`] as const).flatMap((mode) =>
+    ([`initial`, `live`] as const).flatMap((phase) =>
+      ([`first`, `middle`, `last`] as const).map(
+        (position) => `hydration:${mode}:${phase}:${position}`,
+      ),
+    ),
+  ),
+] as const
+
+/**
+ * # Can a native mutation still finish after its confirmation source stops?
+ *
+ * The native mutation contract waits for SQLite's diff observation before
+ * reporting success (PowerSyncTransactor.applyTransaction and the guide's
+ * settled CRUD examples). Fatal decoding stops that observation source.
+ * An unconfirmed handler must reject; it cannot report success or retain an
+ * impossible confirmation wait. A handler admitted after the stop must reject
+ * too. This does not require changing the ready Collection status: stopped
+ * source health and Collection readiness are separate glossary concepts.
+ *
+ * These histories cross real CRUD with callback admission and asynchronous
+ * diff reads. A rejected read alone is not fatal: a later valid notification
+ * can observe the still-stored operation. The driver drains those actual
+ * callbacks and SQLite locks before the comparison. There is no wall-clock
+ * mutation timeout policy or balanced-begin law. Open transactions are only
+ * diagnostics; public handler settlement, base rows and restart are judged.
+ * Ordinary cleanup also retires an unconfirmed native handler. A provider-return
+ * hold lets real SQL commit before cleanup, while the caller still awaits that
+ * return. Its already-owned rejection must not escape as a detached host error.
+ * Healthy same-table peers cannot confirm each other's unobserved mutations.
+ * Each Collection must stage its own sync transaction before its native handler
+ * fulfills; another Collection's commit cannot release that FIFO gate. The
+ * grammar parks either callback before SQL reads while the other's real SDK
+ * notification completes, then checks rows and publications before release.
+ * Authority: flushDiffRecordsWithContext's confirmation-after-staging contract
+ * and the glossary's optimistic state and accepted sync transaction laws.
+ * One shared-table history combines healthy-first and refusing-second mutations
+ * in the same transaction; table identity cannot replace captured run ownership.
+ * SQL rows are diagnostics: rejection does not promise backend rollback.
+ * The stopped-run peer comparison checks the survivor's handler, own authored
+ * row and health. The healthy callback-order histories compare both complete
+ * row snapshots and the owning Collection's publications at the held cut.
+ * Limits: one native table, one CRUD handler or two Collections with one
+ * handler each (separate or shared transaction), one source update, no remote
+ * transport or persistence wrapper.
+ */
+export type NativeMutationHistory = {
+  mode: `eager` | `on-demand`
+  effect:
+    | `healthy`
+    | `decode-refusal`
+    | `read-rejection`
+    | `cleanup`
+    | `cleanup-return`
+  timing:
+    `before-read` | `during-read` | `at-refusal` | `after-stop` | `initial`
+  kind: `insert` | `update` | `delete`
+  coordinate: number
+  value: number
+  peer?: boolean
+  peerTransaction?: boolean
+  activePeer?: boolean
+  peerFirst?: boolean
+}
+export function legalNativeMutationHistory(
+  h: NativeMutationHistory,
+): NativeMutationHistory {
+  if (h.timing === `initial`)
+    return {
+      ...h,
+      mode: `eager`,
+      effect: `decode-refusal`,
+      kind: `insert`,
+      peer: false,
+      peerTransaction: false,
+      activePeer: false,
+      peerFirst: false,
+    }
+  if (h.activePeer)
+    return {
+      ...h,
+      effect: `healthy`,
+      timing: `before-read`,
+      peer: false,
+      peerTransaction: false,
+    }
+  if (h.peer || h.peerTransaction)
+    return {
+      ...h,
+      mode: `eager`,
+      effect: `decode-refusal`,
+      timing: `before-read`,
+      kind: `update`,
+      peer: true,
+    }
+  if (h.effect !== `decode-refusal`) return { ...h, timing: `before-read` }
+  return h
+}
+export const nativeMutationHistoryArb = fc
+  .record({
+    mode: fc.constantFrom(`eager` as const, `on-demand` as const),
+    effect: fc.constantFrom(
+      `healthy` as const,
+      `decode-refusal` as const,
+      `read-rejection` as const,
+      `cleanup` as const,
+      `cleanup-return` as const,
+    ),
+    timing: fc.constantFrom(
+      `before-read` as const,
+      `during-read` as const,
+      `at-refusal` as const,
+      `after-stop` as const,
+      `initial` as const,
+    ),
+    kind: fc.constantFrom(
+      `insert` as const,
+      `update` as const,
+      `delete` as const,
+    ),
+    coordinate: fc.nat({ max: 100_000 }),
+    value: fc.integer({ min: 1, max: 99 }),
+    peer: fc.boolean(),
+    peerTransaction: fc.boolean(),
+    activePeer: fc.boolean(),
+    peerFirst: fc.boolean(),
+  })
+  .map(legalNativeMutationHistory, (h) => ({
+    ...(h as NativeMutationHistory),
+    peer: (h as NativeMutationHistory).peer ?? false,
+    peerTransaction: (h as NativeMutationHistory).peerTransaction ?? false,
+    activePeer: (h as NativeMutationHistory).activePeer ?? false,
+    peerFirst: (h as NativeMutationHistory).peerFirst ?? false,
+  }))
+
+export const nativeMutationStates = [
+  ...([`eager`, `on-demand`] as const).flatMap((mode) =>
+    ([`peer-first`, `owner-first`] as const).flatMap((order) =>
+      ([`insert`, `update`, `delete`] as const).map(
+        (kind) => `active-peer:${mode}:${order}:${kind}`,
+      ),
+    ),
+  ),
+  ...([`eager`, `on-demand`] as const).flatMap((mode) =>
+    (
+      [`before-read`, `during-read`, `at-refusal`, `after-stop`] as const
+    ).flatMap((timing) =>
+      ([`insert`, `update`, `delete`] as const).map(
+        (kind) => `refusal:${mode}:${timing}:${kind}`,
+      ),
+    ),
+  ),
+  `initial`,
+  `healthy-same-table-peer`,
+  `same-table-transaction`,
+  ...([`eager`, `on-demand`] as const).flatMap((mode) =>
+    ([`healthy`, `read-rejection`, `cleanup`, `cleanup-return`] as const).map(
+      (effect) => `${effect}:${mode}`,
+    ),
+  ),
+]
+export type NativeMutationRow = { id: string; value: number }
+export function nativeMutationKeys(h: NativeMutationHistory) {
+  return {
+    target: `target-${h.coordinate}`,
+    refusal: `refusal-${h.coordinate}`,
+    inserted: `inserted-${h.coordinate}`,
+    restarted: `restarted-${h.coordinate}`,
+  }
+}
+export function nativeMutationInitialRows(
+  h: NativeMutationHistory,
+): Array<NativeMutationRow> {
+  const keys = nativeMutationKeys(h)
+  return [
+    { id: keys.target, value: 1 },
+    { id: keys.refusal, value: 1 },
+  ]
+}
+// While the owning callback has not read SQL, its base remains the initial
+// source rows. Its native handler still owns exactly the local optimistic CRUD.
+export function nativeMutationOptimisticRows(
+  h: NativeMutationHistory,
+): Array<NativeMutationRow> {
+  const keys = nativeMutationKeys(h)
+  const rows = new Map(nativeMutationInitialRows(h).map((row) => [row.id, row]))
+  if (h.kind === `delete`) rows.delete(keys.target)
+  else {
+    const id = h.kind === `insert` ? keys.inserted : keys.target
+    rows.set(id, { id, value: h.value + 10 })
+  }
+  return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+export function nativeMutationExpectedRows(
+  h: NativeMutationHistory,
+): Array<NativeMutationRow> {
+  if (h.effect === `cleanup` || h.effect === `cleanup-return`) return []
+  if (h.effect === `decode-refusal`)
+    return h.timing === `initial`
+      ? []
+      : nativeMutationInitialRows(h).sort((a, b) => a.id.localeCompare(b.id))
+  const keys = nativeMutationKeys(h)
+  const rows = new Map(nativeMutationInitialRows(h).map((row) => [row.id, row]))
+  rows.set(keys.refusal, {
+    id: keys.refusal,
+    value: h.effect === `read-rejection` ? 3 : 2,
+  })
+  if (h.kind === `delete`) rows.delete(keys.target)
+  else
+    rows.set(h.kind === `insert` ? keys.inserted : keys.target, {
+      id: h.kind === `insert` ? keys.inserted : keys.target,
+      value: h.value + 10,
+    })
+  return [...rows.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+export type NativeMutationObservation = {
+  cleanupErrors?: ReadonlyArray<string>
+  browserErrors?: ReadonlyArray<string>
+  detachedErrors: Array<string>
+  reached: Array<string>
+  mutation: `pending` | `fulfilled` | `rejected`
+  mutationError: string | null
+  pendingAtFirstRead: boolean | null
+  pendingStoreRegistrations: number
+  openAfterRead: number
+  initialReadRejected: boolean
+  sourceStopped: boolean
+  sourceCauseMatches: boolean
+  status: string
+  rows: Array<NativeMutationRow>
+  base: Array<NativeMutationRow>
+  afterCleanup: `pending` | `fulfilled` | `rejected`
+  afterRestart: `pending` | `fulfilled` | `rejected`
+  restartStatus: string
+  restartMutation: `pending` | `fulfilled` | `rejected`
+  restartRow: NativeMutationRow | null
+  sqliteRows: Array<NativeMutationRow>
+  mutationReturnHeld: boolean
+  activePeer?: {
+    ownerHeld: boolean
+    peerHeld: boolean
+    ownerObserved: boolean
+    peerObserved: boolean
+    mutation: `pending` | `fulfilled` | `rejected`
+    rows: Array<NativeMutationRow>
+    base: Array<NativeMutationRow>
+    publications: Array<Array<NativeMutationRow>>
+    peerRows: Array<NativeMutationRow>
+    peerBase: Array<NativeMutationRow>
+    stopped: boolean
+    peerStopped: boolean
+  }
+  peer?: {
+    pendingAtStop: boolean
+    mutation: `pending` | `fulfilled` | `rejected`
+    stopped: boolean
+    row: NativeMutationRow | null
+  }
+}
+export function nativeMutationViolations(
+  h: NativeMutationHistory,
+  a: NativeMutationObservation,
+): Array<string> {
+  const errors = [
+    ...(a.browserErrors ?? []),
+    ...(a.cleanupErrors ?? []),
+    ...a.detachedErrors.map(
+      (error) => `detached native mutation failure: ${error}`,
+    ),
+  ]
+  const fatal = h.effect === `decode-refusal`
+  const cleanedUp = h.effect === `cleanup` || h.effect === `cleanup-return`
+  const expectedOutcome = fatal || cleanedUp ? `rejected` : `fulfilled`
+  if (a.mutation !== expectedOutcome)
+    errors.push(
+      `native mutation ${a.mutation} after its confirmation source ${fatal ? `stopped` : `drained`}`,
+    )
+  if (fatal && !a.mutationError)
+    errors.push(`stopped mutation lost its rejection`)
+  if (a.sourceStopped !== fatal || (fatal && !a.sourceCauseMatches))
+    errors.push(`native source stop or cause differs`)
+  if (
+    a.status !==
+    (cleanedUp ? `cleaned-up` : h.timing === `initial` ? `error` : `ready`)
+  )
+    errors.push(`native mutation changed the wrong readiness boundary`)
+  const expectedRows = nativeMutationExpectedRows(h)
+  if (h.activePeer) {
+    const cut = a.activePeer
+    const initial = nativeMutationInitialRows(h).sort((left, right) =>
+      left.id.localeCompare(right.id),
+    )
+    const optimistic = nativeMutationOptimisticRows(h)
+    const same = (left: unknown, right: unknown) =>
+      JSON.stringify(left) === JSON.stringify(right)
+    if (!cut) errors.push(`missing active same-table callback cut`)
+    else {
+      if (
+        cut.ownerHeld !== Boolean(h.peerFirst) ||
+        cut.peerHeld !== !h.peerFirst ||
+        cut.ownerObserved !== !h.peerFirst ||
+        cut.peerObserved !== Boolean(h.peerFirst)
+      )
+        errors.push(`active same-table callback order not reached`)
+      if (cut.mutation !== (h.peerFirst ? `pending` : `fulfilled`))
+        errors.push(`another native Collection decided the owning handler`)
+      if (
+        !same(cut.rows, h.peerFirst ? optimistic : expectedRows) ||
+        !same(cut.base, h.peerFirst ? initial : expectedRows)
+      )
+        errors.push(
+          `owning native Collection lost its confirmation publication`,
+        )
+      if (
+        !cut.publications.length ||
+        cut.publications.some(
+          (rows) =>
+            !same(rows, optimistic) &&
+            (h.peerFirst || !same(rows, expectedRows)),
+        )
+      )
+        errors.push(
+          `owning native publication dropped unconfirmed optimistic state`,
+        )
+      if (
+        !same(cut.peerRows, h.peerFirst ? expectedRows : initial) ||
+        !same(cut.peerBase, h.peerFirst ? expectedRows : initial) ||
+        cut.stopped ||
+        cut.peerStopped
+      )
+        errors.push(`healthy native peer differed at callback cut`)
+    }
+  }
+  if (JSON.stringify(a.base) !== JSON.stringify(expectedRows))
+    errors.push(`native authoritative rows differ`)
+  if (JSON.stringify(a.rows) !== JSON.stringify(expectedRows))
+    errors.push(`native mutation did not drop its settled optimistic state`)
+  if (
+    h.effect === `read-rejection` &&
+    (!a.initialReadRejected || !a.pendingAtFirstRead)
+  )
+    errors.push(`read rejection did not preserve the unconfirmed mutation`)
+  if (h.effect === `cleanup-return` && !a.mutationReturnHeld)
+    errors.push(`native committed-write return hold not reached`)
+  if (a.afterCleanup !== expectedOutcome || a.afterRestart !== expectedOutcome)
+    errors.push(
+      `native mutation outcome changed or remained pending across retirement`,
+    )
+  if (
+    a.restartStatus !== `ready` ||
+    a.restartMutation !== `fulfilled` ||
+    a.restartRow?.value !== h.value + 100
+  )
+    errors.push(`native restart did not admit a fresh confirmed mutation`)
+  if (
+    h.peer &&
+    ((!h.peerTransaction && !a.peer?.pendingAtStop) ||
+      a.peer?.mutation !== (h.peerTransaction ? `rejected` : `fulfilled`) ||
+      a.peer.stopped ||
+      a.peer.row?.value !== h.value + 200)
+  )
+    errors.push(
+      `one stopped native Collection poisoned its healthy same-table peer`,
+    )
+  return errors
+}
