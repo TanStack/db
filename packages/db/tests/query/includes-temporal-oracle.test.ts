@@ -1525,18 +1525,18 @@ describe(`includes temporal oracle`, () => {
       resolve: (cell) => ({ ...cell }),
       model: recordedAssertionJudgment,
       driver: async (plan, observe) => {
-        let entered = false
+        const reach = { entered: false }
         await recordAssertionJudgment(laggingSourceLaw, plan, observe, () =>
           expectLaggingSourceTraceMatches(
             plan.consumer,
             plan.shape,
             plan.steps,
             () => {
-              entered = true
+              reach.entered = true
             },
           ),
         )
-        if (entered)
+        if (reach.entered)
           observe(`reach`, `held replay after same-turn initial fulfillment`)
       },
       check: forwardAssertionJudgment,

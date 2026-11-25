@@ -112,3 +112,18 @@ with at most one unload-triggered truncate or one more ordering write while
 an answer is held. The initial-replay receiver is a direct on-demand Effect.
 Neither closes the separate joined-refill cut after replay settlement, or
 claims coverage of repeated truncate cycles or arbitrary provider behavior.
+
+## CI lint follow-up
+
+CI rejected four conditions that TypeScript narrowed to their initial values.
+Adapter callbacks update those values before the production driver checks them.
+The two drivers now store their callback observations in object properties.
+The histories, model, and comparison use the same observations.
+
+| Source | Git blob |
+| --- | --- |
+| `tests/query/ordered-source-loader-state-oracle.test.ts` | `3c03e72955a7021fd82c2a8a91d576b1dbdf13b2` |
+| `tests/query/includes-temporal-oracle.test.ts` | `b83c392e67e5e2a22cf060b9721063342df2a48e` |
+
+ESLint and the changed-file oracle lint passed. The rerun on Arca passed
+all 1,031 tests across both files.

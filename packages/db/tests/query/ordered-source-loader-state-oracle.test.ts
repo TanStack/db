@@ -680,7 +680,7 @@ async function checkRetirementReceiver(
   let clock = 0
   let unloaded: number | undefined
   let invalidation: number | undefined
-  let retiredIntoReplay = false
+  const replay = { started: false }
   let supersedingInvalidation: number | undefined
   let firstSuccessorStartsRepair: boolean | undefined
   let armed = false
@@ -744,7 +744,7 @@ async function checkRetirementReceiver(
               return operations.commit()
             }
             if (
-              (invalidation !== undefined || retiredIntoReplay) &&
+              (invalidation !== undefined || replay.started) &&
               scenario.holdReplacement
             ) {
               heldAnswers++
@@ -772,7 +772,7 @@ async function checkRetirementReceiver(
               // The source discards its installed baseline while the loader
               // retires superseded acquisitions. The held replay answers
               // serve a different provider snapshot.
-              retiredIntoReplay = true
+              replay.started = true
               const replacementRows = [...truth.values()].map(
                 ({ id, rank }) => ({
                   id: id + 20,
@@ -951,7 +951,7 @@ async function checkRetirementReceiver(
     const beforeAnswer = rawRows()
     if (
       scenario.holdReplacement &&
-      (invalidation !== undefined || retiredIntoReplay)
+      (invalidation !== undefined || replay.started)
     ) {
       compareAt(`ordered-source-loader-state-oracle.test.ts:850`, () =>
         expect(
@@ -982,7 +982,7 @@ async function checkRetirementReceiver(
         )
       }
       reached(`held-answer`)
-      if (retiredIntoReplay) {
+      if (replay.started) {
         compareAt(`retirement receiver: raw truncate applied`, () =>
           expect(rawRows()).toEqual([]),
         )
@@ -1059,7 +1059,7 @@ async function checkRetirementReceiver(
       }
       return
     }
-    if (invalidation === undefined && !retiredIntoReplay) {
+    if (invalidation === undefined && !replay.started) {
       compareAt(`ordered-source-loader-state-oracle.test.ts:877`, () =>
         expect(
           starts.filter((at) => at > unloaded!),
