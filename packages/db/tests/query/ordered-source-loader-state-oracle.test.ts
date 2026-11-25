@@ -4566,10 +4566,9 @@ describe(`Ordered source request authority`, () => {
         recordedComparison(history, observations),
       driver: async (history, observe) => {
         const coveringReadState = `superseded failure followed by repair settlement`
-        let reachedCoveringRead = false
+        const entered = new Set<State>()
         await observeComparison(history, observe, async () => {
           executed++
-          const entered = new Set<State>()
           const enter = (state: State) => {
             if (!counts.has(state))
               throw new Error(`Undeclared loader state: ${state}`)
@@ -4599,10 +4598,7 @@ describe(`Ordered source request authority`, () => {
           }
           if (observation.epochMovesWithContinuation > 0)
             enter(`continuation-before-epoch-move`)
-          if (observation.coveringReadHandoffs > 0) {
-            reachedCoveringRead = true
-            enter(coveringReadState)
-          }
+          if (observation.coveringReadHandoffs > 0) enter(coveringReadState)
           if (observation.requestErrorChecks > 0) {
             enter(`current-request-error`)
             if (observation.releaseFaults > 0)
@@ -4622,7 +4618,7 @@ describe(`Ordered source request authority`, () => {
             later[key] += observation[key]
           }
         })
-        if (reachedCoveringRead) observe(`reach`, coveringReadState)
+        if (entered.has(coveringReadState)) observe(`reach`, coveringReadState)
       },
       check: (_history, _observations, verdict) => verdict,
       timeout: 120_000,
