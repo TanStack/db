@@ -1,3 +1,4 @@
+import { runSourceClaimHistory } from '../../db-sqlite-persistence-core/tests/persisted-source-claim-driver'
 /** Worker/OPFS supplies storage; the shared FIFO driver records every cut. */
 import {
   eagerStorageTarget,
@@ -18,13 +19,14 @@ import {
   startupOPFSArtifacts,
 } from './persisted-startup-opfs-cleanup'
 import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
+import type { SourceClaimHistory } from '../../db-sqlite-persistence-core/tests/persisted-source-claim-driver'
 import type { OpenSourceFifoStore } from '../../db-sqlite-persistence-core/tests/persisted-source-fifo-driver'
 import type { SourceFifoOrderingHistory } from '../../db-sqlite-persistence-core/tests/persisted-durability-model-oracle'
 import type { Todo } from '../../db-sqlite-persistence-core/tests/persisted-support'
 import type { ResumeRowProjectionInput } from '../../db-sqlite-persistence-core/tests/resume-row-projection-oracle'
 
 let sequence = 0
-const openOPFS: OpenSourceFifoStore = async (id, rows, metadata) => {
+const openOPFS: OpenSourceFifoStore = async (id, rows, metadata, clock) => {
   const databaseName = `ps-source-fifo-${sequence++}.sqlite`
   await removeStartupOPFSArtifacts(databaseName)
   const database = await openBrowserWASQLiteOPFSDatabase({ databaseName })
@@ -40,7 +42,11 @@ const openOPFS: OpenSourceFifoStore = async (id, rows, metadata) => {
     ])
   }
   try {
-    const { adapter } = createBrowserWASQLitePersistence({ database })
+    const { adapter } = createBrowserWASQLitePersistence({
+      database,
+      now: clock?.now,
+      cacheGenerationClaimTtlMs: clock?.ttl,
+    })
     const claim = await adapter.claimCacheGeneration!(id)
     releaseClaim = () => adapter.releaseCacheGenerationClaim!(claim.claimId)
     const managed = managedStorageTarget(
@@ -223,3 +229,8 @@ async function runResumeRowProjections(
 }
 
 Object.assign(window, { runResumeRowProjections })
+
+Object.assign(window, {
+  runPersistedSourceClaim: (history: SourceClaimHistory) =>
+    runSourceClaimHistory(history, openOPFS),
+})

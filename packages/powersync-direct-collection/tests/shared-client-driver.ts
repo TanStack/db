@@ -147,6 +147,7 @@ export async function observeDirectSharedClient(
   const second = collections[1]!
   let targetSettled = false
   const snapshot = (): SharedClientCut => ({
+    providerState: client.status.state,
     rows: [sortedStartupRows(first.toArray), sortedStartupRows(second.toArray)],
     statuses: [first.status, second.status],
     terminalErrors: [first.health.error !== null, second.health.error !== null],
@@ -359,6 +360,11 @@ export async function observeDirectSharedClient(
     if (!h.next) reached.push(`later-empty`)
     if (h.failure && failed && peer) {
       const owner = h.failure.stream
+      if (
+        failed.providerState === `ready` &&
+        failed.problems[owner].some((p) => p.kind === `stream`)
+      )
+        reached.push(`transport-recovered-stream-rejected`)
       if (
         failed.problems[owner].some((p) => p.kind === `stream`) &&
         failed.problems[owner === 0 ? 1 : 0].length === 0

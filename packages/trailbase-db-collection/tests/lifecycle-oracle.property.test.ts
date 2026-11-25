@@ -163,6 +163,17 @@ async function observeLifecycle(
       [...expected.values()].sort((a, b) => a.id - b.id),
     )
   const recordTimers = () => {
+    // Quantify over allocations, including implementations that need no timer.
+    // Keep identity checks below for every timer that was actually allocated.
+    facts.equal(
+      `unreleased timers`,
+      intervals.mock.results.filter(
+        (timer) =>
+          timer.type === `return` &&
+          !cleared.mock.calls.some(([handle]) => handle === timer.value),
+      ).length,
+      0,
+    )
     for (const timer of intervals.mock.results) {
       if (timer.type === `return`)
         facts.calledWith('cleared', cleared, timer.value)
@@ -1849,8 +1860,8 @@ oracleProperty({
       corrupt: (trace) =>
         corruptFirstFact(
           trace,
-          (entry) => entry.checkpoint.endsWith(`:cleared`),
-          () => [],
+          (entry) => entry.checkpoint.endsWith(`:unreleased timers`),
+          () => 1,
         ),
     },
     ...([`DOMException`, `class instance`, `symbol`] as const).map((kind) => ({

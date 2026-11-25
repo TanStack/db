@@ -49,7 +49,6 @@
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.11.2",
     "debug": "^4.4.3",
     "trailbase": "^0.14.3"
   },

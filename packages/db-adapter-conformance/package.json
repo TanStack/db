@@ -18,7 +18,7 @@
     "sync-adapter"
   ],
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node ../../scripts/check-built-exports.mjs checkEagerLiveSourceHistory",
     "lint": "eslint . --fix",
     "test": "vitest --run",
     "test:oracles": "vitest run tests/reference-adapter-oracle.property.test.ts tests/persisted-demand-receiving-oracle.test.ts tests/persisted-demand-peer-oracle.test.ts",

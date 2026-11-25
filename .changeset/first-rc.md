@@ -13,7 +13,6 @@
 '@tanstack/node-db-sqlite-persistence': major
 '@tanstack/offline-transactions': minor
 '@tanstack/powersync-db-collection': major
-'@tanstack/powersync-direct-collection': major
 '@tanstack/preact-db': major
 '@tanstack/query-db-collection': minor
 '@tanstack/react-db': major

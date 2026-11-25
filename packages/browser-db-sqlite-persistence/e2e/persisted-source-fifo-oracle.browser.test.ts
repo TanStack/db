@@ -1,11 +1,18 @@
 // @vitest-environment node
 /** Real worker/OPFS receives the primary FIFO grammar and comparison. */
 import { afterAll, beforeAll } from 'vitest'
-import { registerSourceFifoOrderingOracle } from '../../db-sqlite-persistence-core/tests/persisted-source-fifo-oracle'
+import {
+  registerSourceClaimBoundaryOracle,
+  registerSourceFifoOrderingOracle,
+} from '../../db-sqlite-persistence-core/tests/persisted-source-fifo-oracle'
 import {
   captureBrowserHistory,
   startAdapterChromium,
 } from '../tests/adapter-chromium-host'
+import type {
+  SourceClaimHistory,
+  SourceClaimObservation,
+} from '../../db-sqlite-persistence-core/tests/persisted-source-claim-driver'
 import type { SourceFifoOrderingHistory } from '../../db-sqlite-persistence-core/tests/persisted-durability-model-oracle'
 import type { SourceFifoRunResult } from '../../db-sqlite-persistence-core/tests/persisted-source-fifo-driver'
 
@@ -49,5 +56,32 @@ registerSourceFifoOrderingOracle({
       ...result,
       browserErrors: observed.browserErrors,
     }))
+  },
+})
+
+registerSourceClaimBoundaryOracle({
+  property: `sqlite-persistence.source-claim-boundary.chromium-opfs`,
+  owns: [
+    `../db-sqlite-persistence-core/src/persisted.ts`,
+    `../db-sqlite-persistence-core/src/sqlite-core-adapter.ts`,
+  ],
+  run: async (history) => {
+    const host = browser
+    if (!host) throw new Error(`Chromium claim receiving host did not start`)
+    const observed = await captureBrowserHistory(host, () =>
+      host.page.evaluate(
+        async (input) => ({
+          result: await (
+            window as unknown as {
+              runPersistedSourceClaim: (
+                history: SourceClaimHistory,
+              ) => Promise<SourceClaimObservation>
+            }
+          ).runPersistedSourceClaim(input),
+        }),
+        history,
+      ),
+    )
+    return { ...observed.result, browserErrors: observed.browserErrors }
   },
 })

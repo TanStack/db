@@ -295,6 +295,8 @@ export type PowerSyncCollectionMeta<TTable extends Table = Table> = {
    * Whether the PowerSync table tracks metadata.
    */
   metadataIsTracked: boolean
+  /** The current native sync run. A transactor captures it before taking a lock. */
+  syncSignal?: AbortSignal
 }
 
 /**

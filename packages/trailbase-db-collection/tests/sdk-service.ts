@@ -200,6 +200,14 @@ export class TrailBaseSdkService<Row extends { id: string | number }> {
     stream.controller.error(error)
   }
 
+  close() {
+    const stream = this.streams.at(-1)
+    if (!stream) throw new Error(`TrailBase SDK has no subscription`)
+    stream.ended = true
+    this.terminalEntries++
+    stream.controller.close()
+  }
+
   async propagate() {
     for (let turn = 0; turn < 4; turn++) await sdkTurn()
   }

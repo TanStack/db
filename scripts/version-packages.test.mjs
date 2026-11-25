@@ -12,6 +12,8 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { fileURLToPath } from 'node:url'
+import readChangesets from '@changesets/read'
 import {
   seedFirstCandidate,
   versionDuringRc,
@@ -40,20 +42,33 @@ test('stable packages keep their release line and require a compatible DB API', 
   }
 })
 
-test('the first RC changeset covers the current public package inventory', () => {
+function publicPackageManifests() {
   const packages = new URL('../packages/', import.meta.url)
+  return readdirSync(packages).flatMap((directory) => {
+    const path = new URL(`${directory}/package.json`, packages)
+    if (!existsSync(path)) return []
+    const manifest = JSON.parse(readFileSync(path, 'utf8'))
+    return manifest.private ? [] : [{ directory, manifest }]
+  })
+}
+
+test('the first RC changeset retains valid entries for its release inventory', () => {
   const entries = [
     ...readFileSync(
       new URL('../.changeset/first-rc.md', import.meta.url),
       'utf8',
     ).matchAll(/^'([^']+)': (major|minor|patch)$/gm),
   ]
-  const publicPackages = readdirSync(packages).flatMap((directory) => {
-    const path = new URL(`${directory}/package.json`, packages)
-    if (!existsSync(path)) return []
-    const manifest = JSON.parse(readFileSync(path, 'utf8'))
-    return manifest.private ? [] : [manifest]
-  })
+  const preStatePath = new URL('../.changeset/pre.json', import.meta.url)
+  const seeded = existsSync(preStatePath)
+  const releaseNames = new Set(entries.map((entry) => entry[1]))
+  // New packages extend pre.json.initialVersions on their first version run.
+  // They do not retroactively join an already consumed seed changeset.
+  // Before seeding, the production seedFirstCandidate check and this check
+  // both require the complete current inventory.
+  const publicPackages = publicPackageManifests()
+    .map(({ manifest }) => manifest)
+    .filter((manifest) => !seeded || releaseNames.has(manifest.name))
   assert.deepEqual(
     entries.map((entry) => entry[1]).sort(),
     publicPackages.map((manifest) => manifest.name).sort(),
@@ -64,6 +79,36 @@ test('the first RC changeset covers the current public package inventory', () =>
     // inventory check must recognize candidates after the seed has run too.
     const candidate = /^(?:0\.|1\.0\.0-rc\.)/.test(manifest.version)
     assert.equal(bump, candidate ? 'major' : 'minor')
+  }
+})
+
+test('new public packages join the active RC through unconsumed changesets', async (t) => {
+  const source = new URL('../', import.meta.url)
+  const preStatePath = new URL('.changeset/pre.json', source)
+  if (!existsSync(preStatePath)) return
+  const preState = JSON.parse(readFileSync(preStatePath, 'utf8'))
+  if (preState.mode !== 'pre' || preState.tag !== 'rc') return
+  const consumed = new Set(preState.changesets)
+  const pending = (await readChangesets(fileURLToPath(source))).filter(
+    ({ id }) => !consumed.has(id),
+  )
+  for (const { directory, manifest } of publicPackageManifests()) {
+    if (manifest.name in preState.initialVersions) continue
+    const root = createRcWorkspace()
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    mkdirSync(join(root, 'packages', directory), { recursive: true })
+    writeJson(join(root, 'packages', directory, 'package.json'), manifest)
+    for (const changeset of pending) {
+      const release = changeset.releases.find(
+        ({ name }) => name === manifest.name,
+      )
+      if (release)
+        addChangeset(root, changeset.id, { [release.name]: release.type })
+    }
+    await versionDuringRc(root)
+    const version = packageVersion(root, directory)
+    assert.match(version, /^1\.0\.0-rc\.\d+(?:\.\d+)?$/, manifest.name)
+    assert.notEqual(version, manifest.version, manifest.name)
   }
 })
 

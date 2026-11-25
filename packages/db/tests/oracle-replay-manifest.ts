@@ -100,7 +100,7 @@ const ownerGroups: ReadonlyArray<
   [
     `browser-db-sqlite-persistence/e2e/native-powersync-batch-decode-oracle.browser.test.ts`,
     `adapter.powersync.batch-decode`,
-    `chromium`,
+    `chromium mutations.chromium`,
   ],
   [
     `electric-db-collection/tests/cross-adapter-receipt-oracle.property.test.ts`,
@@ -115,7 +115,7 @@ const ownerGroups: ReadonlyArray<
   [
     `powersync-db-collection/tests/batch-decode-conformance-oracle.property.test.ts`,
     `adapter.powersync`,
-    `batch-decode`,
+    `batch-decode batch-decode.mutations`,
   ],
   [
     `db-adapter-conformance/tests/neon-sdk-oracle.property.test.ts`,
@@ -291,6 +291,16 @@ const ownerGroups: ReadonlyArray<
     `powersync-direct-collection/tests/request-boundary-conformance-oracle.property.test.ts`,
     `adapter.powersync-direct`,
     `request-boundary`,
+  ],
+  [
+    `powersync-direct-collection/tests/startup-ownership-oracle.property.test.ts`,
+    `adapter.powersync-direct`,
+    `construction`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/powersync-direct-startup-ownership-oracle.browser.test.ts`,
+    `adapter.powersync-direct.construction`,
+    `chromium`,
   ],
   [
     `browser-db-sqlite-persistence/e2e/powersync-direct-request-boundary-oracle.browser.test.ts`,
@@ -1100,6 +1110,21 @@ const ownerGroups: ReadonlyArray<
     `db-sqlite-persistence-core/tests/persisted-source-fifo-sqlite-oracle.test.ts`,
     `sqlite-persistence.source-fifo-order`,
     `node-sqlite`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
+    `sqlite-persistence.source-claim-boundary`,
+    `recording`,
+  ],
+  [
+    `db-sqlite-persistence-core/tests/persisted-source-fifo-sqlite-oracle.test.ts`,
+    `sqlite-persistence.source-claim-boundary`,
+    `node-sqlite`,
+  ],
+  [
+    `browser-db-sqlite-persistence/e2e/persisted-source-fifo-oracle.browser.test.ts`,
+    `sqlite-persistence.source-claim-boundary`,
+    `chromium-opfs`,
   ],
   [
     `browser-db-sqlite-persistence/e2e/persisted-source-fifo-oracle.browser.test.ts`,
@@ -2550,6 +2575,7 @@ function directReplayTestName(property: string): string | undefined {
   if (enumeratedProperties.has(property))
     return `${property.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)} > `
   if (
+    property.startsWith(`sqlite-persistence.source-claim-boundary.`) ||
     property === `sqlite-persistence.source-fifo-order.node-sqlite` ||
     property === `sqlite-persistence.source-fifo-order.chromium-opfs` ||
     property === `sqlite-resume.row-projection.chromium-opfs` ||
@@ -2754,6 +2780,7 @@ const ownerReplayConfigs = new Map([
     `query-cross-adapter-oracle.browser.test.ts`,
     `powersync-direct-shared-client-oracle.browser.test.ts`,
     `powersync-direct-request-boundary-oracle.browser.test.ts`,
+    `powersync-direct-startup-ownership-oracle.browser.test.ts`,
     `powersync-direct-eager-oracle.browser.test.ts`,
     `powersync-direct-eager-source-oracle.browser.test.ts`,
     `powersync-direct-persisted-receipt-oracle.browser.test.ts`,

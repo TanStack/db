@@ -4055,9 +4055,12 @@ class PersistedCollectionRuntime<
     const recoveredPresence = new Map<TKey, RecoveryPresence>()
     let snapshotInvalidatedByTruncate = false
 
-    while (transactions.length > 0) {
-      const transaction = transactions.shift()
-      if (!transaction) continue
+    // Taking the next queue item also admits work appended during an await.
+    for (
+      let transaction = transactions.shift();
+      transaction;
+      transaction = transactions.shift()
+    ) {
       // Recovery can receive another transaction during an awaited read. Each
       // transaction reads its own complete key projection at its FIFO turn.
       let snapshotRows:
@@ -4168,6 +4171,15 @@ class PersistedCollectionRuntime<
           }
         }
       } catch (error) {
+        // A baseline read may reach SQLite after its initially live claim
+        // expires. Established loss aborts this old commit and schedules the
+        // same private recovery as ordinary admission. A live-claim I/O error
+        // still follows the durability failure policy.
+        if (
+          this.hasExpiredCacheClaim() &&
+          !this.isBufferedSyncTransactionCurrent(transaction)
+        )
+          continue
         transaction.rejectApplied?.(error)
         for (const abandoned of transactions) {
           abandoned.rejectApplied?.(error)
@@ -4457,40 +4469,13 @@ class PersistedCollectionRuntime<
     return operationFailure
   }
 
-  private async applyBufferedSyncTransactionUnsafe(
+  private rejectBufferedSyncTransaction(
     transaction: BufferedSyncTransaction<T, TKey>,
-    scopedAdapter?: HydrationPersistenceAdapter,
-  ): Promise<{
-    applied: boolean
-    hydrationFailure?: { reason: unknown }
-  }> {
-    this.throwIfTerminal()
-    this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
-    if (
-      transaction.admittedStorageCollectionId !== undefined &&
-      transaction.admittedStorageCollectionId !== this.storageCollectionId
-    ) {
-      const error = new SyncTransactionAbortedError()
-      if (!transaction.rejectApplied) throw error
-      transaction.rejectApplied(error)
-      return { applied: false }
-    }
-    if (!transaction.internal && this.scopedRecoveryPending) {
-      const error = new SyncTransactionAbortedError()
-      if (!transaction.rejectApplied) throw error
-      transaction.rejectApplied(error)
-      return { applied: false }
-    }
-    if (
-      !transaction.internal &&
-      this.cacheGenerationClaim &&
-      (scopedAdapter ?? this.persistence.adapter).renewCacheGenerationClaim &&
-      !(await this.renewCacheClaim(scopedAdapter ?? this.persistence.adapter))
-    ) {
-      const error = new SyncTransactionAbortedError()
-      // Recovery needs this apply mutex, so start it after the rejected
-      // transaction has released its turn. Its new source snapshots use a
-      // fresh cache generation; this commit must never be replayed into it.
+    recover: boolean,
+  ): false {
+    if (recover) {
+      // Recovery needs this apply mutex. Start it after the abandoned turn;
+      // the old transaction must never replay into the new cache generation.
       queueMicrotask(() => {
         if (transaction.lifecycleGeneration !== this.lifecycleGeneration) return
         if (this.scopedRecoveryPending) return
@@ -4498,10 +4483,61 @@ class PersistedCollectionRuntime<
           this.markTerminalFailure(failure, transaction.lifecycleGeneration)
         })
       })
-      if (!transaction.rejectApplied) throw error
-      transaction.rejectApplied(error)
-      return { applied: false }
     }
+    const error = new SyncTransactionAbortedError()
+    if (!transaction.rejectApplied) throw error
+    transaction.rejectApplied(error)
+    return false
+  }
+
+  // Check synchronously at the application boundary: renewal may return
+  // before a paused run's continuation observes expiry or scoped recovery.
+  private isBufferedSyncTransactionCurrent(
+    transaction: BufferedSyncTransaction<T, TKey>,
+  ): boolean {
+    this.throwIfTerminal()
+    this.throwIfLifecycleReplaced(transaction.lifecycleGeneration)
+    const expired = !transaction.internal && this.hasExpiredCacheClaim()
+    if (
+      (transaction.admittedStorageCollectionId !== undefined &&
+        transaction.admittedStorageCollectionId !== this.storageCollectionId) ||
+      (!transaction.internal && this.scopedRecoveryPending) ||
+      expired
+    )
+      return this.rejectBufferedSyncTransaction(transaction, expired)
+    return true
+  }
+
+  private async admitBufferedSyncTransactionUnsafe(
+    transaction: BufferedSyncTransaction<T, TKey>,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<boolean> {
+    if (!this.isBufferedSyncTransactionCurrent(transaction)) return false
+    if (
+      !transaction.internal &&
+      this.cacheGenerationClaim &&
+      (scopedAdapter ?? this.persistence.adapter).renewCacheGenerationClaim &&
+      !(await this.renewCacheClaim(scopedAdapter ?? this.persistence.adapter))
+    )
+      return this.rejectBufferedSyncTransaction(transaction, true)
+    return true
+  }
+
+  private async applyBufferedSyncTransactionUnsafe(
+    transaction: BufferedSyncTransaction<T, TKey>,
+    scopedAdapter?: HydrationPersistenceAdapter,
+  ): Promise<{
+    applied: boolean
+    hydrationFailure?: { reason: unknown }
+  }> {
+    if (
+      !(await this.admitBufferedSyncTransactionUnsafe(
+        transaction,
+        scopedAdapter,
+      )) ||
+      !this.isBufferedSyncTransactionCurrent(transaction)
+    )
+      return { applied: false }
     const abortedBeforeApplication = transaction.signal?.aborted === true
     let abortedDuringApplication = false
     let applicationReturned = false

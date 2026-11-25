@@ -7,15 +7,22 @@ import {
   eagerStorageTarget,
   managedStorageTarget,
 } from '../src'
-import { registerSourceFifoOrderingOracle } from './persisted-source-fifo-oracle'
+import {
+  registerSourceClaimBoundaryOracle,
+  registerSourceFifoOrderingOracle,
+} from './persisted-source-fifo-oracle'
 import { createMetadataSQLiteDriver } from './sync-metadata-sqlite-driver'
 import type { OpenSourceFifoStore } from './persisted-source-fifo-oracle'
 import type { Todo } from './persisted-support'
 
-const openSQLite: OpenSourceFifoStore = async (id, rows, metadata) => {
+const openSQLite: OpenSourceFifoStore = async (id, rows, metadata, clock) => {
   const database = new DatabaseSync(`:memory:`)
   const { driver, dispose } = createMetadataSQLiteDriver(database)
-  const adapter = new SQLiteCorePersistenceAdapter({ driver })
+  const adapter = new SQLiteCorePersistenceAdapter({
+    driver,
+    now: clock?.now,
+    cacheGenerationClaimTtlMs: clock?.ttl,
+  })
   const claim = await adapter.claimCacheGeneration(id)
   const managed = managedStorageTarget(claim.storageCollectionId, claim.claimId)
   // Eager and on-demand histories use separate storage targets. Seed both with
@@ -83,3 +90,9 @@ describe(`source FIFO over SQLite`, () =>
     receivingPath: `Node 22 node:sqlite over the real SQLite adapter and its scoped scheduler loans.`,
     open: openSQLite,
   }))
+
+registerSourceClaimBoundaryOracle({
+  property: `sqlite-persistence.source-claim-boundary.node-sqlite`,
+  owns: [`src/persisted.ts`, `src/sqlite-core-adapter.ts`],
+  open: openSQLite,
+})

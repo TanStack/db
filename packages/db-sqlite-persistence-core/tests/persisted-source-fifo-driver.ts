@@ -128,6 +128,7 @@ export type OpenSourceFifoStore = (
   id: string,
   initialRows: Array<Todo>,
   metadata: unknown,
+  clock?: { now: () => number; ttl: number },
 ) => Promise<SourceFifoStore>
 let generatedOwnershipHistoryId = 0
 function sortedTodoRows(rows: Iterable<Todo>): Array<Todo> {

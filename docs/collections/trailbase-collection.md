@@ -53,9 +53,6 @@ The `trailBaseCollectionOptions` function accepts the following options:
 - `schema`: [Standard Schema](https://standardschema.dev) compatible schema (e.g., Zod, Effect) for client-side validation
 - `parse`: Object mapping field names to parsing functions that transform data coming from TrailBase
 - `serialize`: Object mapping field names to serialization functions that transform data going to TrailBase
-- `onInsert`: Handler function called when items are inserted
-- `onUpdate`: Handler function called when items are updated
-- `onDelete`: Handler function called when items are deleted
 
 ## Data Transformation
 
@@ -115,32 +112,23 @@ const todosCollection = createCollection(
 
 ## Mutation Handlers
 
-Handle inserts, updates, and deletes by providing mutation handlers:
+TrailBase collections provide built-in handlers for `insert`, `update`, and
+`delete`. Each handler keeps the optimistic state until the backend request
+succeeds and a fresh change event for every affected key reaches that sync run.
+An older event for the same key cannot confirm a later mutation, including a
+mutation started by a public change callback while that older event publishes.
 
-```typescript
-const todosCollection = createCollection(
-  trailBaseCollectionOptions({
-    id: 'todos',
-    recordApi: trailBaseClient.records('todos'),
-    getKey: (item) => item.id,
-    onInsert: async ({ transaction }) => {
-      const newTodo = transaction.mutations[0].modified
-      // TrailBase handles the persistence automatically
-      // Add custom logic here if needed
-    },
-    onUpdate: async ({ transaction }) => {
-      const { original, modified } = transaction.mutations[0]
-      // TrailBase handles the persistence automatically
-      // Add custom logic here if needed
-    },
-    onDelete: async ({ transaction }) => {
-      const deletedTodo = transaction.mutations[0].original
-      // TrailBase handles the persistence automatically
-      // Add custom logic here if needed
-    },
-  })
-)
-```
+If the change stream closes or fails, a handler whose backend response has
+arrived rejects promptly when confirmation is missing. A new handler also
+rejects when its sync run has already stopped. Graceful closure first drains
+buffered events. If the stream stays healthy but supplies no confirmation, the
+handler rejects after its 120-second confirmation timeout.
+
+A fresh event already accepted before stream closure or cleanup remains valid
+when the backend response arrives later. Cleanup and restart cannot let an old
+request use a replacement run's event. A failed handler removes its optimistic
+state; rejection does not promise cancellation or rollback of an in-flight
+backend request.
 
 ## Complete Example
 
@@ -182,10 +170,6 @@ export const todosCollection = createCollection<SelectTodo, Todo>(
     },
     serialize: {
       created_at: (date) => Math.floor(date.valueOf() / 1000),
-    },
-    onInsert: async ({ transaction }) => {
-      const newTodo = transaction.mutations[0].modified
-      console.log('Todo created:', newTodo)
     },
   })
 )

@@ -18,7 +18,9 @@
  * multi-tab coordination or native mobile hosts.
  */
 import { expect } from 'vitest'
+import { fc } from '@fast-check/vitest'
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
+import { runSourceClaimHistory } from './persisted-source-claim-driver'
 import { createRecordingAdapter } from './persisted-support'
 import {
   generatedPersistenceFixedSeeds,
@@ -26,6 +28,10 @@ import {
   sourceFifoOrderingHistory,
 } from './persisted-durability-model-oracle'
 import { runSourceFifoHistory } from './persisted-source-fifo-driver'
+import type {
+  SourceClaimHistory,
+  SourceClaimObservation,
+} from './persisted-source-claim-driver'
 import type { SourceFifoOrderingHistory } from './persisted-durability-model-oracle'
 import type {
   OpenSourceFifoStore,
@@ -40,9 +46,44 @@ export type {
   SourceFifoRunResult,
 } from './persisted-source-fifo-driver'
 
-const openRecordingStore: OpenSourceFifoStore = (_id, rows, metadata) => {
+export const openRecordingStore: OpenSourceFifoStore = (
+  id,
+  rows,
+  metadata,
+  clock,
+) => {
   const adapter = createRecordingAdapter(rows)
   if (metadata !== undefined) adapter.rowMetadata.set(`shared`, metadata)
+  if (clock) {
+    let generation = 0
+    let expiresAtMs = clock.now() + clock.ttl
+    const claim = () => ({
+      storageCollectionId: `${id}-cache-${generation}`,
+      claimId: `${id}-claim`,
+      expiresAtMs,
+    })
+    adapter.getCacheGenerationNow = clock.now
+    adapter.claimCacheGeneration = () => Promise.resolve(claim())
+    adapter.renewCacheGenerationClaim = () =>
+      Promise.resolve(
+        clock.now() >= expiresAtMs
+          ? undefined
+          : (expiresAtMs = clock.now() + clock.ttl),
+      )
+    adapter.releaseCacheGenerationClaim = () => Promise.resolve()
+    adapter.rotateCacheGeneration = () => {
+      generation++
+      expiresAtMs = clock.now() + clock.ttl
+      adapter.rows.clear()
+      adapter.rowMetadata.clear()
+      return Promise.resolve(claim())
+    }
+    const load = adapter.loadResumeSnapshot.bind(adapter)
+    adapter.loadResumeSnapshot = (...args) =>
+      clock.now() >= expiresAtMs
+        ? Promise.reject(new Error(`expired persisted cache claim`))
+        : load(...args)
+  }
   return Promise.resolve({
     adapter,
     read: () =>
@@ -529,6 +570,339 @@ export function registerSourceFifoOrderingOracle({
                 }
               : entry
           }),
+      },
+    ],
+  })
+}
+
+/** The FIFO owner crosses claim authority with its diverted successor path.
+ * README Cache retention and the cache-generation design require lost-claim
+ * recovery. A live-claim I/O failure remains terminal (coverage-map authority).
+ * Expiry and pending recovery reject old receipts without publishing into the
+ * fresh cache; live controls preserve complete rows and permit ordinary use.
+ */
+export function registerSourceClaimBoundaryOracle({
+  property,
+  owns,
+  open = openRecordingStore,
+  run,
+}: {
+  property: string
+  owns: ReadonlyArray<string>
+  open?: OpenSourceFifoStore
+  run?: (history: SourceClaimHistory) => Promise<SourceClaimObservation>
+}): void {
+  const cuts = [
+    `live`,
+    `expired`,
+    `expired-during-baseline`,
+    `queued-expired-during-baseline`,
+    `queued-recovery-pending`,
+    `recovery-pending`,
+    `recovery-during-renewal`,
+    `ordinary-recovery-during-renewal`,
+    `ordinary-recovery-after-renewal`,
+    `ordinary-expired-after-renewal`,
+    `ordinary-expired-after-live-check`,
+    `ordinary-expired-at-turn`,
+    `ordinary-recovery-pending`,
+    `dependent-recovery-pending`,
+    `live-read-error`,
+  ] as const
+  const arbitrary = fc
+    .record({
+      cut: fc.constantFrom(...cuts),
+      title: fc.string({ maxLength: 12 }),
+      elapsed: fc.integer({ min: 0, max: 3 }),
+      successors: fc.integer({ min: 1, max: 3 }),
+    })
+    .filter((h) => h.cut !== `dependent-recovery-pending` || h.successors >= 2)
+  const required = new WeakMap<SourceClaimHistory, string>()
+  const constructed = cuts.flatMap((cut) =>
+    Array.from({ length: 2 }, (_, index) => ({
+      name: `${cut} claim cut ${index + 1}`,
+      enters: [cut],
+      build: (history: SourceClaimHistory) => {
+        const built = {
+          ...history,
+          cut,
+          successors:
+            cut === `dependent-recovery-pending`
+              ? Math.max(2, history.successors)
+              : history.successors,
+        }
+        required.set(built, cut)
+        return built
+      },
+    })),
+  )
+  oracleProperty({
+    id: property,
+    owns,
+    law: {
+      statement: `A source commit applies only under current sync-run and cache-claim authority at the application boundary, after all awaited admission work. Lost claims and pending recovery reject old work; live-claim read failures remain terminal.`,
+      authority: `README cache retention; glossary persisted cache claim; issue-2056-cache-eviction-design; oracle-coverage Electric recovery demand and scoped persisted restore; persisted-durability-model-oracle expectAbortGraphObservation same-key abort law.`,
+      limits: `One sync run and deterministic host clock across ordinary commits, successful-hydration diverted commits, and failed-demand queued replay; one-to-three partial successors. Live controls repeat one key; independent cancellation preserves usability, and the two-or-three-successor dependent pending-recovery cut preserves the abort-graph owner's same-key fail-stop law. Recovery also begins during an awaited renewal. No multi-tab delivery or native mobile host. Read counts are diagnostics; no universal performance budget.`,
+    },
+    histories: {
+      arbitrary,
+      runs: 4,
+      fixedSeeds: [18_530_111],
+      states: [...cuts],
+      constructed,
+    },
+    resolve: (history) => ({ history }),
+    // Claim loss removes the old base; an ordinary live result preserves the
+    // cached row's unseen field. An I/O failure revokes no claim and crashes.
+    model: ({ history }) => ({
+      cut: history.cut,
+      reached: true,
+      requestLocalReadFailed: history.cut.startsWith(`queued-`),
+      rotations:
+        history.cut.includes(`expired`) || history.cut.includes(`recovery`)
+          ? 1
+          : 0,
+      outcomes: Array.from({ length: history.successors }, () => ({
+        status: history.cut === `live` ? `fulfilled` : `rejected`,
+        name:
+          history.cut === `live`
+            ? null
+            : history.cut === `live-read-error`
+              ? `Error`
+              : `AbortError`,
+        sameReadError: history.cut === `live-read-error`,
+      })),
+      status:
+        history.cut === `live-read-error` ||
+        history.cut === `dependent-recovery-pending`
+          ? `crashed`
+          : `ready`,
+      shared:
+        history.cut.includes(`expired`) || history.cut.includes(`recovery`)
+          ? null
+          : {
+              id: `shared`,
+              title:
+                history.cut === `live`
+                  ? `${history.title}/${history.successors - 1}`
+                  : `cached`,
+              detail: `unseen durable field`,
+            },
+      next:
+        history.cut === `live-read-error` ||
+        history.cut === `dependent-recovery-pending`
+          ? `not-admitted`
+          : `fulfilled`,
+      nextStatus:
+        history.cut === `live-read-error` ||
+        history.cut === `dependent-recovery-pending`
+          ? `crashed`
+          : `ready`,
+      nextRows:
+        history.cut === `live-read-error` ||
+        history.cut === `dependent-recovery-pending`
+          ? { public: null, durable: null, currentTarget: null }
+          : {
+              public: { id: `next`, title: `next` },
+              durable: { id: `next`, title: `next` },
+              currentTarget: true,
+            },
+      cleanupErrors: [],
+      browserErrors: [],
+    }),
+    driver: async ({ history }, observe) => {
+      const result = await (run
+        ? run(history)
+        : runSourceClaimHistory(history, open))
+      observe(`source claim result`, result)
+      if (process.env.TANSTACK_DB_PERSISTENCE_BASELINE_WORK === `1`)
+        process.stderr.write(
+          `source claim baseline work ${JSON.stringify({ property, history, reads: result.baselineReads })}\n`,
+        )
+      if (result.reached) observe(`reach`, result.cut)
+    },
+    check: ({ history }, trace, expected) => {
+      const observed = trace.find(
+        (entry) => entry.checkpoint === `source claim result`,
+      )?.value as SourceClaimObservation | undefined
+      if (!observed)
+        return violation(
+          `source claim result`,
+          `missing observation`,
+          `claim-authorized source FIFO`,
+        )
+      const {
+        baselineReads: _baselineReads,
+        next,
+        nextStatus,
+        nextRows,
+        executionErrors,
+        ...settlement
+      } = observed
+      const {
+        next: expectedNext,
+        nextStatus: expectedNextStatus,
+        nextRows: expectedNextRows,
+        ...expectedSettlement
+      } = expected
+      const details = executionErrors?.length
+        ? ` Later execution diagnostics: ${JSON.stringify(executionErrors)}`
+        : ``
+      try {
+        expect({
+          ...settlement,
+          browserErrors: observed.browserErrors ?? [],
+        }).toEqual(expectedSettlement)
+      } catch (error) {
+        if (!(error instanceof Error) || error.name !== `AssertionError`)
+          throw error
+        return violation(
+          `successor receipt and recovery`,
+          `${error.message} Completed settlement: ${JSON.stringify(settlement)}${details}`,
+          `claim-authorized source FIFO`,
+        )
+      }
+      const nextPrefix = {
+        next,
+        nextStatus,
+        public: nextRows.public,
+        currentTarget: nextRows.currentTarget,
+      }
+      try {
+        expect(nextPrefix).toEqual({
+          next: expectedNext,
+          nextStatus: expectedNextStatus,
+          public: expectedNextRows.public,
+          currentTarget: expectedNextRows.currentTarget,
+        })
+      } catch (error) {
+        if (!(error instanceof Error) || error.name !== `AssertionError`)
+          throw error
+        return violation(
+          `ordinary next source use`,
+          `${error.message} Completed next use: ${JSON.stringify(nextPrefix)}${details}`,
+          `claim-authorized source FIFO`,
+        )
+      }
+      if (executionErrors?.length)
+        throw new AggregateError(
+          executionErrors.map((message) => new Error(message)),
+          `Source claim next-use observation failed`,
+        )
+      try {
+        expect(nextRows.durable).toEqual(expectedNextRows.durable)
+      } catch (error) {
+        if (!(error instanceof Error) || error.name !== `AssertionError`)
+          throw error
+        return violation(
+          `ordinary next source durability`,
+          error.message,
+          `claim-authorized source FIFO`,
+        )
+      }
+      const state = required.get(history)
+      if (
+        state &&
+        !trace.some(
+          (entry) => entry.checkpoint === `reach` && entry.value === state,
+        )
+      )
+        return violation(`reach`, `missing ${state}`, `constructed claim reach`)
+      return pass
+    },
+    calibrations: [
+      {
+        name: `preserves next public mismatch before later durable read failure`,
+        history: { constructed: `live claim cut 1` },
+        law: `claim-authorized source FIFO`,
+        difference:
+          /(?=[\s\S]*calibrated next public corruption)(?=[\s\S]*calibrated later durable read failure)/,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `source claim result`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as SourceClaimObservation),
+                    nextRows: {
+                      ...(entry.value as SourceClaimObservation).nextRows,
+                      public: {
+                        id: `next`,
+                        title: `calibrated next public corruption`,
+                      },
+                    },
+                    executionErrors: [`calibrated later durable read failure`],
+                  },
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `preserves settlement mismatch before later durable read failure`,
+        history: { constructed: `live claim cut 1` },
+        law: `claim-authorized source FIFO`,
+        difference:
+          /(?=[\s\S]*calibrated old settlement corruption)(?=[\s\S]*calibrated later durable read failure)/,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `source claim result`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as SourceClaimObservation),
+                    shared: {
+                      id: `shared`,
+                      title: `calibrated old settlement corruption`,
+                    },
+                    executionErrors: [`calibrated later durable read failure`],
+                  },
+                }
+              : entry,
+          ),
+      },
+      {
+        name: `rejects acknowledged next write absent from current durable storage`,
+        history: { constructed: `expired claim cut 1` },
+        law: `claim-authorized source FIFO`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `source claim result`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as SourceClaimObservation),
+                    nextRows: {
+                      ...(entry.value as SourceClaimObservation).nextRows,
+                      durable: null,
+                    },
+                  },
+                }
+              : entry,
+          ),
+      },
+      ...constructed.map((builder) => ({
+        name: `${builder.name} cannot omit reach`,
+        history: { constructed: builder.name },
+        law: `constructed claim reach`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.filter((entry) => entry.checkpoint !== `reach`),
+      })),
+      {
+        name: `rejects terminal loss of an expired claim`,
+        history: { constructed: `expired claim cut 1` },
+        law: `claim-authorized source FIFO`,
+        corrupt: (trace) =>
+          trace.map((entry) =>
+            entry.checkpoint === `source claim result`
+              ? {
+                  ...entry,
+                  value: {
+                    ...(entry.value as SourceClaimObservation),
+                    status: `crashed`,
+                  },
+                }
+              : entry,
+          ),
       },
     ],
   })

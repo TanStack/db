@@ -203,9 +203,14 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
       // The client enters `ready` when a full checkpoint is applied after
       // (re)connecting. An earlier status listener can change requested streams
       // before this callback runs, so each wait inherits its lease/run signal.
-      // Delivery is healthy once none of this Collection's streams fail.
+      // A full checkpoint heals the connection independently of stream errors.
       const onCheckpointApplied = () => {
         if (!active || client.status.state !== 'ready') return
+        if (connectionError) {
+          const recovered = connectionError
+          connectionError = undefined
+          reportHealthy(recovered)
+        }
         const sources = new Set(streamErrors.keys())
         if (lease) sources.add(lease)
         Promise.all(
@@ -218,15 +223,7 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
                   clearStreamError(source)
               })
           }),
-        ).then(
-          () => {
-            if (!active || !connectionError || streamErrors.size) return
-            reportHealthy(connectionError)
-            connectionError = undefined
-          },
-          // A stream that still fails keeps its failure, and the outage.
-          () => {},
-        )
+        ).catch(() => {})
       }
       const onChanges = (changes: TableChanges) => {
         if (!active || !synced) return
@@ -292,44 +289,49 @@ export function powerSyncCollectionOptions<T extends { id: string }>(
           }
         : cleanup
 
-      // Delivers the current rows synchronously, so a parse error may already
-      // have stopped the run when this returns.
-      unlisten = client.listen(options.table, {
-        onChanges,
-        onError: onConnectionError,
-      })
-      if (controller.signal.aborted) {
-        unlisten()
-        return handlers
-      }
-      unsubscribeStatus = client.subscribeStatus(onCheckpointApplied)
-      if (!onDemand) {
-        const eager = client.acquireStreams(options.streams ?? [], {
-          onError: (error) => onStreamError(eager, error),
-          includeDefaultStreams: options.includeDefaultStreams ?? false,
+      try {
+        // Delivers the current rows synchronously, so a parse error may already
+        // have stopped the run when this returns.
+        unlisten = client.listen(options.table, {
+          onChanges,
+          onError: onConnectionError,
         })
-        lease = eager
-      }
-
-      if (lease) {
-        lease
-          .waitForSync(controller.signal)
-          .then(async () => {
-            if (controller.signal.aborted) return
-            synced = true
-            // The changes until now were skipped, so read the whole table.
-            onChanges(client.tableSnapshot(options.table))
-            await lastApplied
-            if (active) markReady()
+        if (controller.signal.aborted) {
+          unlisten()
+          return handlers
+        }
+        unsubscribeStatus = client.subscribeStatus(onCheckpointApplied)
+        if (!onDemand) {
+          const eager = client.acquireStreams(options.streams ?? [], {
+            onError: (error) => onStreamError(eager, error),
+            includeDefaultStreams: options.includeDefaultStreams ?? false,
           })
-          .catch(stop)
-      } else {
-        // Readiness for on-demand data is tracked by each loadSubset promise.
-        // Starting the collection itself requires no remote table snapshot.
-        markReady()
-      }
+          lease = eager
+        }
 
-      return handlers
+        if (lease) {
+          lease
+            .waitForSync(controller.signal)
+            .then(async () => {
+              if (controller.signal.aborted) return
+              synced = true
+              // The changes until now were skipped, so read the whole table.
+              onChanges(client.tableSnapshot(options.table))
+              await lastApplied
+              if (active) markReady()
+            })
+            .catch(stop)
+        } else {
+          // Readiness for on-demand data is tracked by each loadSubset promise.
+          // Starting the collection itself requires no remote table snapshot.
+          markReady()
+        }
+
+        return handlers
+      } catch (error) {
+        cleanup()
+        throw error
+      }
     },
   }
 

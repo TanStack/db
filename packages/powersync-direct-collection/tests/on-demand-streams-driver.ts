@@ -66,10 +66,10 @@ export function directOnDemandStreamsAdapter({
       })
       const requested: Array<StreamOwner> = []
       const connectionInputs: Array<StreamConnectionInput> = []
-      // Connection health sees whether every requested requirement resolved,
-      // not which healthy subset happened to be replayed or how often. Adjacent
-      // equal inputs are idempotent under that law. Keep their order relative
-      // to interruptions; scope identities remain in the ownership observations.
+      // A consumed full checkpoint supplies connection recovery independently
+      // of its stream rejections (maintainer decision 2026-11-24, N07).
+      // Failed requirements remain diagnostic here and are judged separately
+      // through stream ownership. Preserve ordering against interruptions.
       const receiveConnectionInput = (event: StreamConnectionInput) => {
         if (JSON.stringify(connectionInputs.at(-1)) !== JSON.stringify(event))
           connectionInputs.push(event)

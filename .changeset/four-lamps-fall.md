@@ -1,5 +1,6 @@
 ---
-'@tanstack/powersync-direct-collection': minor
+'@tanstack/powersync-direct-collection': major
 ---
 
-Initial release.
+Release the first PowerSync Direct collection candidate alongside the DB 1.0
+release candidates.

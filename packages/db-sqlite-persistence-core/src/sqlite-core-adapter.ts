@@ -51,6 +51,10 @@ type SqliteSupportedValue = null | number | string
 // lower binding cap use smaller chunks; each replacement row binds four values.
 const REPLACEMENT_BATCH_SIZE = 125
 
+function getBindLimit(driver: SQLiteDriver, fallback: SQLiteDriver): number {
+  return driver.maxBoundParameters ?? fallback.maxBoundParameters ?? 999
+}
+
 type CollectionTableMapping = {
   tableName: string
   tombstoneTableName: string
@@ -2407,10 +2411,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
           // Encode before deduplication: storage distinguishes numeric/string
           // keys and signed zero. The transaction driver owns the binding cap.
           const keys = [...new Set(ctx.rowKeys.map(encodePersistedStorageKey))]
-          const cap =
-            transactionDriver.maxBoundParameters ??
-            this.driver.maxBoundParameters ??
-            999
+          const cap = getBindLimit(transactionDriver, this.driver)
           for (const batch of batches(keys, cap))
             for (const row of decodeStoredSqliteRows(
               await transactionDriver.query<StoredSqliteRow>(
@@ -3686,10 +3687,7 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       queryParams.push(...orderByCompiled.params)
     }
 
-    if (
-      queryParams.length >
-      (driver.maxBoundParameters ?? this.driver.maxBoundParameters ?? 999)
-    ) {
+    if (queryParams.length > getBindLimit(driver, this.driver)) {
       sql = `SELECT key, value, metadata, row_version FROM ${collectionTableSql}`
       queryParams.length = 0
     }

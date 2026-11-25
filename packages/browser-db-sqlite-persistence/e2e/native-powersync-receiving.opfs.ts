@@ -3,6 +3,7 @@ import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'
 import { observeBrowserPowerSyncInitialReceipt } from '../../powersync-db-collection/tests/initial-receipt-browser'
 import { observePowerSyncHooks } from '../../powersync-db-collection/tests/hook-lifecycle-driver'
 import { observeNativeBatchDecode } from '../../powersync-db-collection/tests/batch-decode-driver'
+import { observeNativeMutationRefusal } from '../../powersync-db-collection/tests/batch-decode-mutation-driver'
 import { openBrowserReceivingDatabase } from '../../powersync-db-collection/tests/native-receiving-browser'
 import { retainInitialReceiptCleanup } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'
 import { inProcessSeams } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
@@ -14,7 +15,10 @@ import { removeStartupOPFSArtifacts } from './persisted-startup-opfs-cleanup'
 import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
 import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
 import type { HookHistory } from '../../powersync-db-collection/tests/hook-lifecycle-oracle'
-import type { NativeDecodeHistory } from '../../powersync-db-collection/tests/batch-decode-oracle'
+import type {
+  NativeDecodeHistory,
+  NativeMutationHistory,
+} from '../../powersync-db-collection/tests/batch-decode-oracle'
 
 let sequence = 0
 async function runNativePowerSyncInitialReceipt(
@@ -75,14 +79,20 @@ const runNativePowerSyncBatchDecode = (
   history: NativeDecodeHistory,
   id: string,
 ) => observeNativeBatchDecode(openBrowserReceivingDatabase, history, id)
+const runNativePowerSyncMutationRefusal = (
+  history: NativeMutationHistory,
+  id: string,
+) => observeNativeMutationRefusal(openBrowserReceivingDatabase, history, id)
 
 declare global {
   interface Window {
     runNativePowerSyncInitialReceipt: typeof runNativePowerSyncInitialReceipt
     runNativePowerSyncHooks: typeof runNativePowerSyncHooks
     runNativePowerSyncBatchDecode: typeof runNativePowerSyncBatchDecode
+    runNativePowerSyncMutationRefusal: typeof runNativePowerSyncMutationRefusal
   }
 }
 window.runNativePowerSyncInitialReceipt = runNativePowerSyncInitialReceipt
 window.runNativePowerSyncHooks = runNativePowerSyncHooks
 window.runNativePowerSyncBatchDecode = runNativePowerSyncBatchDecode
+window.runNativePowerSyncMutationRefusal = runNativePowerSyncMutationRefusal

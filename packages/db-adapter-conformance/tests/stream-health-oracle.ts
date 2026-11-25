@@ -1,8 +1,9 @@
 /**
  * Stream health is the incidence of failed streams with retained logical
  * owners, plus an independent connection outage. Releasing a stream claim
- * cannot heal that outage. Only a successful full sync of retained requirements
- * does so (Direct Errors and reportError/reportHealthy). This judgment knows no
+ * cannot heal that outage. A successful full checkpoint heals the connection
+ * even when a retained stream remains rejected (maintainer decision,
+ * 2026-11-24, external-review N07). That stream keeps its own failure. This judgment knows no
  * SDK leases, request counters, rows or receipt machinery. A lease may expose
  * only its first failed stream, so it requires a nonempty, relevant stream
  * witness rather than enumerating inaccessible failures. Unknown causes and
@@ -15,13 +16,14 @@ export type StreamProblem =
 
 // Provider inputs are distinct from adapter health reports. A cold acquisition
 // may retire during replay while its receipt is held. A later checkpoint with
-// no failed retained requirement heals the connection, while that original
-// query still rejects its own acquisition. Pre-ready transport failures keep
+// heals the connection, while that original query still rejects its own
+// acquisition. Pre-ready transport failures keep
 // loading rather than becoming a ready source's reported outage.
 export type StreamConnectionInput =
   | { kind: `interrupted`; ready: boolean }
   | {
       kind: `checkpoint`
+      /** Diagnostic input; rejected requirements keep their own stream cause. */
       hasFailedRequirement: boolean
     }
 
@@ -30,9 +32,7 @@ export function streamConnectionOutage(
 ): boolean {
   return inputs.reduce(
     (outage, input) =>
-      input.kind === `interrupted`
-        ? outage || input.ready
-        : outage && input.hasFailedRequirement,
+      input.kind === `interrupted` ? outage || input.ready : false,
     false,
   )
 }

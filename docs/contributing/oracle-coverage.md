@@ -3985,21 +3985,41 @@ preserves the live-host and mutant evidence.
 The shared [source FIFO owner](../../packages/db-sqlite-persistence-core/tests/persisted-source-fifo-oracle.ts)
 now supplies the existing persisted oracle and a
 [real Node SQLite receiver](../../packages/db-sqlite-persistence-core/tests/persisted-source-fifo-sqlite-oracle.test.ts).
-Both retain the four-run fixed/random budget and seed 18,530,101. Six axes cross
-ordinary same-key/disjoint commits, equal-value restoration, a queued subset
-read before an older ordinary commit, failed hydration with a later partial
-update, and independent abort. Five fresh constructions per axis enforce reach;
-all six axes remain in every generated history. The held-read premise records
+Both retain the four-run fixed/random budget and seed 18,530,101. Eleven axes
+cross ordinary same-key/disjoint commits, equal-value restoration, a queued
+subset read before an older ordinary commit, failed hydration with a later
+partial update, independent and baseline-read abort, loaded partial rows,
+sparse ordinary predecessors, multi-key updates, and work appended during a
+baseline read. Five fresh constructions per axis enforce reach; all eleven
+axes remain in every generated history. The held-read premise records
 the older unapplied commit and the newer commit during the read. Comparisons
 retain the held public baseline and check settled receipts, complete public and
 durable rows, changing disjoint-write order, partial-update metadata, status,
-and pending markers. Both hosts were RED before production repair. Direct's
-real SDK/Chromium/worker/OPFS receiver separately exposed the same ordering
+and pending markers. The original six-axis repair was RED on both hosts before production repair.
+Direct's real SDK/Chromium/worker/OPFS receiver separately exposed the same ordering
 defect at its original loaded cut. The repair preserves ordinary FIFO admission
 and reuses the existing baseline helper at the deferred transaction's actual
 turn. See the [review and evidence](oracle-reviews/2026-11-23-powersync-request-fixtures.md).
 These controlled schedules and one-process native receiver do not establish
 multi-tab or mobile-host behavior.
+
+The same FIFO owner also registers `sqlite-persistence.source-claim-boundary`
+for controlled storage, Node SQLite, and Chromium worker/OPFS. Its successful
+hydration histories hold an ordinary predecessor after its durable write but
+before the diverted partial successor's FIFO turn, then cross a live claim,
+expiry before the baseline read, expiry at actual baseline admission, pending
+scoped recovery, recovery during/after renewal, known expiry in renewed and
+no-renew caller continuations, failed-demand queued replay, and a live-claim I/O
+failure. One-to-three successors preserve
+independent cancellation and repeated same-key live controls; the abort-graph
+owner retains dependent-abort fail-stop. Each host uses the same judgment at
+receipt settlement, recovery and the next ordinary write's public/durable cut: expired authority rejects the old commit,
+rotates privately, clears the old base, and permits new source use. Live I/O
+failure stays terminal. Two fresh constructions per cut reach each state ten
+times per fixed/random campaign; the four-run generated budget remains
+separate. Baseline round trips are recorded as work evidence, not a prohibition
+on a strategy that preserves hidden durable fields. See the
+[claim-boundary review](oracle-reviews/2026-11-24-persisted-baseline-claims.md).
 
 The `hydration source durability routing` owner in
 `packages/db-sqlite-persistence-core/tests/persisted-oracle.test.ts` now runs
@@ -8985,10 +9005,10 @@ these commands do not imply that the current portfolio is entirely GREEN.
 | Complete eager replacement and initial gate: `db-adapter-conformance/tests/eager-reload-oracle.ts` | Query, Convex, Electric, RxDB, native and Direct PowerSync, TrailBase and actual Neon SDK; complete empty/change/omission results, applied receipts, optimistic settlement, terminal first loads where applicable. Provider-consumption barriers precede the comparison; missing readiness is an observed mismatch. LocalStorage receives complete replacement; local-only retains its user-owned rows under its existing owner. |
 | Initial receipt cleanup: `powersync-direct-collection/tests/initial-receipt-oracle.ts` | Actual provider and persistence boundaries for Electric, RxDB, native PowerSync and Neon, including Node SQLite and Chromium worker/OPFS where recorded. Rejected deferred receipts and application of already-admitted receipts are explicit alternative premises. Detached host failures and teardown diagnostics remain observable. |
 | Native PowerSync hooks: `powersync-db-collection/tests/hook-lifecycle-oracle.ts` | Real Node/browser SQLite; returned cleanup ownership, pending-hook retirement, subset release, and successful load settlement behind an actual held applied receipt. |
-| Native PowerSync decoding: `powersync-db-collection/tests/batch-decode-oracle.ts` | Real Node/browser SQLite pages; valid transformed keys and values, refused initial/live pages, terminal health and watcher release, corrected source data and empty/nonempty new demand in the same run, followed by explicit cleanup/restart. Earlier accepted initial pages remain legal. |
+| Native PowerSync decoding: `powersync-db-collection/tests/batch-decode-oracle.ts` | Real Node/browser SQLite pages; valid transformed keys and values, refused initial/live pages, terminal health and watcher release, corrected source data and new demand, cleanup/restart. Native CRUD also crosses refusal and cleanup: each confirmation belongs to its captured sync run, including a healthy same-table peer and a healthy-first two-Collection transaction. Two active observers release in either order; a peer cannot retire the writing Collection's optimism before its own source commit. Complete own/peer rows and publication cuts distinguish premature confirmation from waiting for every observer. Held SDK returns expose detached rejections without erasing already committed SQL effects. Earlier accepted initial pages remain legal; SQL cancellation is not promised. |
 | RxDB mutation settlement: `rxdb-db-collection/tests/mutation-source-batch-oracle.ts`, receiving `db/tests/optimistic-history-oracle.ts` | Built-in CRUD handlers and real SDK change events before/after handler settlement; whole application rows, settlement publications and detached failure observations. No invented explicit confirmation API. |
 | Electric decoding: `electric-db-collection/tests/sdk-decoder-oracle.ts` | Real ShapeStream HTTP delivery in Node and Chromium; valid transformed keys and values, parser refusal, retained health and subsequent valid delivery, using actual completed SDK subscriber delivery. |
-| TrailBase mutation confirmation: `trailbase-db-collection/tests/mutation-events-sdk-oracle.ts` | Real SDK CRUD and event delivery, one write at a time; stale same-key evidence cannot confirm a later request. Event identity supplies causality without assuming wall-clock progress. |
+| TrailBase mutation confirmation: `trailbase-db-collection/tests/mutation-events-sdk-oracle.ts` | Installed SDK on Node and Chromium, one built-in CRUD handler, eager/on-demand, both response/event orders and prior same-key evidence. Maintainer decision 2026-11-24 requires prompt rejection once HTTP is available and stopped source makes confirmation impossible. Twenty-seven generated reach states cross EOF/error, buffered drain, retirement/replacement, proof held beyond the old pruning window, healthy missing-event deadline and reentrant entry through a public change callback. Accepted proof survives closure and delayed HTTP; a retired request cannot borrow replacement evidence; an older publishing event cannot confirm its new handler. Four dual-host source controls fail those comparison cuts. No concurrent-handler, persistence, deployed-service, HTTP cancellation or backend rollback claim. [Review evidence](oracle-reviews/2026-11-24-pr2446-c366-review.md). |
 | Neon exact-query client sharing: `db-adapter-conformance/tests/neon/neon-shared-client-oracle.ts` | Actual SDK client with distinct query subscriptions; either peer releases while the survivor continues. This is query-local membership, unlike Direct's shared table union. |
 | Persisted demand coverage: `db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts` | `db-adapter-conformance/tests/persisted-demand-receiving-oracle-suite.ts` receives the unchanged judgment through Query, Electric, native PowerSync, TrailBase and lazy Convex. Fresh SDKs and physically closed/reopened Node SQLite or Chromium worker/OPFS storage distinguish exact/empty saved coverage from overlap, failed, unfinished and never-requested demand. Per-load waits, early failure, public restored source rows, preload, durable rows and late online answers are checked. Direct has its separate receiver below. |
 
@@ -9144,3 +9164,30 @@ about native cross-context lock scheduling. The existing real Chromium OPFS
 and real Electron receiving paths keep their native host implementations,
 histories, observation checkpoints and comparisons. Maintainer decision:
 2026-11-18, use a Node 22 polyfill and retain real Chromium witnesses.
+
+### External review at c366c65d3
+
+The [review evaluation](oracle-reviews/2026-11-24-pr2446-c366-review.md)
+records each finding, its oracle gap, actual receiving evidence and limits.
+`powersync-direct-collection/tests/startup-ownership-oracle.property.test.ts`
+receives the shared construction judgment from `shared-client-oracle.ts` on
+Node and Chromium. Generated startup steps fail before or after table/status
+registration, acquisition and sync waiting. Actual SDK normalization refusals
+include empty names and invalid JSON parameters. The comparison checks the
+original failure, a surviving peer, and resource counts after each of two
+public cleanup calls. Source and corrupted-observation mutants reject leaks,
+peer release, cause replacement and duplicate release.
+
+The shared-client and stream-health owners distinguish connection recovery
+from retained stream failures. Maintainer decision, 2026-11-24: a successful
+SDK reconnection clears its connection cause even when a stream still fails;
+that stream's cause remains. Raw Node/Chromium and controlled/Node SQLite/OPFS
+receivers check failure frames, subsequent outages, peer delivery and cleanup.
+
+One review hypothesis remains unproved: a persisted on-demand acquisition is
+already synced while its source Collection still loads. Its owner is
+`db-adapter-conformance/tests/on-demand-streams-oracle.ts`. Cold/cached actual
+SDK probes with startup-read and durable-write holds did not reach that cut;
+the original reviewer also could not supply a reproduction. A valid schedule
+must establish both premises before the later stream error. This is an open
+evidence question, not a skipped history or a product limitation.

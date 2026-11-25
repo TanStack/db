@@ -76,19 +76,26 @@ export class PowerSyncTransactor {
      */
     const collectionsById = new Map<
       string,
-      PendingMutation<any>[`collection`]
+      {
+        collection: PendingMutation<any>[`collection`]
+        metadata: PowerSyncCollectionMeta
+      }
     >()
     const lastCollectionMutationIndexes = new Map<string, number>()
     for (const [index, mutation] of mutations.entries()) {
       const collectionId = mutation.collection.id
       if (!collectionsById.has(collectionId)) {
-        collectionsById.set(collectionId, mutation.collection)
+        const metadata = this.getMutationCollectionMeta(mutation)
+        collectionsById.set(collectionId, {
+          collection: mutation.collection,
+          metadata,
+        })
       }
       const changesDatabase =
         mutation.type != `update` ||
         Object.keys(mutation.changes).some((key) => key != `id`) ||
         (typeof mutation.metadata != `undefined` &&
-          this.getMutationCollectionMeta(mutation).metadataIsTracked)
+          collectionsById.get(collectionId)!.metadata.metadataIsTracked)
       if (changesDatabase) {
         lastCollectionMutationIndexes.set(collectionId, index)
       }
@@ -96,7 +103,7 @@ export class PowerSyncTransactor {
 
     // Check all the observers are ready before taking a lock
     await Promise.all(
-      Array.from(collectionsById.values()).map(async (collection) => {
+      Array.from(collectionsById.values()).map(async ({ collection }) => {
         if (collection.isReady()) {
           return
         }
@@ -129,7 +136,10 @@ export class PowerSyncTransactor {
     // Persist to PowerSync
     const { whenComplete } = await this.database.writeTransaction(
       async (tx) => {
-        const pendingOperations: Array<PendingOperation | null> = []
+        const pendingOperations: Array<{
+          operation: PendingOperation
+          signal?: AbortSignal
+        }> = []
 
         for (const [index, mutation] of mutations.entries()) {
           /**
@@ -138,23 +148,24 @@ export class PowerSyncTransactor {
            */
           const shouldWait =
             index == lastCollectionMutationIndexes.get(mutation.collection.id)
+          let operation: PendingOperation | null
           switch (mutation.type) {
             case `insert`:
-              pendingOperations.push(
-                await this.handleInsert(mutation, tx, shouldWait),
-              )
+              operation = await this.handleInsert(mutation, tx, shouldWait)
               break
             case `update`:
-              pendingOperations.push(
-                await this.handleUpdate(mutation, tx, shouldWait),
-              )
+              operation = await this.handleUpdate(mutation, tx, shouldWait)
               break
             case `delete`:
-              pendingOperations.push(
-                await this.handleDelete(mutation, tx, shouldWait),
-              )
+              operation = await this.handleDelete(mutation, tx, shouldWait)
               break
           }
+          if (operation)
+            pendingOperations.push({
+              operation,
+              signal: collectionsById.get(mutation.collection.id)!.metadata
+                .syncSignal,
+            })
         }
 
         /**
@@ -163,13 +174,15 @@ export class PowerSyncTransactor {
          * observed via the diff triggers.
          * We return without awaiting in order to free the write lock.
          */
-        return {
-          whenComplete: Promise.all(
-            pendingOperations
-              .filter((op) => !!op)
-              .map((op) => this.pendingOperationStore.waitFor(op)),
+        const confirmation = Promise.all(
+          pendingOperations.map(({ operation, signal }) =>
+            this.pendingOperationStore.waitFor(operation, signal),
           ),
-        }
+        )
+        // A run can stop before the SDK forwards this callback's result.
+        // Observe rejection now; the original promise still rejects its handler.
+        void confirmation.catch(() => undefined)
+        return { whenComplete: confirmation }
       },
     )
 

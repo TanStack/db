@@ -275,6 +275,7 @@ function createPowerSyncCollectionConfig<
   type OutputType = InferPowerSyncOutputType<TTable, TSchema>
 
   const { viewName, trackMetadata: metadataIsTracked } = table
+  let syncSignal: AbortSignal | undefined
 
   /**
    * Deserializes data from the incoming sync stream
@@ -352,6 +353,7 @@ function createPowerSyncCollectionConfig<
         params.markReady()
       }
       const abortController = new AbortController()
+      syncSignal = abortController.signal
       let deserializationFailure: { error: unknown } | undefined
       const throwIfDeserializationFailed = (): void => {
         if (deserializationFailure) throw deserializationFailure.error
@@ -360,13 +362,13 @@ function createPowerSyncCollectionConfig<
       // A refused SQLite row makes this run inconsistent with its source.
       // Keep its original cause and stop tracking; only a new run can resume.
       const deserialize = (value: TableType): OutputType => {
-        if (deserializationFailure) throw deserializationFailure.error
+        throwIfDeserializationFailed()
         try {
           return deserializeSyncRow(value)
         } catch (error) {
           deserializationFailure = { error }
+          abortController.abort(error)
           fail(error)
-          abortController.abort()
           void disposeTrackingAfterAbort()
           throw error
         }
@@ -493,8 +495,8 @@ function createPowerSyncCollectionConfig<
             beforeCreate: async (context) => {
               // A retained reload uses one snapshot across its source reads.
               // Other initial loads and subset loads keep batch commits. A
-              // transaction begins only after its SQLite rows are read, so a
-              // failed read opens none.
+              // transaction begins after its SQLite batch query completes.
+              // A failed query opens no transaction for that batch.
               const batches: Array<Array<TableType>> = []
               const apply = () => {
                 begin({ snapshot })
@@ -611,7 +613,10 @@ function createPowerSyncCollectionConfig<
           // Confirm these local operations after the sync transaction is
           // staged; waiting for its applied receipt would deadlock the user
           // transaction that currently parks it.
-          pendingOperationStore.resolvePendingFor(pendingOperations)
+          pendingOperationStore.resolvePendingFor(
+            pendingOperations,
+            abortController.signal,
+          )
         } catch (error) {
           database.logger.log({
             level: LogLevels.error,
@@ -835,7 +840,6 @@ function createPowerSyncCollectionConfig<
         const pendingReleases: Array<PendingRelease> = []
         const pendingDemandLoads = new Set<Promise<void>>()
         const pendingDemandCleanups = new Set<Promise<unknown>>()
-        let stopped = false
         let trackingRevision = 0
         let reconciledTrackingRevision = 0
         let rebuildPromise: Promise<void> | null = null
@@ -863,15 +867,12 @@ function createPowerSyncCollectionConfig<
         let trackingOutage = false
         const reconcileTracking = async (): Promise<void> => {
           while (
-            !stopped &&
-            !deserializationFailure &&
+            !abortController.signal.aborted &&
             reconciledTrackingRevision !== trackingRevision
           ) {
             const revision = trackingRevision
             const isCurrent = () =>
-              !stopped &&
-              !deserializationFailure &&
-              trackingRevision === revision
+              !abortController.signal.aborted && trackingRevision === revision
             const appliedReceipts: Array<SyncAppliedReceipt> = []
 
             await database.writeLock(async (ctx) => {
@@ -955,14 +956,17 @@ function createPowerSyncCollectionConfig<
         const rebuildTracking = async (): Promise<void> => {
           // New demand can join after reconciliation exits but before its
           // shared promise clears. Each waiter must check its revision again.
-          while (!stopped && reconciledTrackingRevision !== trackingRevision) {
-            if (deserializationFailure) throw deserializationFailure.error
+          while (
+            !abortController.signal.aborted &&
+            reconciledTrackingRevision !== trackingRevision
+          ) {
+            throwIfDeserializationFailed()
             await (rebuildPromise ??= reconcileTracking()
               .catch((error) => {
                 // A rebuild may already have removed every active diff trigger,
                 // so rows can grow stale. Later demand rebuilds again, so after
                 // Collection readiness this is a failureReason, not fail().
-                if (stopped || deserializationFailure) {
+                if (abortController.signal.aborted) {
                   // Cleanup or fatal refusal already ended tracking.
                 } else if (ready) {
                   trackingOutage = true
@@ -974,21 +978,21 @@ function createPowerSyncCollectionConfig<
                 rebuildPromise = null
               }))
           }
-          if (deserializationFailure) throw deserializationFailure.error
+          throwIfDeserializationFailed()
         }
 
         const loadSubset = async (
           options: LoadSubsetOptions,
         ): Promise<void> => {
           throwIfDeserializationFailed()
-          if (stopped) return
+          if (abortController.signal.aborted) return
           // Never create a trigger that has no observer to drain its diff table.
           await startup
           throwIfDeserializationFailed()
           if (
             // Cleanup can run while startup is pending.
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-            stopped ||
+            abortController.signal.aborted ||
             releasedSubsets.has(options) ||
             options.signal?.aborted
           ) {
@@ -1019,7 +1023,7 @@ function createPowerSyncCollectionConfig<
           if (
             // The user hook can reenter cleanup.
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-            stopped ||
+            abortController.signal.aborted ||
             releasedSubsets.has(options) ||
             options.signal?.aborted ||
             demands.get(options) !== demand
@@ -1121,7 +1125,7 @@ function createPowerSyncCollectionConfig<
           const departingWhereSQL = toInlinedWhereClause(compiledDeparting)
           let rowsToEvict: Array<{ id: string }>
           for (;;) {
-            if (stopped || deserializationFailure) return
+            if (abortController.signal.aborted) return
             const revision = trackingRevision
             const active = activeWhereExpressions()
             let evictionSQL: string
@@ -1141,7 +1145,7 @@ function createPowerSyncCollectionConfig<
 
             rowsToEvict = await database.getAll<{ id: string }>(evictionSQL)
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cleanup can run during the query
-            if (stopped || deserializationFailure) return
+            if (abortController.signal.aborted) return
             if (trackingRevision === revision) break
           }
           if (rowsToEvict.length > 0) {
@@ -1156,8 +1160,7 @@ function createPowerSyncCollectionConfig<
 
         function scheduleReleaseDrain(delay = 0): void {
           if (
-            stopped ||
-            deserializationFailure ||
+            abortController.signal.aborted ||
             drainingReleases ||
             releaseRetryTimer
           )
@@ -1173,13 +1176,17 @@ function createPowerSyncCollectionConfig<
         }
 
         async function drainReleases(): Promise<void> {
-          if (stopped || drainingReleases) return
+          if (abortController.signal.aborted || drainingReleases) return
           drainingReleases = true
           let retryDelay = 0
           try {
             const attempts = pendingReleases.length
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- each release can reenter cleanup
-            for (let index = 0; !stopped && index < attempts; index++) {
+            for (
+              let index = 0;
+              // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- each release can reenter cleanup
+              !abortController.signal.aborted && index < attempts;
+              index++
+            ) {
               const pending = pendingReleases.shift()!
               try {
                 await performPhysicalRelease(pending.options)
@@ -1227,14 +1234,13 @@ function createPowerSyncCollectionConfig<
 
         return {
           cleanup: () => {
-            stopped = true
+            abortController.abort()
             clearTimeout(releaseRetryTimer)
             releaseRetryTimer = undefined
             database.logger.log({
               level: LogLevels.info,
               message: `Sync has been stopped for ${viewName} into ${trackedTableName}`,
             })
-            abortController.abort()
             const trackingDisposal = disposeTrackingAfterAbort()
             const pendingLoads = [...pendingDemandLoads]
             const pendingTasks = [...pendingDemandCleanups]
@@ -1340,6 +1346,7 @@ function createPowerSyncCollectionConfig<
         tableName: viewName,
         trackedTableName,
         metadataIsTracked,
+        syncSignal,
         serializeValue: (value) =>
           serializeForSQLite<TTable>(value, table, serializer),
       }),

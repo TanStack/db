@@ -27,6 +27,7 @@ import {
   retainInitialReceiptCleanup,
 } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'
 import { observeDirectSharedClient } from '../../powersync-direct-collection/tests/shared-client-driver'
+import { observeDirectConstruction } from '../../powersync-direct-collection/tests/sync-run-boundary-driver'
 import { observeDirectRequestBoundary } from '../../powersync-direct-collection/tests/request-boundary-driver'
 import { directConformanceDriver } from '../../powersync-direct-collection/tests/conformance-driver'
 import { observeEagerLiveSourceHistory } from '../../db-adapter-conformance/tests/eager-live-source-framework-oracle'
@@ -254,6 +255,7 @@ const runDirectEagerSource = (
 
 declare global {
   interface Window {
+    runDirectConstruction: typeof observeDirectConstruction
     runDirectPersistedStartup: typeof runDirectPersistedStartup
     runDirectEagerReload: typeof runDirectEagerReload
     runDirectEagerGateFailure: typeof runDirectEagerGateFailure
@@ -276,5 +278,6 @@ window.runDirectPersistedInitialReceipt = runDirectPersistedInitialReceipt
 window.runDirectMutationConfirmation = runDirectMutationConfirmation
 window.runDirectDecodeRefusal = runDirectDecodeRefusal
 window.runDirectSharedClient = runDirectSharedClient
+window.runDirectConstruction = observeDirectConstruction
 window.runDirectRequestBoundary = runDirectRequestBoundary
 window.runDirectEagerSource = runDirectEagerSource

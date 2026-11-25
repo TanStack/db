@@ -15,7 +15,10 @@
  * passive or distinct explicit streams, one retirement and one later complete
  * checkpoint. Active peers additionally compose request-scoped rejection,
  * changed rejection, healthy-peer update/deletion and changed/unchanged
- * recovery. A bounded application status listener may change the requested
+ * recovery. A successful full checkpoint retires connection failures while
+ * retaining stream failures; a later outage adds a new connection cause after
+ * retained stream failures (maintainer decision 2026-11-24, N07). A bounded
+ * application status listener may change the requested
  * streams before a Collection's ready listener runs. Its real SDK wait then
  * remains pending until the successor checkpoint. Cleanup releases that run's
  * pending work while a peer keeps syncing; a later checkpoint cannot supply
@@ -111,9 +114,12 @@ export const sharedClientStates = [
   `recovery-request-open`,
   `wait-pending-before-cleanup`,
   `wait-applied-before-cleanup`,
+  `transport-recovered-stream-rejected`,
 ] as const
 export type SharedClientState = (typeof sharedClientStates)[number]
 export type SharedClientCut = {
+  /** Actual SDK connection state, distinct from Collection readiness. */
+  providerState?: string
   rows: [Array<StartupRow>, Array<StartupRow>]
   statuses: [string, string]
   terminalErrors: [boolean, boolean]
@@ -180,7 +186,6 @@ export function sharedClientModel(h: SharedClientHistory) {
   ): Array<StreamProblem> =>
     fault?.stream === owner
       ? [
-          { kind: `connection`, attempt: 1 },
           {
             kind: `stream`,
             stream: owner === 0 ? `alpha` : `beta`,
@@ -198,8 +203,10 @@ export function sharedClientModel(h: SharedClientHistory) {
     scopedProblems(0, fault?.repeat),
     scopedProblems(1, fault?.repeat),
   ]
-  // Reopening the shared transport starts a new outage for the healthy peer
-  // too. Opening the request has delivered no successful checkpoint yet.
+  // A delivered full checkpoint clears its connection failure independently
+  // of subscription rejection (maintainer decision, 2026-11-24, N07).
+  // Reopening afterward creates a new outage, after the retained stream frame.
+  // The new request has delivered no successful checkpoint yet.
   const pendingProblems = peerProblems.map((problems) =>
     problems.some((problem) => problem.kind === `connection`)
       ? problems
@@ -334,9 +341,8 @@ export function sharedClientViolations(
           actual.problems[owner],
         ).map((failure) => `${cut}/${owner} ${failure}`),
       )
-      // Closing transport precedes resolving the successor's arguments. The
-      // retained connection error therefore precedes every stream rejection.
-      // Compare the full frame, not only relative stream-message order.
+      // Successful checkpoints retire connection causes without retiring
+      // stream causes. A later outage joins after that retained stream frame.
       const frame = (problems: ReadonlyArray<StreamProblem>) =>
         problems.flatMap((p) =>
           p.kind === `stream`
@@ -345,23 +351,7 @@ export function sharedClientViolations(
         )
       const wantedFrame = frame(health)
       const observedFrame = frame(actual.problems[owner])
-      // RETRY-1 permits extra reports for later attempts of the still-open
-      // outage. They can occur only at the authored closes: C2 before E4,
-      // and the recovery close after the final rejection. C1 stays mandatory.
-      const pattern = wantedFrame.flatMap((token, index) => [
-        ...(h.failure?.repeat && index === 2
-          ? [{ token: `connection:2`, optional: true }]
-          : []),
-        { token, optional: false },
-      ])
-      if (
-        cut === `recoveryPending` &&
-        health.some((problem) => problem.kind === `stream`)
-      )
-        pattern.push({
-          token: `connection:${h.failure?.repeat ? 3 : 2}`,
-          optional: true,
-        })
+      const pattern = wantedFrame.map((token) => ({ token, optional: false }))
       let cursor = 0
       let ordered = true
       for (const expectedEntry of pattern) {
@@ -410,5 +400,110 @@ export function sharedClientViolations(
     failures.push(`SDK wait did not reach the declared pre-cleanup boundary`)
   if (raw.finalProviderState !== `idle`)
     failures.push(`final provider resources`)
+  return failures
+}
+
+/**
+ * Partial construction has the same ownership obligation as normal cleanup.
+ * A failed sync run returns no cleanup callback to core, so it must release
+ * resources it already acquired before propagating its original failure.
+ * This projection counts acquisitions independently of SDK allocation order.
+ * It covers actual SDK subscription normalization refusals plus controlled
+ * throws at the public collaborator boundaries, beside an optional ready peer.
+ * It makes no promise about an SDK method's internal partial allocations.
+ */
+export const sharedConstructionStages = [
+  `table-listener`,
+  `status-listener`,
+  `subscription-values`,
+  `lease-wait`,
+  `successful-start`,
+] as const
+export const sharedConstructionValues = [
+  `empty-name`,
+  `bigint-parameter`,
+  `circular-parameter`,
+  `throwing-json`,
+] as const
+export type SharedConstructionHistory = {
+  stage: (typeof sharedConstructionStages)[number]
+  value: (typeof sharedConstructionValues)[number]
+  failureIndex: number
+  peer: boolean
+  coordinate: number
+}
+export const sharedConstructionHistoryArb = fc.record({
+  stage: fc.constantFrom(...sharedConstructionStages),
+  value: fc.constantFrom(...sharedConstructionValues),
+  failureIndex: fc.integer({ min: 0, max: 2 }),
+  peer: fc.boolean(),
+  coordinate: fc.integer({ min: 0, max: 10_000 }),
+})
+export const sharedConstructionStates = [
+  ...sharedConstructionStages,
+  ...sharedConstructionValues,
+  `ready-peer-survives`,
+] as const
+export type SharedConstructionObservation = {
+  browserErrors?: ReadonlyArray<string>
+  primaryErrorPreserved: boolean
+  failedStageReached: boolean
+  sourceStatus: string
+  peerStatus?: string
+  peerRows?: ReadonlyArray<string>
+  afterStart: ReadonlyArray<SharedClientResource>
+  afterSourceCleanup: ReadonlyArray<SharedClientResource>
+  afterRepeatedSourceCleanup: ReadonlyArray<SharedClientResource>
+  afterPeerCleanup: ReadonlyArray<SharedClientResource>
+  finalResources: ReadonlyArray<SharedClientResource>
+  finalProviderState: string
+  reached: ReadonlyArray<(typeof sharedConstructionStates)[number]>
+}
+// The authored failure, not the provider's resource topology, decides the
+// obligation: failed construction owes no resources; a live run retains them
+// until its own cleanup. A peer's row is independent of the failed input.
+export function sharedConstructionModel(h: SharedConstructionHistory) {
+  return {
+    failed: h.stage !== `successful-start`,
+    sourceStatus: h.stage === `successful-start` ? `ready` : `crashed`,
+    peerRows: h.peer ? [`peer-${h.coordinate}`] : undefined,
+  }
+}
+export function sharedConstructionViolations(
+  h: SharedConstructionHistory,
+  raw: SharedConstructionObservation,
+) {
+  const expected = sharedConstructionModel(h)
+  const failures = [...(raw.browserErrors ?? [])]
+  if (!raw.failedStageReached) failures.push(`construction stage not reached`)
+  if (raw.sourceStatus !== expected.sourceStatus)
+    failures.push(`construction outcome changed source status`)
+  if (expected.failed && !raw.primaryErrorPreserved)
+    failures.push(`construction replaced its primary failure`)
+  for (const resource of raw.afterStart)
+    if (resource.owner === 0 && resource.releases !== Number(expected.failed))
+      failures.push(`construction retained ${resource.kind}`)
+  for (const [cut, resources] of [
+    [`source cleanup`, raw.afterSourceCleanup],
+    [`repeated source cleanup`, raw.afterRepeatedSourceCleanup],
+  ] as const)
+    for (const resource of resources)
+      if (resource.releases !== (resource.owner === 0 ? 1 : 0))
+        failures.push(`${cut} changed ${resource.owner}/${resource.kind}`)
+  if (
+    h.peer &&
+    (raw.peerStatus !== `ready` ||
+      JSON.stringify(raw.peerRows) !== JSON.stringify(expected.peerRows))
+  )
+    failures.push(`failed construction retired peer delivery`)
+  for (const [cut, resources] of [
+    [`peer cleanup`, raw.afterPeerCleanup],
+    [`final`, raw.finalResources],
+  ] as const)
+    for (const resource of resources)
+      if (resource.releases !== 1)
+        failures.push(`${cut} construction resource ${resource.kind}`)
+  if (raw.finalProviderState !== `idle`)
+    failures.push(`failed construction kept provider active`)
   return failures
 }

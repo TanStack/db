@@ -146,7 +146,7 @@
  * a driver and compares each checkpoint with the model.
  */
 import * as fc from 'fast-check'
-import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'
+import { describeOracleCleanupError } from './cleanup-diagnostics'
 import type { ChangeMessage, HealthNode } from '@tanstack/db'
 
 // ---------------------------------------------------------------------------

@@ -1,15 +1,22 @@
 /** Each real host applies the same native page-admission model and check. */
 import { oracleProperty, pass, violation } from '../../db/tests/oracle-property'
 import {
+  legalNativeMutationHistory,
   nativeDecodeBatch,
   nativeDecodeHistoryArb,
   nativeDecodeModel,
   nativeDecodeStates,
   nativeDecodeViolations,
+  nativeMutationExpectedRows,
+  nativeMutationHistoryArb,
+  nativeMutationStates,
+  nativeMutationViolations,
 } from './batch-decode-oracle'
 import type {
   NativeDecodeHistory,
   NativeDecodeObservation,
+  NativeMutationHistory,
+  NativeMutationObservation,
 } from './batch-decode-oracle'
 import type { Observation } from '../../db/tests/oracle-property'
 
@@ -376,5 +383,212 @@ export function registerNativeBatchDecode(
       })),
     ],
     timeout: 180_000,
+  })
+}
+
+/** CRUD settlement shares the decode owner's refusal/retirement boundary. */
+export function registerNativeMutationRefusal(
+  property: string,
+  receive: (
+    h: NativeMutationHistory,
+    id: string,
+  ) => Promise<NativeMutationObservation>,
+  { owns }: { owns: ReadonlyArray<string> },
+) {
+  let sequence = 0
+  const required = new WeakMap<NativeMutationHistory, string>()
+  const constructed = nativeMutationStates.map((state) => ({
+    name: `generated ${state}`,
+    enters: [state],
+    build: (h: NativeMutationHistory) => {
+      let built = {
+        ...h,
+        peer: false,
+        peerTransaction: false,
+        activePeer: false,
+        peerFirst: false,
+      }
+      if (state.startsWith(`active-peer:`)) {
+        const [, mode, order, kind] = state.split(`:`)
+        built = {
+          ...built,
+          activePeer: true,
+          timing: `before-read`,
+          peerFirst: order === `peer-first`,
+          mode: mode as NativeMutationHistory['mode'],
+          kind: kind as NativeMutationHistory['kind'],
+        }
+      } else if (
+        state === `healthy-same-table-peer` ||
+        state === `same-table-transaction`
+      )
+        built = {
+          ...built,
+          peer: true,
+          effect: `decode-refusal`,
+          peerTransaction: state === `same-table-transaction`,
+          timing: `before-read`,
+        }
+      else if (state === `initial`) built.timing = `initial`
+      else if (state.startsWith(`refusal:`)) {
+        const [, mode, timing, kind] = state.split(`:`)
+        built = {
+          ...built,
+          effect: `decode-refusal`,
+          mode: mode as NativeMutationHistory['mode'],
+          timing: timing as NativeMutationHistory['timing'],
+          kind: kind as NativeMutationHistory['kind'],
+        }
+      } else {
+        const [effect, mode] = state.split(`:`)
+        built = {
+          ...built,
+          effect: effect as NativeMutationHistory['effect'],
+          mode: mode as NativeMutationHistory['mode'],
+          timing: `before-read`,
+        }
+      }
+      const history = legalNativeMutationHistory(built)
+      required.set(history, state)
+      return history
+    },
+  }))
+  oracleProperty({
+    id: property,
+    owns,
+    law: {
+      statement: `A native mutation fulfills only after its own Collection stages the observed SQLite operation; a same-table peer cannot replace that confirmation. Fatal decoder refusal rejects unconfirmed and newly admitted handlers instead of retaining an impossible wait. A rejected diff read permits later observation, and cleanup/restart cannot revive the retired request's outcome.`,
+      authority: `PowerSyncTransactor.applyTransaction and PendingOperationStore's confirmation contract; PowerSync guide settled CRUD; native definitions.ts fatal deserialization; glossary optimistic state, stopped sync error and cleanup.`,
+      limits: `One native table, one CRUD handler or two same-table Collections with individually owned confirmations, and one authored source update. Healthy same-table callbacks run in either order, with full owning/peer row snapshots and owning publications checked while the other callback remains parked. Real callback/read gates cover eager/on-demand, ordinary cleanup, and a committed SQLite write whose SDK result is held before forwarding. No transport or persistence wrapper. SQL rows and open sync transactions are diagnostics, not rollback or balanced-begin obligations.`,
+    },
+    histories: {
+      arbitrary: nativeMutationHistoryArb,
+      states: nativeMutationStates,
+      constructed,
+      runs: 8,
+      fixedSeeds: [2377],
+    },
+    model: nativeMutationExpectedRows,
+    driver: async (h, observe) => {
+      const actual = await receive(h, `${property}-${sequence++}`)
+      for (const state of actual.reached) observe(`reach`, state)
+      observe(`after native confirmation source drained`, actual)
+    },
+    check: (h, trace) => {
+      const actual = trace.find(
+        (item) =>
+          item.checkpoint === `after native confirmation source drained`,
+      )?.value as NativeMutationObservation | undefined
+      if (!actual)
+        return violation(
+          `after native confirmation source drained`,
+          `missing native mutation observation`,
+          `native mutation settlement`,
+        )
+      const state = required.get(h)
+      if (state && !actual.reached.includes(state))
+        return violation(`reach`, `missing ${state}`, `native mutation reach`)
+      const errors = nativeMutationViolations(h, actual)
+      return errors.length
+        ? violation(
+            `after native confirmation source drained`,
+            errors.join(`; `),
+            `native mutation settlement`,
+            {
+              actual: { history: h, observation: actual },
+              expected: nativeMutationExpectedRows(h),
+            },
+          )
+        : pass
+    },
+    calibrations: [
+      {
+        name: `a peer cannot fulfill the owning confirmation`,
+        history: {
+          constructed: `generated active-peer:eager:peer-first:insert`,
+        },
+        law: `native mutation settlement`,
+        difference: `another native Collection decided the owning handler`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.map((item) => {
+            if (item.checkpoint !== `after native confirmation source drained`)
+              return item
+            const actual = item.value as NativeMutationObservation
+            return {
+              ...item,
+              value: {
+                ...actual,
+                activePeer: { ...actual.activePeer!, mutation: `fulfilled` },
+              },
+            }
+          }),
+      },
+      {
+        name: `an unconfirmed mutation cannot disappear from a publication`,
+        history: {
+          constructed: `generated active-peer:eager:peer-first:insert`,
+        },
+        law: `native mutation settlement`,
+        difference: `owning native publication dropped unconfirmed optimistic state`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.map((item) => {
+            if (item.checkpoint !== `after native confirmation source drained`)
+              return item
+            const actual = item.value as NativeMutationObservation
+            return {
+              ...item,
+              value: {
+                ...actual,
+                activePeer: {
+                  ...actual.activePeer!,
+                  publications: [actual.activePeer!.base],
+                },
+              },
+            }
+          }),
+      },
+      {
+        name: `a healthy mutation cannot retain its confirmation wait`,
+        history: { constructed: `generated healthy:eager` },
+        law: `native mutation settlement`,
+        difference: `native mutation pending after its confirmation source drained`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace.map((item) =>
+            item.checkpoint === `after native confirmation source drained`
+              ? {
+                  ...item,
+                  value: {
+                    ...(item.value as NativeMutationObservation),
+                    mutation: `pending`,
+                  },
+                }
+              : item,
+          ),
+      },
+      ...constructed.map(({ name, enters: [state] }) => ({
+        name: `missing ${name}`,
+        history: { constructed: name },
+        law: `native mutation reach`,
+        corrupt: (trace: ReadonlyArray<Observation>) =>
+          trace
+            .map((item) =>
+              item.checkpoint === `after native confirmation source drained`
+                ? {
+                    ...item,
+                    value: {
+                      ...(item.value as NativeMutationObservation),
+                      reached: (
+                        item.value as NativeMutationObservation
+                      ).reached.filter((reached) => reached !== state),
+                    },
+                  }
+                : item,
+            )
+            .filter(
+              (item) => !(item.checkpoint === `reach` && item.value === state),
+            ),
+      })),
+    ],
+    timeout: 120_000,
   })
 }

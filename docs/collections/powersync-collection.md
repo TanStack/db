@@ -406,7 +406,17 @@ task.due_date.getTime() // OK - TypeScript knows this is a Date
 
 ### Optimistic Updates
 
-Updates to the collection are applied optimistically to the local state first, then synchronized with PowerSync and the backend. If an error occurs during sync, the changes are automatically rolled back.
+Updates first apply optimistically. The built-in handlers write to PowerSync's
+local SQLite database and wait for the Collection to observe the changes. If a
+handler rejects, its optimistic state rolls back.
+
+If decoding fails and stops the Collection's sync run, its unconfirmed built-in
+mutations reject. Cleanup also rejects outstanding confirmations owned by the
+retired run. Their optimistic state rolls back. Writes that SQLite already
+committed remain committed.
+
+After restart, the new sync run must observe a mutation before its handler fulfills.
+A peer watching the same table cannot fulfill that obligation.
 
 ### Metadata Tracking
 

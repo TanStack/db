@@ -23,7 +23,10 @@ import {
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../../db/tests/oracle-assertion-adapter'
-import { registerSourceFifoOrderingOracle } from './persisted-source-fifo-oracle'
+import {
+  registerSourceClaimBoundaryOracle,
+  registerSourceFifoOrderingOracle,
+} from './persisted-source-fifo-oracle'
 import {
   assertGenerationNoticeHistory,
   atPersistedOracleCheckpoint,
@@ -6216,4 +6219,9 @@ describe(`persistedCollectionOptions`, () => {
       ),
     check: forwardAssertionJudgment,
   })
+})
+
+registerSourceClaimBoundaryOracle({
+  property: `sqlite-persistence.source-claim-boundary.recording`,
+  owns: [`src/persisted.ts`],
 })
