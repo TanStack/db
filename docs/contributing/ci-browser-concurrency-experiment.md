@@ -2,7 +2,7 @@
 
 The CP-SAT analysis of PR #2446 predicts completion below twenty minutes with two independent browser processes per adapter runner. That prediction needs a contention measurement on the actual four-core GitHub host.
 
-The experiment runs on `codex/ci-browser-concurrency-experiment`. Its workflow uses two runners. One measures serial then parallel execution. The other reverses that order to expose cache and phase-order effects. Each runner uses the repository's Node 22 version and locked dependencies. Source and tests must match `80ceaba64f8c58944f5c3799a1124d9619d2ea52`. Both timed modes include the same fixture cleanup repair described below.
+The experiment runs on `codex/ci-browser-concurrency-experiment`. Its workflow uses two runners. One measures serial then parallel execution. The other reverses that order to expose cache and phase-order effects. Each runner uses the repository's Node 22 version and locked dependencies. Source and tests must match `7cd1d0a7128c276cea455d190b894e7942e39fbb`. Both timed modes include the same fixture cleanup repair described below.
 
 The two process queues are the first pair in the CP-SAT assignment:
 
@@ -30,3 +30,28 @@ The missing test boundary was deterministic busy-handle injection for these two 
 
 
 A follow-up calibration found that recording native cleanup retries in Query's product trace made the unchanged determinism check reject variable teardown timing. Query now retains retry diagnostics in the browser log, as Direct does. The calibration injects a retry in one run, performs a second run without injection, and requires the complete received Query results to agree. It fails on the contaminated recorder and passes after the separation. The experiment preflight now runs all nine receiver cleanup checks, in addition to the complete decoder construction. Failed or interrupted pilot trials remain excluded from speedup evidence.
+
+
+The next source snapshot binds TrailBase hydration's ten calibrations to their declared fixed or generated histories. One missing-state calibration previously executed 33 receiving histories before finding its premise; the bound form executes one. The framework requires that clean history to pass and its corrupted trace to fail the exact named law. All 90 Chromium units and 180 controlled/Node SQLite units pass. The original fixed/fresh budgets, five construction bases, primary histories, models and comparisons remain unchanged. The [calibration review](oracle-reviews/2026-11-25-trailbase-hydration-calibrations.md) records the checker mutant and limits.
+
+The source guard also checks the actual tracked working tree against the declared baseline. A real temporary-repository calibration first showed that comparing only commit IDs accepted an uncommitted source edit. The repaired guard rejects it and still accepts unrelated private diagnostics. Both timing modes must use the same calibration definitions.
+
+
+## Hosted baseline result
+
+Run [45655864001](https://github.com/TanStack/db/actions/runs/45655864001), head
+`2154f876627c75e56b5f94d2aabb90c0f1528541`, passed all 3,160 selected timed
+units on Node 22. Both orders passed every exact-count and process-cleanup gate.
+This source precedes the calibration binding refactor above.
+
+| Order | Serial | Parallel | Speedup |
+| --- | ---: | ---: | ---: |
+| Serial first | 22m48s | 17m09s | 1.330× |
+| Parallel first | 22m24s | 16m43s | 1.340× |
+
+The paired job took 31.5–32.0% longer than the longest serial queue. Individual
+queue slowdown was 29.7–31.4% for decoding and 72.4–74.6% for its peers. Peak
+sampled aggregate RSS was 3.36 GiB; shared pages can be counted more than once.
+The ten-percent contention assumption is unsupported by this measurement. The
+full schedule needs recalculation and a hosted whole-CI run. These two orders
+measure one browser pair and are not P95 evidence.

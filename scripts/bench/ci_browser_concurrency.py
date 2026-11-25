@@ -21,7 +21,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / 'packages/browser-db-sqlite-persistence'
-BASE = '80ceaba64f8c58944f5c3799a1124d9619d2ea52'
+BASE = '7cd1d0a7128c276cea455d190b894e7942e39fbb'
 
 
 @dataclass(frozen=True)
@@ -268,6 +268,11 @@ def compare(phases: list[dict]) -> dict:
             'units_per_phase': sum(s.passed for q in WORKERS for s in q)}
 
 
+def verify_source() -> None:
+    subprocess.run(['git', 'diff', '--exit-code', BASE, '--',
+                    'packages', 'package.json', 'pnpm-lock.yaml', '.nvmrc'], cwd=ROOT, check=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--order', required=True, choices=['serial-first', 'parallel-first'])
@@ -281,8 +286,7 @@ def main() -> int:
             raise RuntimeError('The benchmark requires ordinary campaigns without replay overrides')
     if os.environ.get('TANSTACK_DB_ORACLE_RUNS_MULTIPLIER', '1') != '1':
         raise RuntimeError('The benchmark requires the unchanged run multiplier')
-    subprocess.run(['git', 'diff', '--exit-code', BASE, 'HEAD', '--',
-                    'packages', 'package.json', 'pnpm-lock.yaml', '.nvmrc'], cwd=ROOT, check=True)
+    verify_source()
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
     metadata = {'base': BASE, 'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),

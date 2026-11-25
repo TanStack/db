@@ -1,9 +1,13 @@
 """Calibration of benchmark selection validation and Linux resource accounting."""
 import unittest
 import re
+from pathlib import Path
+import subprocess
+import tempfile
+from unittest.mock import patch
 
 from ci_browser_concurrency import (Process, Selection, WORKERS, compare,
-                                    owned_processes, parse_process, validate_report)
+                                    owned_processes, parse_process, validate_report, verify_source)
 
 
 class SelectionTests(unittest.TestCase):
@@ -74,6 +78,28 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual(result['worst_worker_slowdown_factor'], 1.4)
         phases[1]['ok'] = False
         self.assertFalse(compare(phases)['ok'])
+
+
+class SourceTests(unittest.TestCase):
+    def test_dirty_sources_cannot_benchmark_a_clean_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=root, stderr=subprocess.DEVNULL, text=True).strip()
+            git('init', '-q')
+            (root / 'packages').mkdir()
+            source = root / 'packages/source.ts'
+            source.write_text('before\n')
+            git('add', '.')
+            git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qm', 'baseline')
+            with patch.multiple('ci_browser_concurrency', ROOT=root, BASE=git('rev-parse', 'HEAD')):
+                verify_source()
+                source.write_text('after\n')
+                with self.assertRaises(subprocess.CalledProcessError):
+                    verify_source()
+                source.write_text('before\n')
+                (root / '.review-local').write_text('diagnostic\n')
+                verify_source()
 
 
 if __name__ == '__main__':

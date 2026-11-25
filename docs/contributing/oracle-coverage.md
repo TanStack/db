@@ -8373,8 +8373,14 @@ These unwrapped histories establish no persistence or remote-replication claim.
 TrailBase's [primary lifecycle owner](../../packages/trailbase-db-collection/tests/lifecycle-hydration-oracle.ts)
 now crosses cleanup while actual persisted hydration completion is held, old
 list completion/rejection, and replacement runs that are loading or ready.
-Controlled and real Node SQLite receive 24 fixed histories plus fixed/fresh
-campaigns of 50 per host; Chromium receives the same 24 histories. The comparisons
+Controlled storage, real Node SQLite and Chromium receive the same 24 fixed
+histories and fixed/fresh campaigns of 50 per host, with nine five-base randomized
+constructions per campaign. Each missing-state calibration binds its declared
+generated construction and requires its exact missing-state difference; the
+row-loss calibration binds an existing replacement-ready fixed history. These
+bindings remove candidate search and require the selected clean trace to pass.
+The [calibration review](oracle-reviews/2026-11-25-trailbase-hydration-calibrations.md)
+records the retained budgets, receiving checks and checker mutant. The comparisons
 check public/durable replacement rows, a later event and reader/error ownership.
 The exact old cancellation-guard removal (`M150`, now `M151`) reaches obsolete
 begin attempts but preserves these observations through existing wrapper/core
