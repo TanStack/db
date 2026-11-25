@@ -23,6 +23,7 @@ const config = defineConfig({
       exclude: [
         `**/node_modules/**`,
         `tests/reload-class-oracle.test.ts`,
+        `tests/reload-sql-recording-oracle.test.ts`,
         `tests/reload-class-oracle.electron.e2e.test.ts`,
       ],
     },

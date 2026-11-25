@@ -592,6 +592,11 @@ const ownerGroups: ReadonlyArray<
     `chromium`,
   ],
   [
+    `electron-db-sqlite-persistence/tests/reload-sql-recording-oracle.test.ts`,
+    `sqlite-reload.electron.sql-recording`,
+    ``,
+  ],
+  [
     `db-sqlite-persistence-core/tests/persisted-oracle.test.ts`,
     `persistence`,
     `crossed-leadership-index`,

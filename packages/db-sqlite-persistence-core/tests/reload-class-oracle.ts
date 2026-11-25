@@ -208,10 +208,12 @@ export type ReloadHost = {
    */
   adapterPerTab: boolean
   openTab: (dbName: string) => Promise<ReloadTab>
-  /** Record every statement the database runs, in order, or stop. */
+  /** Record every statement in order; stop drains through its acknowledged cut. */
   record: (
     recorder: ((sql: string, params: ReadonlyArray<unknown>) => void) | null,
-  ) => void
+  ) => void | Promise<void>
+  /** Flush asynchronous host notifications into their original execution order. */
+  flushRecord?: () => Promise<void>
   setStatementLatency: (latency: 0 | 1) => void
   rawQuery: (
     sql: string,
@@ -584,7 +586,7 @@ export async function observeReload(
     let needSettled: boolean | undefined
     let followerLeadsAll: boolean | undefined
     let rotatedStorageId: string | undefined
-    host.record((sql, params) =>
+    await host.record((sql, params) =>
       log.push({ sql: sql.replace(/\s+/g, ` `).trim(), params }),
     )
     cleanups.push(() => host.record(null))
@@ -760,6 +762,7 @@ export async function observeReload(
         `rotated generation leader`,
       ).catch(() => undefined) // the comparison reports a missing term
     }
+    await host.flushRecord?.()
     const reloadLog = [...log]
 
     // A second tab opens after the first is ready, as a follower.
@@ -955,8 +958,9 @@ export async function observeReload(
     }
     return await finish(reloadLog)
 
-    async function finish(reloadLog: ReadonlyArray<Logged> = [...log]) {
-      host.record(null)
+    async function finish(reloadLog?: ReadonlyArray<Logged>) {
+      await host.record(null)
+      const firstReload = reloadLog ?? [...log]
       const factsPresent: Record<string, boolean> = {}
       const storedRow: Record<string, boolean> = {}
       for (const [index, id] of ids.entries()) {
@@ -988,7 +992,7 @@ export async function observeReload(
         adapterPerTab: host.adapterPerTab,
         ids,
         storageIds,
-        reloadLog,
+        reloadLog: firstReload,
         log: [...log],
         preloadsCalledAtEveryGrant,
         termDuringHold,

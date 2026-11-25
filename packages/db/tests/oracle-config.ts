@@ -702,6 +702,7 @@ const staticOracleProperties = [
   `persisted-demand-coverage.history`,
   `persisted-demand-coverage.required`,
   `sqlite-reload.class`,
+  `sqlite-reload.electron.sql-recording`,
   `query.startup-ownership`,
   `query.persisted-write-precedence`,
   `query.retained-scoped-hydration`,

@@ -13,6 +13,7 @@ import { BrowserWindow, app, ipcMain } from 'electron'
 import { createNodeSQLitePersistence } from '../../../../node-db-sqlite-persistence/src'
 import { exposeElectronSQLitePersistence } from '../../../src/main'
 import { inProcessSeams } from '../../../../db-sqlite-persistence-core/tests/reload-class-oracle'
+import type { RecordedSql } from './sql-recording'
 import type { BetterSqlite3Database } from '../../../../node-db-sqlite-persistence/src'
 import type {
   HeldCall,
@@ -64,6 +65,10 @@ function betterSqliteSurface(
 
 let window: BrowserWindow | undefined
 let recording = false
+let recordingFrame = 0
+let sessionSequence = 0
+let activeSession = 0
+const recordingEntries: Array<RecordedSql> = []
 let session: { close: () => void } | undefined
 const holds = new Map<string, HeldCall>()
 
@@ -72,18 +77,31 @@ const send = (channel: string, ...args: Array<unknown>) =>
 
 ipcMain.handle(`reload:session`, (_event, filename: string) => {
   session?.close()
+  const sessionId = ++sessionSequence
+  activeSession = sessionId
   const database = new DatabaseSync(filename)
   const dispose = exposeElectronSQLitePersistence({
     ipcMain,
     persistence: createNodeSQLitePersistence({
       database: betterSqliteSurface(database, (sql, params) => {
-        if (recording) send(`reload:sql`, sql, params)
+        if (recording && activeSession === sessionId) {
+          const entry = {
+            frame: recordingFrame,
+            sequence: recordingEntries.length + 1,
+            session: sessionId,
+            sql,
+            params: [...params],
+          }
+          recordingEntries.push(entry)
+          send(`reload:sql`, entry)
+        }
       }),
       schemaMismatchPolicy: `reset`,
     }),
   })
   session = {
     close: () => {
+      if (activeSession === sessionId) activeSession = 0
       dispose()
       database.close()
     },
@@ -93,9 +111,21 @@ ipcMain.handle(`reload:close-session`, () => {
   session?.close()
   session = undefined
 })
-ipcMain.handle(`reload:record`, (_event, on: boolean) => {
+ipcMain.handle(`reload:record`, (_event, frame: number, on: boolean) => {
+  // Stop and capture run in one main-process turn. A statement before stop
+  // belongs to this frame even when its one-way notice is still in flight.
+  const finalEntries = on ? [] : [...recordingEntries]
   recording = on
+  recordingFrame = frame
+  recordingEntries.length = 0
+  return finalEntries
 })
+// An acknowledged snapshot closes the observation cut without assuming that
+// an invoke reply and every earlier one-way SQL notice share a delivery queue.
+ipcMain.handle(`reload:trace`, () => ({
+  frame: recordingFrame,
+  entries: recordingEntries,
+}))
 ipcMain.handle(
   `reload:raw`,
   (_event, filename: string, sql: string, params: Array<unknown>) => {

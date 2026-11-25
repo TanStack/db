@@ -9197,6 +9197,22 @@ and real Electron receiving paths keep their native host implementations,
 histories, observation checkpoints and comparisons. Maintainer decision:
 2026-11-18, use a Node 22 polyfill and retain real Chromium witnesses.
 
+### Electron reload recording fidelity
+
+`electron-db-sqlite-persistence/tests/reload-sql-recording-oracle.test.ts`
+owns the reload receiver's transport recorder law. Its independent authored
+statement list checks retired-frame isolation, sequence gaps, buffer/live
+replay and a current-frame tail executed before acknowledged stop. Five
+builders and 100 generated histories per fixed/fresh campaign reach each
+state. Equal SQL and parameters under distinct sequence IDs remain distinct.
+An unscoped-notice mutant and early-retirement stop each fail the comparison.
+The real Electron receiver retains the shared reload model and comparisons;
+both app executions pass. See the [evidence and limits](oracle-reviews/2026-11-24-electron-reload-recording.md).
+This repairs a confirmed instrument gap. The original desktop CI ordering
+failure's exact cause remains unconfirmed. Calling renderer preload before a
+grant does not prove that its managed claim already reached the main process;
+this follow-up establishes no stronger admission premise.
+
 ### External review at c366c65d3
 
 The [review evaluation](oracle-reviews/2026-11-24-pr2446-c366-review.md)

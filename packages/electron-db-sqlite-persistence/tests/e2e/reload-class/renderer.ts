@@ -16,6 +16,8 @@ import {
 } from '../../../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import { createElectronSQLitePersistence } from '../../../src/renderer'
 import { ElectronCollectionCoordinator } from '../../../src/electron-coordinator'
+import { createSqlRecording } from './sql-recording'
+import type { RecordedSql } from './sql-recording'
 import type {
   HeldCall,
   ReloadHost,
@@ -38,11 +40,17 @@ declare global {
 }
 
 const bridge = window.reloadBridge
-let recorder: ((sql: string, params: ReadonlyArray<unknown>) => void) | null =
-  null
-bridge.on(`reload:sql`, (sql, params) =>
-  recorder?.(sql as string, params as ReadonlyArray<unknown>),
-)
+const recording = createSqlRecording()
+bridge.on(`reload:sql`, (entry) => recording.accept(entry as RecordedSql))
+async function flushRecording() {
+  const snapshot = (await bridge.invoke(`reload:trace`)) as {
+    frame: number
+    entries: Array<RecordedSql>
+  }
+  if (snapshot.frame !== recording.frame())
+    throw new Error(`SQL recording frame changed during its observation`)
+  for (const entry of snapshot.entries) recording.accept(entry)
+}
 const invoke: ElectronPersistenceInvoke = (channel, request) =>
   bridge.invoke(
     channel,
@@ -81,10 +89,19 @@ function electronAppHost(filename: string): ReloadHost {
     adapterPerTab: false,
     controlsLatency: false,
     setStatementLatency: () => {},
-    record: (next) => {
-      recorder = next
-      void bridge.invoke(`reload:record`, next !== null)
+    record: async (next) => {
+      if (next) {
+        const frame = recording.begin(next)
+        await bridge.invoke(`reload:record`, frame, true)
+      } else {
+        await recording.stop(
+          bridge.invoke(`reload:record`, recording.frame(), false) as Promise<
+            Array<RecordedSql>
+          >,
+        )
+      }
     },
+    flushRecord: flushRecording,
     rawQuery: async (sql, params = []) =>
       (await bridge.invoke(`reload:raw`, filename, sql, [...params])) as Array<
         Record<string, unknown>
@@ -119,7 +136,14 @@ async function run() {
         electronAppHost(`${directory}/h${index}.sqlite`),
         history,
       )
-      results.push({ name, violations: reloadViolations(history, observation) })
+      const violations = reloadViolations(history, observation)
+      results.push({
+        name,
+        violations,
+        // Keep the raw record when a receiving law fails. IPC ordering cannot
+        // be diagnosed from the final violation names alone.
+        ...(violations.length > 0 ? { observation } : {}),
+      })
     } catch (error) {
       results.push({
         name,
