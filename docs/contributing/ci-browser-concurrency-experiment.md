@@ -20,3 +20,5 @@ The artifacts contain metadata, exact commands, complete test logs and reports, 
 The candidate's additional contention allowance is ten percent, on top of a separate twenty-five-percent duration margin. If measured contention is larger, feed the measured factors back into CP-SAT. Do not claim that the full CI target passed from this microbenchmark. A complete hosted run of the resulting schedule must still measure dispatch, setup and aggregate gates.
 
 The experiment workflow is separate from PR #2446. It changes no existing workflow or required check. Hosted results belong in a follow-up section here after collection.
+
+The first VM attempt exposed a selector mismatch: the JSON reporter joins names with spaces, while Vitest 5 filters use ` > `. The exact-count gate invalidated that attempt before it could supply timing evidence. A preflight now executes one complete constructed decoder unit through the real Vitest command. Its five bases and comparison remain intact. The timed phase still runs all 166 selected decoder units.

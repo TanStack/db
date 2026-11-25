@@ -38,7 +38,7 @@ class Selection:
 WORKERS = (
     (Selection('native-decode-fixed',
                'e2e/native-powersync-batch-decode-oracle.browser.test.ts',
-               166, 876, r'^adapter\.powersync\.batch-decode\.chromium fixed seed '),),
+               166, 876, r'^adapter\.powersync\.batch-decode\.chromium > fixed seed '),),
     (
         Selection('trailbase-hydration', 'tests/trailbase-hydration-oracle.test.ts', 90, 90),
         Selection('query-cross-adapter', 'e2e/query-cross-adapter-oracle.browser.test.ts', 185, 185),
@@ -213,7 +213,7 @@ def run_selection(selection: Selection, directory: Path, sampler: Sampler) -> di
     return result
 
 
-def run_phase(mode: str, directory: Path) -> dict:
+def run_phase(mode: str, directory: Path, workers=WORKERS) -> dict:
     directory.mkdir(parents=True)
     sampler = Sampler(directory)
     monitor = threading.Thread(target=sampler.run)
@@ -227,10 +227,10 @@ def run_phase(mode: str, directory: Path) -> dict:
     try:
         if mode == 'parallel':
             with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = [executor.submit(worker, queue) for queue in WORKERS]
+                futures = [executor.submit(worker, queue) for queue in workers]
                 results = [future.result() for future in futures]
         else:
-            results = [worker(queue) for queue in WORKERS]
+            results = [worker(queue) for queue in workers]
         work_seconds = time.monotonic() - started
         remaining = sampler.cleanup_check()
     finally:
@@ -272,6 +272,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--order', required=True, choices=['serial-first', 'parallel-first'])
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--preflight', action='store_true')
     args = parser.parse_args()
     if platform.system() != 'Linux' or os.cpu_count() != 4:
         raise RuntimeError('The CP-SAT experiment requires a four-core Linux hosted runner')
@@ -296,6 +297,13 @@ def main() -> int:
     if metadata['node'] != 'v' + (ROOT / '.nvmrc').read_text().strip():
         raise RuntimeError('The benchmark must use the repository Node version')
     (args.output / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+    if args.preflight:
+        selected = WORKERS[0][0]
+        selected = Selection('decoder-selection-preflight', selected.file, 1,
+                             selected.total, selected.pattern +
+                             '2377: generated eager:initial:valid 1$')
+        result = run_phase('serial', args.output / 'selection', ((selected,),))
+        return 0 if result['ok'] else 1
     order = ['serial', 'parallel'] if args.order == 'serial-first' else ['parallel', 'serial']
     phases = [run_phase(mode, args.output / mode) for mode in order]
     summary = compare(phases)

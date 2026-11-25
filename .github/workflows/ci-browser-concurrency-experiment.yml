@@ -44,6 +44,10 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Check benchmark accounting
         run: python3 -m unittest discover -s scripts/bench -p ci_browser_concurrency_test.py
+      - name: Verify actual oracle selection
+        run: python3 scripts/bench/ci_browser_concurrency.py --order "$EXPERIMENT_ORDER" --preflight --output test-results/ci-browser-concurrency/preflight
+        env:
+          EXPERIMENT_ORDER: ${{ matrix.order }}
       - name: Measure complete selections in both modes
         run: python3 scripts/bench/ci_browser_concurrency.py --order "$EXPERIMENT_ORDER" --output test-results/ci-browser-concurrency
         env:

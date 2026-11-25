@@ -1,5 +1,6 @@
 """Calibration of benchmark selection validation and Linux resource accounting."""
 import unittest
+import re
 
 from ci_browser_concurrency import (Process, Selection, WORKERS, compare,
                                     owned_processes, parse_process, validate_report)
@@ -22,6 +23,20 @@ class SelectionTests(unittest.TestCase):
             report = {**self.report, field: value}
             with self.subTest(field=field):
                 self.assertTrue(validate_report(report, self.selection))
+
+    def test_decoder_selector_keeps_fixed_units_and_excludes_other_properties(self):
+        pattern = WORKERS[0][0].pattern
+        for title in [
+            'adapter.powersync.batch-decode.chromium > fixed seed 2377: generated',
+            'adapter.powersync.batch-decode.chromium > fixed seed 2377: generated eager:initial:valid 1',
+        ]:
+            self.assertIsNotNone(re.search(pattern, title), title)
+        for title in [
+            'adapter.powersync.batch-decode.chromium > random seed: generated',
+            'adapter.powersync.batch-decode.mutations.chromium > fixed seed 2377: generated',
+            'adapter.powersync.batch-decode.chromium > calibration: retains cleanup',
+        ]:
+            self.assertIsNone(re.search(pattern, title), title)
 
     def test_complete_peer_files_and_fixed_decode_selection_are_retained(self):
         self.assertEqual(sum(s.passed for q in WORKERS for s in q), 790)
