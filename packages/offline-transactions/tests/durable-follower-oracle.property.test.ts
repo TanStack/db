@@ -63,6 +63,7 @@
  */
 import fc from 'fast-check'
 import { expect, vi } from 'vitest'
+import { createCollection } from '@tanstack/db'
 import { NonRetriableError } from '../src/types'
 import {
   forwardAssertionJudgment,
@@ -239,6 +240,12 @@ const reachStates = [
   `default-removal-failure-reported`,
   // An unreadable decision with no row did not stop a replay.
   `orphan-decision-ignored`,
+  // An added message after a failed replay was refused, not sent.
+  `admission-refused-after-failed-replay`,
+  // An added message waited for a newer replay of the same tab.
+  `admission-waited-for-newer-replay`,
+  // Replacements that each added a Collection still saw an issued call.
+  `issued-call-across-extended-replacements`,
   // Removing a write whose call succeeded but whose row stayed completed it.
   `removed-after-success-completed`,
   // A leader's own write removed while its call ran stayed pending across a
@@ -316,6 +323,9 @@ type SharedActionType =
   | `removal-pending-replay-lost`
   | `default-removal-delete-fails`
   | `unreadable-orphan-decision`
+  | `added-after-failed-replay`
+  | `added-across-replays`
+  | `replaced-twice-extended`
   | `remove-own-running`
   | `remove-own-rejected-running`
   | `replace-default-with-durable`
@@ -396,6 +406,9 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: sharedAction(`removal-pending-replay-lost`) },
   { weight: 1, arbitrary: sharedAction(`default-removal-delete-fails`) },
   { weight: 1, arbitrary: sharedAction(`unreadable-orphan-decision`) },
+  { weight: 1, arbitrary: sharedAction(`added-after-failed-replay`) },
+  { weight: 1, arbitrary: sharedAction(`added-across-replays`) },
+  { weight: 1, arbitrary: sharedAction(`replaced-twice-extended`) },
   { weight: 1, arbitrary: sharedAction(`remove-own-running`) },
   { weight: 1, arbitrary: sharedAction(`remove-own-rejected-running`) },
   { weight: 1, arbitrary: sharedAction(`replace-default-with-durable`) },
@@ -477,6 +490,9 @@ const spliced = (
           action.type !== `removal-pending-replay-lost` &&
           action.type !== `default-removal-delete-fails` &&
           action.type !== `unreadable-orphan-decision` &&
+          action.type !== `added-after-failed-replay` &&
+          action.type !== `added-across-replays` &&
+          action.type !== `replaced-twice-extended` &&
           action.type !== `remove-own-running` &&
           action.type !== `remove-own-rejected-running` &&
           action.type !== `replace-default-with-durable` &&
@@ -749,8 +765,21 @@ class ReadFailingStorage extends FakeStorageAdapter {
 // Another adapter object over the same stored data.
 class StorageView implements StorageAdapter {
   constructor(private readonly target: StorageAdapter) {}
-  get(key: string) {
-    return this.target.get(key)
+  // Reads of this tab only that capture their value, then wait for release.
+  private readHolds = 0
+  private readonly heldReads: Array<() => void> = []
+  holdNextRead(): void {
+    this.readHolds += 1
+  }
+  releaseRead(): void {
+    this.heldReads.shift()?.()
+  }
+  async get(key: string) {
+    if (this.readHolds === 0) return this.target.get(key)
+    this.readHolds -= 1
+    const value = await this.target.get(key)
+    await new Promise<void>((release) => this.heldReads.push(release))
+    return value
   }
   set(key: string, value: string) {
     return this.target.set(key, value)
@@ -766,6 +795,16 @@ class StorageView implements StorageAdapter {
   }
 }
 
+// A Collection a replacement executor registers in addition.
+function extraCollection(id: string) {
+  return createCollection<{ id: string }, string, {}>({
+    id,
+    getKey: (item) => item.id,
+    startSync: true,
+    sync: { sync: ({ markReady }) => markReady() },
+  })
+}
+
 type ChannelMessage = { type: string; id?: string; error?: unknown }
 
 function controlledChannels() {
@@ -778,10 +817,12 @@ function controlledChannels() {
     lostIds: [] as Array<string>,
     created: 0,
   }
+  // Only channels with the sender's name hear it, as with BroadcastChannel.
   const deliver = (from: ControlledChannel | null, data: ChannelMessage) => {
     const copy = structuredClone(data)
+    const name = from?.name ?? CHANNEL
     for (const channel of open) {
-      if (channel === from) continue
+      if (channel === from || channel.name !== name) continue
       setTimeout(() => {
         if (open.has(channel)) channel.onmessage?.({ data: copy })
       }, 0)
@@ -790,7 +831,8 @@ function controlledChannels() {
   class ControlledChannel {
     onmessage: ((event: { data: ChannelMessage }) => void) | null = null
     constructor(readonly name: string) {
-      expect(name, `channel name`).toBe(CHANNEL)
+      // A tab that registers more Collections names a longer channel.
+      expect(name.startsWith(CHANNEL), `channel name`).toBe(true)
       state.created += 1
       open.add(this)
     }
@@ -893,6 +935,8 @@ async function runHistory(
     env: ReturnType<typeof createTestOfflineEnvironment>
     election: TabElection
     session: number
+    // This tab's own way to the stored data.
+    view: StorageView
   }
   const tabs: Array<Tab | undefined> = Array.from({ length: TABS })
   let sessions = 0
@@ -911,11 +955,14 @@ async function runHistory(
     tabStorage: StorageAdapter = storage,
     // A durable tab in a default-mode history.
     durableTab = durable,
+    // Collections a replacement registers beyond the shared one.
+    extra?: Record<string, ReturnType<typeof extraCollection>>,
   ) => {
+    const view = new StorageView(tabStorage)
     const tabElection = new TabElection(election, hold, failStart === true)
     const session = ++sessions
     const env = createTestOfflineEnvironment({
-      storage: tabStorage as FakeStorageAdapter,
+      storage: view as unknown as FakeStorageAdapter,
       // Each tab names its collection differently under the shared key.
       collectionId: `items-${session}`,
       collection,
@@ -943,6 +990,7 @@ async function runHistory(
       },
       config: {
         ...(durableTab ? { followerWrites: `durable` } : {}),
+        ...(extra ? { collections: extra } : {}),
         leaderElection: tabElection,
         onlineDetector: online.detector(),
         beforeRetry: (
@@ -955,7 +1003,7 @@ async function runHistory(
         jitter: false,
       } as never,
     })
-    tabs[index] = { env, election: tabElection, session }
+    tabs[index] = { env, election: tabElection, session, view }
     await beforeInit?.()
     if (failStart) {
       await expect(
@@ -2515,7 +2563,10 @@ async function runHistory(
           reach(`adopted-decision-survived`)
           break
         }
-        case `replaced-twice-during-call`: {
+        case `replaced-twice-during-call`:
+        case `replaced-twice-extended`: {
+          // Each replacement may also add a Collection of its own.
+          const extended = action.type === `replaced-twice-extended`
           // A follower's executor is replaced; the replacement leads and
           // issues the write's rejected call; the row is removed and that
           // replacement is replaced in turn while the call runs.
@@ -2534,7 +2585,16 @@ async function runHistory(
           if (!write) break
           const collection = tabs[writer]!.env.collection
           await closeTab(writer)
-          await openTab(writer, undefined, undefined, false, collection)
+          await openTab(
+            writer,
+            undefined,
+            undefined,
+            false,
+            collection,
+            storage,
+            durable,
+            extended ? { zfirst: extraCollection(`first-extra`) } : undefined,
+          )
           await rotateTo(tabs[writer]!.election)
           let release!: () => void
           callGate = new Promise<void>((resolve) => {
@@ -2552,7 +2612,16 @@ async function runHistory(
             write.transactionId!,
           )
           await closeTab(writer)
-          await openTab(writer, undefined, undefined, false, collection)
+          await openTab(
+            writer,
+            undefined,
+            undefined,
+            false,
+            collection,
+            storage,
+            durable,
+            extended ? { zsecond: extraCollection(`second-extra`) } : undefined,
+          )
           expect(write.outcome, `${write.id} waits for its issued call`).toBe(
             undefined,
           )
@@ -2561,7 +2630,17 @@ async function runHistory(
           expect(write.outcome, `${write.id} takes the server's outcome`).toBe(
             `failed`,
           )
-          reach(`issued-call-across-replacements`)
+          reach(
+            extended
+              ? `issued-call-across-extended-replacements`
+              : `issued-call-across-replacements`,
+          )
+          // A tab over more Collections names its own channel; a tab over
+          // the shared one takes its place.
+          if (extended) {
+            await closeTab(writer)
+            await openTab(writer)
+          }
           break
         }
         case `running-removal-completes-first`: {
@@ -2802,6 +2881,107 @@ async function runHistory(
             `the orphan decision is gone`,
           ).toBe(null)
           reach(`orphan-decision-ignored`)
+          break
+        }
+        case `added-after-failed-replay`: {
+          // A committed removal's deletion fails; the next leader's replay
+          // fails to read the row, and an added message for it arrives.
+          const leader = leaderIndex()
+          const writer = tabs.findIndex((tab, index) => tab && index !== leader)
+          if (
+            !durable ||
+            leader < 0 ||
+            writer < 0 ||
+            tabs.filter(Boolean).length < 3 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          storage.failDeletes = 1
+          await tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          write.removed = true
+          write.deliverable = false
+          storage.failReadKey = `tx:${write.transactionId}`
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          const failed = election.holder!
+          online.set(true)
+          expectedWarnings.admission += 1
+          channels.inject({ type: `added`, id: write.transactionId })
+          await settle()
+          expect(calls, `${write.id} not admitted`).not.toContain(write.id)
+          // Another leader's replay settles the row.
+          failed.releaseLeadership()
+          await settle()
+          await failed.requestLeadership()
+          await original.requestLeadership()
+          await settle()
+          expect(calls, `${write.id} never sent`).not.toContain(write.id)
+          reach(`admission-refused-after-failed-replay`)
+          break
+        }
+        case `added-across-replays`: {
+          // A committed removal's deletion fails. The next leader's replay
+          // stalls while an added message waits on it; that tab loses and
+          // regains leadership, and its newer replay stalls too.
+          const leader = leaderIndex()
+          const next = election.queue[0]
+          const nextTab = tabs.findIndex((tab) => tab?.election === next)
+          const writer = tabs.findIndex(
+            (tab, index) => tab && index !== leader && index !== nextTab,
+          )
+          if (
+            !durable ||
+            leader < 0 ||
+            nextTab < 0 ||
+            writer < 0 ||
+            !(await quiet())
+          )
+            break
+          online.set(false)
+          const write = await doWrite(writer, `write`)
+          if (!write) break
+          storage.failDeletes = 1
+          await tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          write.removed = true
+          write.deliverable = false
+          const view = tabs[nextTab]!.view
+          view.holdNextRead()
+          // The first leader steps out of the election meanwhile.
+          const original = tabs[leader]!.election
+          original.releaseLeadership()
+          await settle()
+          online.set(true)
+          channels.inject({ type: `added`, id: write.transactionId })
+          await settle()
+          // The tab in between adopts the decision; its deletion stalls.
+          storage.holdNextDelete()
+          next!.releaseLeadership()
+          await settle()
+          view.holdNextRead()
+          await next!.requestLeadership()
+          tabs[writer]!.election.releaseLeadership()
+          await settle()
+          await tabs[writer]!.election.requestLeadership()
+          expect(election.holder, `the stalled tab leads again`).toBe(next)
+          view.releaseRead()
+          await settle()
+          expect(calls, `${write.id} not admitted`).not.toContain(write.id)
+          view.releaseRead()
+          await settle()
+          storage.releaseDelete()
+          await settle()
+          await original.requestLeadership()
+          await settle()
+          expect(calls, `${write.id} never sent`).not.toContain(write.id)
+          reach(`admission-waited-for-newer-replay`)
           break
         }
         case `remove-deletion-pending`: {
@@ -3725,6 +3905,24 @@ oracleProperty({
         enters: [`orphan-decision-ignored`],
         build: (generated: History): History =>
           spliced(generated, [{ type: `unreadable-orphan-decision` }]),
+      },
+      {
+        name: `an added message after a failed replay is refused`,
+        enters: [`admission-refused-after-failed-replay`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `added-after-failed-replay` }]),
+      },
+      {
+        name: `an added message waits for a newer replay`,
+        enters: [`admission-waited-for-newer-replay`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `added-across-replays` }]),
+      },
+      {
+        name: `replacements that add Collections still see an issued call`,
+        enters: [`issued-call-across-extended-replacements`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `replaced-twice-extended` }]),
       },
       {
         name: `removing a write whose call succeeded completes it`,

@@ -467,7 +467,7 @@ export class OfflineExecutor {
     // Removals this tab asked a former leader for are now its own to make,
     // unless it stopped leading during the replay; they then stay with the
     // current leader.
-     
+
     if (this.isOfflineEnabled && term === this.term)
       for (const [request, removal] of [...this.removals]) {
         this.removals.delete(request)
@@ -644,7 +644,7 @@ export class OfflineExecutor {
         if (!(await waiter.saved)) continue
         // Absence means success only where rejections are recorded, and not
         // while this runtime still runs the write's call.
-        if (!owner.recordsOutcomes || this.callRunning(id)) continue
+        if (!owner.recordsOutcomes || this.callRunning(id, owner)) continue
         const outbox = owner.outbox!
         // A row that cannot be decoded is still there.
         if (await outbox.has(id)) continue
@@ -998,20 +998,23 @@ export class OfflineExecutor {
     }
   }
 
-  /** Whether an executor over these Collections in this runtime runs its call. */
-  private callRunning(id: string): boolean {
+  /**
+   * Whether an executor in this runtime over the waiter owner's Collections
+   * runs the write's call; replacements may each add other Collections.
+   */
+  private callRunning(id: string, owner: OfflineExecutor): boolean {
     if (this.issued.has(id)) return true
-    for (const collection of Object.values(this.config.collections)) {
+    for (const collection of Object.values(owner.config.collections)) {
       for (const issuer of callIssuers.get(collection) ?? [])
         if (
           issuer.issued.has(id) &&
           (retainsCollections(
-            this.config.collections,
             issuer.config.collections,
+            owner.config.collections,
           ) ||
             retainsCollections(
+              owner.config.collections,
               issuer.config.collections,
-              this.config.collections,
             ))
         )
           return true

@@ -40,6 +40,8 @@ export class TransactionExecutor {
   >()
   // The replay of the current term, which admissions wait for.
   private replay: Promise<void> | null = null
+  // The leadership term whose replay last completed.
+  private replayedTerm: number | undefined | null = null
   private cleanupTimer: ReturnType<typeof setTimeout> | null = null
   private cleanupAttempts = 0
   private cleaning = false
@@ -392,8 +394,10 @@ export class TransactionExecutor {
         }
       }
       await this.outbox.remove(transaction.id)
-      await this.offlineExecutor.finishRunningRemoval?.(transaction.id)
+      // The call stops counting as running before its marker is looked up,
+      // so a removal that registers a marker afterwards sees it finished.
       this.scheduler.markCompleted(transaction)
+      await this.offlineExecutor.finishRunningRemoval?.(transaction.id)
       return true
     } catch (error) {
       const storageError = toError(error)
@@ -440,15 +444,18 @@ export class TransactionExecutor {
       finish = resolve
     })
     this.replay = replay
+    const term = this.offlineExecutor.leadershipTerm
     try {
-      await this.loadPending()
+      if (await this.loadPending()) this.replayedTerm = term
     } finally {
       if (this.replay === replay) this.replay = null
       finish()
     }
   }
 
-  private async loadPending(): Promise<void> {
+  /** False when the read was stale for this term and changed nothing. */
+  private async loadPending(): Promise<boolean> {
+    let reconciled = false
     let removedIds: Array<string> = []
     // Rows a former leader decided to reject: settled here, never sent.
     let decided: Array<OfflineTransaction> = []
@@ -514,6 +521,7 @@ export class TransactionExecutor {
 
         // Schedule retry timer for loaded transactions
         this.scheduleNextRetry()
+        reconciled = true
       },
       this.offlineExecutor.recordsOutcomes ? decisions : undefined,
     )
@@ -548,6 +556,7 @@ export class TransactionExecutor {
       `Transaction excluded by beforeRetry`,
     )
     await Promise.all(removedIds.map((id) => cleanUp(id, exclusion, false)))
+    return reconciled
   }
 
   /** Records and removes one excluded write; false when that failed. */
@@ -664,8 +673,13 @@ export class TransactionExecutor {
     // A read that the transaction's removal overtakes returns null. One that
     // spans a change of leadership is dropped: another leader may have sent
     // the write, and this term's outbox load already has it if it remains.
-    await this.replay
+    // Every replay in flight finishes first, a newer one included.
+    while (this.replay) await this.replay
     const term = this.offlineExecutor.leadershipTerm
+    // Only a successful replay of this term has loaded its decisions; the
+    // admission is retried after a failed one.
+    if (this.offlineExecutor.isOfflineEnabled && this.replayedTerm !== term)
+      throw new Error(`The outbox replay for this leadership has not completed`)
     const transaction = await this.outbox.getCurrent(id)
     // A row this leader decided to reject, or loaded with a decision, is in
     // `excluding` and is settled, never sent.
