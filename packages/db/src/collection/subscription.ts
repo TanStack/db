@@ -80,6 +80,7 @@ type CollectionSubscriptionOptions = {
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
   /** Callback for subset-load failures scoped to this subscription. */
   onLoadSubsetError?: (event: SubscriptionLoadSubsetErrorEvent) => void
+  onTruncateReplayStart?: SubscribeChangesOptions[`onTruncateReplayStart`]
   truncateReplayPublication?: TruncateReplayPublicationControl
   /**
    * Whether this subscription defers provider work: it starts no idle source
@@ -529,6 +530,9 @@ export class CollectionSubscription
     this.setStatus(`loadingSubset`)
 
     if (this.truncateReplayState !== replayState) return
+
+    if (replayState.currentAttempt === attempt)
+      this.options.onTruncateReplayStart?.(replayState.completion.promise)
 
     if (this.options.truncateReplayPublication) {
       this.truncateReplacementPending = true

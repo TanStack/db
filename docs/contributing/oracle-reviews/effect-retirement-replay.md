@@ -345,3 +345,55 @@ observer and reuse their existing replay and readiness tracking.
 | `tests/query/ordered-work-oracle.property.test.ts` | `1308ea9134d2e6cd8b47e57810f9e77a6aa4d0e0` |
 
 Paths in the table are relative to `packages/db`.
+
+## Reload and replay error delivery
+
+A source reload retires its sync run and replays current logical demand.
+It can leave the same ordered repair owing a joined refill as an explicit
+truncate. The adapter retains old rows until it applies replacement writes
+on reload. An ordered Effect must resume the repair when the active replay
+settles with either trigger.
+
+The receiving oracle calls the public source `reload()` while an ordered
+repair holds an answer. It crosses both receivers, index settings, widths,
+joined answer timings, and refill outcomes. It checks the retained old
+window during replay, the held replacement refill, and final publication
+or the original rejection. On `ad6f0b4df`, all 16 Effect reload histories
+end at `refill acquisition held` because the refill never started. The
+Collection controls pass. After the Effect receives replay start from its
+subscription, both receivers reach a held reload refill in 16 histories
+each. The property passes 284 histories and two runner checks.
+
+The second replay's failure now has a separate checkpoint before the
+obsolete transport settles. The same original error must remain visible
+afterward. Replacing the first observation with no error fails all 32
+rejected-replay histories. Successful replacements report no error at
+either cut.
+
+The broad DB shard exposed a neighboring timing regression after the
+literal-answer change. Source-only repairs with a literal reply must still
+publish synchronously. The subscriber now holds the literal repair
+participant for a joined filter, whose next acquisition can remain pending.
+The asynchronous branch keeps its hold. The older direct loader examples
+also now check that abort ends the participant before its transport
+rejects, while the non-aborted rejection preserves the exact failure.
+
+The joined replay driver contains the input type and production operations.
+The history grammar, model and comparison remain in the ordered-work oracle.
+
+| Source | Git blob |
+| --- | --- |
+| `src/collection/subscription.ts` | `2214d1601d36caebd38fd11cd5ef4a2c016fd4b8` |
+| `src/query/effect.ts` | `658c1fcf05478d0638e6cbedb4c7ed3b540aa94e` |
+| `src/query/live/collection-subscriber.ts` | `e3d08e95c29ada6bbe8b21e39fdb3c136f5f5a65` |
+| `tests/query/ordered-joined-replay-driver.ts` | `aac483f7744067cc962bbf06ac8ba4aa0ba3d077` |
+| `tests/query/ordered-work-oracle.property.test.ts` | `70edcdff45fe3ee7157ff77a2cd64a5f10fd49dd` |
+| `tests/query/ordered-source-loader.test.ts` | `127668429007db8116355f268cf0049b0cfaa966` |
+
+Paths in the table are relative to `packages/db`.
+
+The final source changes add 391 gzip and 225 Brotli bytes to the production
+package, and 244 gzip and 294 Brotli bytes to the typical app, compared with
+`53770d6b5`. The reload path reuses the existing replay completion and cursor
+reset. The literal-answer hold keeps the prior timing gate for source-only
+repairs.

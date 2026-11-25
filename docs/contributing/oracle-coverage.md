@@ -8827,6 +8827,7 @@ Both late transport outcomes leave that verdict intact. After a successful
 second replay, a later ordering change must still start a bounded repair.
 This catches an obsolete rejection that raises hidden recovery debt while its
 immediate reads and publications remain correct.
+The second replay exposes its failure before the old transport settles.
 
 The post-replay driver also returns literal `true` for the first root
 answer before holding the next required acquisition. Both receivers retain
@@ -8836,6 +8837,12 @@ prefix may need one current bounded revalidation and its tie. It must
 issue no larger prefix or forward cursor read. A subsequent source delete
 starts a bounded repair after replay retirement, just as a subsequent rank
 change does.
+
+The driver also calls the source's public `reload()` during a held repair.
+Reload leaves the old rows in the source until the new adapter applies its
+writes. With the replacement prefix deliberately short, both receivers must
+start a refill after the replay and keep the preceding window until it
+settles. Explicit truncate remains a control in the same property.
 
 ### Initial Effect acquisition aborted by replay
 

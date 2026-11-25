@@ -438,11 +438,16 @@ export class CollectionSubscriber<
       orderByInfo,
       subscription,
       this.alias,
-      (result, holdPublication, options) => {
+      (result, holdPublication, settlesAsync, options) => {
         if (result instanceof Promise) {
+          // A literal answer from a joined repair can still leave its next
+          // acquisition pending. Other literal repairs publish in this turn.
           this.collectionConfigBuilder.trackOrderedLoadPromise(
             result,
-            holdPublication && !subscription.hasPendingTruncateReplacement,
+            holdPublication &&
+              (settlesAsync ||
+                Boolean(orderByInfo.joinedFilterSourceIds?.length)) &&
+              !subscription.hasPendingTruncateReplacement,
           )
         }
         onLoadSubsetResult(result, options)

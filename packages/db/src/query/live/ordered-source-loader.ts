@@ -153,6 +153,7 @@ export class OrderedSourceLoader {
     private readonly onResult: (
       result: LoadSubsetRequestResult,
       holdPublication: boolean,
+      settlesAsync: boolean,
       options?: LoadSubsetOptions,
     ) => void = () => {},
     private readonly canRetryRepair: () => boolean = () => false,
@@ -1065,7 +1066,7 @@ export class OrderedSourceLoader {
           this.loadFullSource()
         })
         void retry.catch(() => {})
-        this.onResult(retry, true)
+        this.onResult(retry, true, true)
       },
       250 * 2 ** this.repairRetries++,
     )
@@ -1389,7 +1390,7 @@ export class OrderedSourceLoader {
             () => complete(undefined, true),
             () => {
               if (!synchronousCompletionFailure) {
-                this.onResult(true, false)
+                this.onResult(true, false, false)
               }
             },
             () => {
@@ -1444,6 +1445,7 @@ export class OrderedSourceLoader {
       this.onResult(
         tracked,
         isAuthoritativeRequest && this.needsOrderingRepair,
+        settlesAsync,
         options,
       )
       return tracked
@@ -1480,7 +1482,7 @@ export class OrderedSourceLoader {
             // returns.
             const rejected = Promise.reject(failure)
             void rejected.catch(() => {})
-            this.onResult(rejected, true)
+            this.onResult(rejected, true, true)
           }
         }
         throw failure

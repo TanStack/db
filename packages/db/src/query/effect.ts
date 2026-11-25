@@ -660,6 +660,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
       // Check if this alias has orderBy optimization (cursor-based loading)
       const orderByInfo = this.optimizableOrderByCollections[sourceId]
+      let followOrderedReplay: ((completion: Promise<void>) => void) | undefined
 
       const changeCallback = (
         changes: Array<ChangeMessage<any, string | number>>,
@@ -685,6 +686,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           whereExpression,
         ),
         owner: this.dependent,
+        onTruncateReplayStart: orderByInfo
+          ? (completion) => followOrderedReplay?.(completion)
+          : undefined,
         onLoadSubsetError: ({ error }) =>
           this.onSourceError(normalizeError(error)),
         // subscribeChanges can report a result before it returns the
@@ -772,25 +776,27 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         )
         this.orderedLoaders.set(sourceId, loader)
         let replayCompletion: Promise<void> | undefined
+        followOrderedReplay = (replay) => {
+          loader.resetCursor()
+          if (replay === replayCompletion) return
+          replayCompletion = replay
+          void replay
+            .then(
+              () => {
+                if (this.disposed || replayCompletion !== replay) return
+                replayCompletion = undefined
+                loader.settleFullSourceReplay()
+                this.scheduleGraphRun()
+              },
+              () => {
+                if (replayCompletion === replay) replayCompletion = undefined
+              },
+            )
+            .catch(reportUncaught)
+        }
         this.unsubscribeCallbacks.add(
           collection.on(`truncate`, () => {
-            loader.resetCursor()
-            const replay = subscription.pendingTruncateReplacement
-            if (!replay || replay === replayCompletion) return
-            replayCompletion = replay
-            void replay
-              .then(
-                () => {
-                  if (this.disposed || replayCompletion !== replay) return
-                  replayCompletion = undefined
-                  loader.settleFullSourceReplay()
-                  this.scheduleGraphRun()
-                },
-                () => {
-                  if (replayCompletion === replay) replayCompletion = undefined
-                },
-              )
-              .catch(reportUncaught)
+            if (!subscription.pendingTruncateReplacement) loader.resetCursor()
           }),
         )
         loader.start()

@@ -21,7 +21,7 @@ export type JoinedReplayHistory = {
   receiver: `collection` | `effect`
   limit: 1 | 2
   indexed: boolean
-  trigger: `explicit` | `retirement`
+  trigger: `explicit` | `retirement` | `reload`
   holdJoined: boolean
   answer: `complete` | `refill` | `refill-rejection`
   initial: ReadonlyArray<Row>
@@ -74,6 +74,7 @@ export type JoinedReplayTrace = {
     started: boolean
     obsoleteAborted: boolean
     obsoleteStillPending: boolean
+    settledError: JoinedReplayTrace[`reportedError`]
     afterObsoleteSettlement: Cut
     nextRepair?: {
       rows: Array<Row>
@@ -134,6 +135,7 @@ export async function receiveJoinedReplay(
   }
   const postReplayRequests: JoinedReplayTrace[`postReplayRequests`] = []
   let refillSignal: AbortSignal | undefined
+  let replacedReloadRows = false
 
   const truncateTo = (rows: ReadonlyArray<Row>) => {
     providerRows = rows
@@ -169,6 +171,18 @@ export async function receiveJoinedReplay(
               options.limit === undefined ? undefined : offset + options.limit,
             )
           operations.begin()
+          // Reload preserves rows across sync runs. The new provider applies
+          // its removals together with its first replacement answer.
+          if (
+            history.trigger === `reload` &&
+            requests.phase === `replay` &&
+            !replacedReloadRows
+          ) {
+            replacedReloadRows = true
+            for (const key of installed.keys())
+              operations.write({ type: `delete`, key })
+            installed.clear()
+          }
           for (const value of page) {
             if (installed.get(value.id) === value) continue
             operations.write({
@@ -203,7 +217,7 @@ export async function receiveJoinedReplay(
               options.orderBy !== undefined &&
               options.limit === history.limit &&
               options.cursor === undefined
-            if (history.trigger === `explicit`) await repair.promise
+            if (history.trigger !== `retirement`) await repair.promise
           }
           if (isReplayDemand) {
             requests.replay++
@@ -344,6 +358,13 @@ export async function receiveJoinedReplay(
     window: live?.utils.getWindow(),
     moveOutcome: move.outcome,
   })
+  const reportedError = (): JoinedReplayTrace[`reportedError`] => {
+    const error = live ? live.utils.lastSubsetError : errors[0]
+    if (error === undefined) return `none`
+    const originatingError =
+      history.laterReplay?.outcome === `rejects` ? laterFailure : failure
+    return error === originatingError ? `originating error` : `different error`
+  }
 
   return withHistoryCleanup(
     async () => {
@@ -360,8 +381,14 @@ export async function receiveJoinedReplay(
       rootSync.write({ type: `update`, value: moved })
       await rootSync.commit()
       await flushPromises()
-      if (history.trigger === `explicit`) {
-        await startReplay()
+      if (history.trigger !== `retirement`) {
+        if (history.trigger === `reload`) {
+          requests.phase = `replay`
+          providerRows = history.replacement
+          void source.reload()
+        } else {
+          await startReplay()
+        }
         repair.resolve()
       }
       await flushPromises()
@@ -409,6 +436,7 @@ export async function receiveJoinedReplay(
         laterReplay.resolve()
         await flushPromises()
         settled = cut()
+        const settledError = reportedError()
         const obsoleteStillPending = requests.pendingRefill > 0
         refill.resolve()
         await flushPromises()
@@ -417,6 +445,7 @@ export async function receiveJoinedReplay(
           started,
           obsoleteAborted,
           obsoleteStillPending,
+          settledError,
           afterObsoleteSettlement: cut(),
         }
         // A subsequent valid ordering write exposes repair debt that a late
@@ -448,9 +477,6 @@ export async function receiveJoinedReplay(
         await flushPromises()
         settled = cut()
       }
-      const error = live ? live.utils.lastSubsetError : errors[0]
-      const originatingError =
-        history.laterReplay?.outcome === `rejects` ? laterFailure : failure
       return {
         initial,
         waitingForReplay,
@@ -467,12 +493,7 @@ export async function receiveJoinedReplay(
         rowsAtMoveFulfillment: move.rowsAtFulfillment,
         windowAtMoveFulfillment: move.windowAtFulfillment,
         laterReplay: laterReplayTrace,
-        reportedError:
-          error === undefined
-            ? `none`
-            : error === originatingError
-              ? `originating error`
-              : `different error`,
+        reportedError: reportedError(),
       }
     },
     () => {

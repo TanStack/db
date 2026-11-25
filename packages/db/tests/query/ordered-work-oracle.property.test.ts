@@ -212,6 +212,16 @@ const joinedReplayHistories: Array<JoinedReplayHistory> = [false, true].flatMap(
   (indexed) => [
     ...joinedReplaySchedules.map((schedule) => ({ ...schedule, indexed })),
     ...joinedReplaySchedules
+      .filter(
+        ({ trigger, answer }) =>
+          trigger === `explicit` && answer !== `complete`,
+      )
+      .map((schedule) => ({
+        ...schedule,
+        indexed,
+        trigger: `reload` as const,
+      })),
+    ...joinedReplaySchedules
       .filter(({ answer, limit }) => answer !== `complete` && limit === 2)
       .map((schedule) => ({
         ...schedule,
@@ -1016,6 +1026,8 @@ describe(`ordered source work oracle`, () => {
         `collection literal-true refill followed by held repair`,
         `effect literal-true refill followed by held repair`,
         `ordinary delete after replay retirement`,
+        `collection held refill after reload replay`,
+        `effect held refill after reload replay`,
       ],
     },
     label: ({
@@ -1109,6 +1121,9 @@ describe(`ordered source work oracle`, () => {
       ) {
         observe(`reach`, `ordinary delete after replay retirement`)
       }
+      if (history.trigger === `reload` && trace.heldRefill) {
+        observe(`reach`, `${history.receiver} held refill after reload replay`)
+      }
       observe(`joined replay trace`, trace)
     },
     // The replay's raw writes and root subscription readiness establish reach.
@@ -1137,13 +1152,29 @@ describe(`ordered source work oracle`, () => {
         [`prior window`, trace.initial, expected.prior],
         [`bounded repair started`, trace.repairStarted, true],
         [`replay started`, trace.replayRequests > 0, true],
-        [`raw truncate applied`, trace.waitingForReplay.installed, []],
         [
           `replay installed source rows`,
           trace.afterReplayAnswers.installed.length > 0,
           true,
         ],
       ]
+      if (history.trigger === `reload`) {
+        const retained = trace.waitingForReplay.installed
+        comparisons.push([
+          `reload preserves the old source until provider writes`,
+          retained.length > 0 &&
+            retained.every(({ id }) =>
+              history.initial.some((row) => row.id === id),
+            ),
+          true,
+        ])
+      } else {
+        comparisons.push([
+          `raw truncate applied`,
+          trace.waitingForReplay.installed,
+          [],
+        ])
+      }
       if (history.holdJoined)
         comparisons.push([`joined load was held`, trace.joinedDemandHeld, true])
       if (history.literalRoot) {
@@ -1256,6 +1287,11 @@ describe(`ordered source work oracle`, () => {
           ],
           [`second replay held reads`, later.held.rows, expected.prior],
           [`second replay held publications`, later.held.publications, []],
+          [
+            `second replay error before obsolete settlement`,
+            later.settledError,
+            expected.error,
+          ],
           [
             `second replay installed source rows`,
             trace.settled.installed.length > 0,

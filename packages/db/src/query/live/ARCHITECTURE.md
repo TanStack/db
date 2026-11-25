@@ -1543,6 +1543,11 @@ its logical owner, but an owner whose current acquisition was aborted owes
 the replay nothing. Releasing the owner removes its work from readiness. Work
 started inside the current replay attempt holds publication until it
 settles or aborts.
+
+A reload can replay a live subscription's demand without emitting a
+truncate. An ordered Effect resets its cursor when either replay starts.
+The current replay's completion resumes its ordered loader and schedules
+the graph pass that checks any remaining refill.
 Core installs each tentative acquisition and binds it to the current replay
 attempt before calling adapter code. A reentrant release or newer truncate can
 therefore see and retire the exact work it supersedes; work returned after that

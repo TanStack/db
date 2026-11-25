@@ -838,11 +838,18 @@ describe(`OrderedSourceLoader`, () => {
         await targetSettlement
         expect(target.controller.signal.aborted).toBe(false)
         expect(releases).toEqual([])
+      } else if (outcome === `abort`) {
+        target.controller.abort()
+        await expect(targetSettlement).resolves.toBeUndefined()
+        target.deferred.reject(failure)
+        await Promise.resolve()
+        expect(pendingPromise(loader)).toBeUndefined()
+        expect(requests.at(-1)).toBe(target)
+        expect(releases).toEqual([])
       } else {
-        if (outcome === `abort`) target.controller.abort()
         target.deferred.reject(failure)
         await expect(targetSettlement).rejects.toBe(failure)
-        expect(target.controller.signal.aborted).toBe(outcome === `abort`)
+        expect(target.controller.signal.aborted).toBe(false)
 
         const requestCount = requests.length
         expect(loader.loadMore()).toBeUndefined()
