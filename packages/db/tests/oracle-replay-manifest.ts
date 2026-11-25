@@ -2889,6 +2889,10 @@ const ownerReplayConfigs = new Map([
     `vitest.adapter-oracles.config.ts`,
   ],
   [
+    `packages/browser-db-sqlite-persistence/tests/native-browser-context-oracle.test.ts`,
+    `vitest.adapter-oracles.config.ts`,
+  ],
+  [
     `packages/convex-db-collection/e2e/backend-oracle.test.ts`,
     `vitest.e2e.config.ts`,
   ],

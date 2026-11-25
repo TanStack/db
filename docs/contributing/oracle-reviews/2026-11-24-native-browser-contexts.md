@@ -94,6 +94,12 @@ discovery selects all 35 receiver files exactly once (9, 9, 9 and 8), using the
 package script that CI invokes. Its nonmatching test filter is diagnostic only
 and is absent from CI. The prior 34-file partition evidence remains historical.
 
+The replay manifest also selects the dedicated browser configuration for this
+owner. Registry accounting alone does not execute every owner's host. The
+official guarded replay of seed `2377`, path `0:0:0:0` and the first constructed
+unit passes one selected unit (29 skipped), with one witnessed execution and
+three completed runs for that exact property, seed and path.
+
 ## Oracle review and grammar controls
 
 The model is a list of zeros, one per completed history. It does not duplicate
