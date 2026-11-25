@@ -22,6 +22,7 @@ import {
 import type {
   ConstructedHistory,
   Observation,
+  ReadonlyHistory,
   Verdict,
 } from '../../db/tests/oracle-property.js'
 import type { GraphHistory } from './hash-graph-shared-oracle'
@@ -105,7 +106,10 @@ function prefix(
 // e1fb504 associates only the initially seeded constructions with their state
 // claims. Record every fresh result, including generated and shrunk builds, so
 // the shared comparison enforces each builder's declared states independently.
-const constructionStates = new WeakMap<GraphHistory, ReadonlyArray<string>>()
+const constructionStates = new WeakMap<
+  ReadonlyHistory<GraphHistory>,
+  ReadonlyArray<string>
+>()
 
 function enforceConstructed(
   builders: Array<ConstructedHistory<GraphHistory>>,

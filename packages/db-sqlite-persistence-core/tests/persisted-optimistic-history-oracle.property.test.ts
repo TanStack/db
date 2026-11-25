@@ -187,7 +187,7 @@ const insertThenUpdateBehindHeldStore: Array<OptimisticStep> = [
 // ---------------------------------------------------------------------------
 
 /** A wrapping history's generated body, without its settle-and-observe tail. */
-const bodyOf = (history: { steps: Array<OptimisticStep> }) =>
+const bodyOf = (history: { readonly steps: ReadonlyArray<OptimisticStep> }) =>
   history.steps.slice(0, history.steps.length - wrappingSteps([]).length)
 const row = (id: number, a: number): HistoryRow => ({ id, a, b: 0, c: 0 })
 

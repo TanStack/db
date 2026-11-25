@@ -1328,7 +1328,7 @@ describe(`includes temporal oracle`, () => {
     driver: (plan, observe) =>
       recordAssertionJudgment(demandSchedulingLaw, plan, observe, () =>
         expectScheduledAcquisitionsRespectCurrentDemand(
-          fc.schedulerFor(plan.order),
+          fc.schedulerFor([...plan.order]),
         ),
       ),
     check: forwardAssertionJudgment,

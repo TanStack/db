@@ -6,6 +6,7 @@ import { differs, oracleProperty, pass, violation } from './oracle-config.js'
 import type {
   ConstructedHistory,
   Observation,
+  ReadonlyHistory,
   Verdict,
 } from './oracle-config.js'
 
@@ -124,7 +125,11 @@ type ReadCase = {
 }
 
 // Construction requirements are test-only provenance, not index state.
-const constructionRequirements = new WeakMap<ReadCase, ReadonlyArray<string>>()
+// A literal `build` result is read-only (ReadonlyHistory), so the key is too.
+const constructionRequirements = new WeakMap<
+  ReadonlyHistory<ReadCase>,
+  ReadonlyArray<string>
+>()
 
 // The pinned framework checks only seeded construction identities. Associate
 // every generated and shrunk output with its obligation as well. Fresh objects
