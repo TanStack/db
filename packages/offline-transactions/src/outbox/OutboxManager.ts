@@ -17,6 +17,8 @@ export type OutboxOutcome = {
   error: { name: string; message: string }
   // When it was recorded, so an outcome no writer reads can be pruned.
   at: number
+  // Who recorded it, so that recorder can withdraw only its own record.
+  by?: string
 }
 
 /**
@@ -123,16 +125,26 @@ export class OutboxManager {
     }
   }
 
-  /** Records a rejection before its row is removed. */
-  async recordRejection(id: string, error: Error): Promise<void> {
+  /** Records a rejection before its row is removed; returns its token. */
+  async recordRejection(id: string, error: Error): Promise<string> {
+    const by = `${Date.now()}:${Math.random()}`
     const outcome: OutboxOutcome = {
       error: { name: error.name, message: error.message },
       at: Date.now(),
+      by,
     }
     await this.storage.set(
       `${this.outcomePrefix}${id}`,
       JSON.stringify(outcome),
     )
+    return by
+  }
+
+  /** Removes the record only if the recording with token `by` made it. */
+  async withdrawOutcome(id: string, by: string): Promise<void> {
+    const data = await this.storage.get(`${this.outcomePrefix}${id}`)
+    if (data !== null && (JSON.parse(data) as OutboxOutcome).by === by)
+      await this.storage.delete(`${this.outcomePrefix}${id}`)
   }
 
   async getOutcome(id: string): Promise<OutboxOutcome | null> {

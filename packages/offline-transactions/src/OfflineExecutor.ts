@@ -45,6 +45,13 @@ type OutboxMessage =
   | { type: `added`; id: string }
   | { type: `settled`; id: string; error?: { name: string; message: string } }
   | { type: `leader` }
+  // A follower asks the leader to remove saved writes, and hears back.
+  | { type: `remove`; request: string; ids: Array<string> }
+  | {
+      type: `removed`
+      request: string
+      error?: { name: string; message: string }
+    }
 
 function outboxMessageError(error: { name: string; message: string }): Error {
   const restored =
@@ -116,6 +123,15 @@ export class OfflineExecutor {
   private term = 0
   // Saves in progress; true once removeFromOutbox or clearOutbox removed one.
   private readonly saving = new Map<string, boolean>()
+  // Removals this follower asked the leader for, by request.
+  private readonly removals = new Map<
+    string,
+    {
+      ids: Array<string>
+      resolve: () => void
+      reject: (error: Error) => void
+    }
+  >()
   private pendingTransactionPromises: Map<
     string,
     {
@@ -395,6 +411,8 @@ export class OfflineExecutor {
         await this.loadAndReplayTransactions()
       }
       this.initialized = true
+      // A replacement executor settles saved writes its predecessor left.
+      if (!isLeader) this.reconcileFollowerWrites()
       this.initResolve()
     } catch (error) {
       console.warn(`Failed to initialize offline executor:`, error)
@@ -432,6 +450,11 @@ export class OfflineExecutor {
       } satisfies OutboxMessage)
     }
     this.reconcileFollowerWrites()
+    // Removals this tab asked a former leader for are now its own to make.
+    for (const [request, removal] of [...this.removals]) {
+      this.removals.delete(request)
+      this.removeSaved(removal.ids).then(removal.resolve, removal.reject)
+    }
 
     // Replay completion is separate from initialization and durable admission.
     this.executor.executeAll().catch((error) => {
@@ -459,6 +482,17 @@ export class OfflineExecutor {
   private handleOutboxMessage(message: OutboxMessage): void {
     if (message.type === `leader`) {
       this.reconcileFollowerWrites()
+      // A new leader may not have heard earlier removal requests.
+      for (const [request, removal] of this.removals)
+        this.postRemoval(request, removal.ids)
+    } else if (message.type === `remove`) {
+      this.removeForFollower(message.request, message.ids)
+    } else if (message.type === `removed`) {
+      const removal = this.removals.get(message.request)
+      if (!removal) return
+      this.removals.delete(message.request)
+      if (message.error) removal.reject(outboxMessageError(message.error))
+      else removal.resolve()
     } else if (message.type === `added`) {
       this.admitFollowerWrite(message.id)
     } else {
@@ -467,6 +501,51 @@ export class OfflineExecutor {
         message.error && outboxMessageError(message.error),
       )
     }
+  }
+
+  // Only the leader knows whether a write's call started, so it removes.
+  private removeForFollower(request: string, ids: Array<string>): void {
+    if (!this.isOfflineEnabled) return
+    this.removeSaved(ids).then(
+      () => {
+        this.outboxChannel?.postMessage({
+          type: `removed`,
+          request,
+        } satisfies OutboxMessage)
+      },
+      (error: unknown) => {
+        console.warn(`Failed to remove transactions for a follower:`, error)
+        const failure =
+          error instanceof Error ? error : new Error(String(error))
+        this.outboxChannel?.postMessage({
+          type: `removed`,
+          request,
+          error: { name: failure.name, message: failure.message },
+        } satisfies OutboxMessage)
+      },
+    )
+  }
+
+  private postRemoval(request: string, ids: Array<string>): void {
+    this.outboxChannel?.postMessage({
+      type: `remove`,
+      request,
+      ids,
+    } satisfies OutboxMessage)
+  }
+
+  // An initialized follower that shares the outbox asks the leader.
+  private get forwardsRemovals(): boolean {
+    return this.writesToSharedOutbox && !this.isOfflineEnabled
+  }
+
+  private forwardRemoval(ids: Array<string>): Promise<void> {
+    for (const id of ids) if (this.saving.has(id)) this.saving.set(id, true)
+    const request = safeRandomUUID()
+    return new Promise<void>((resolve, reject) => {
+      this.removals.set(request, { ids, resolve, reject })
+      this.postRemoval(request, ids)
+    })
   }
 
   private admitFollowerWrite(id: string): void {
@@ -516,7 +595,11 @@ export class OfflineExecutor {
     if (!this.recordsOutcomes) return
     const sweep = ++this.sweeps
     let failed = false
-    for (const [id, waiter] of [...this.pendingTransactionPromises]) {
+    // A predecessor this executor settles may have left saved writes.
+    const waiters = this.relatedExecutors().flatMap((owner) => [
+      ...owner.pendingTransactionPromises,
+    ])
+    for (const [id, waiter] of waiters) {
       try {
         if (!(await waiter.saved)) continue
         if (await this.outbox!.get(id)) continue
@@ -837,6 +920,16 @@ export class OfflineExecutor {
 
   /** The executors in this runtime that receive this transaction's outcome. */
   private settlementOwners(transactionId: string): Array<OfflineExecutor> {
+    return this.relatedExecutors().filter(
+      (owner) =>
+        owner === this ||
+        owner.pendingTransactionPromises.has(transactionId) ||
+        owner.restorationTransactions.has(transactionId),
+    )
+  }
+
+  /** This executor and those in this runtime whose outcomes it delivers. */
+  private relatedExecutors(): Array<OfflineExecutor> {
     const candidates = new Set<OfflineExecutor>([this])
     for (const collection of Object.values(this.config.collections)) {
       for (const owner of completionOwners.get(collection) ?? [])
@@ -845,18 +938,10 @@ export class OfflineExecutor {
     return [...candidates].filter(
       (owner) =>
         owner === this ||
-        ((owner.pendingTransactionPromises.has(transactionId) ||
-          owner.restorationTransactions.has(transactionId)) &&
-          // Either executor may deliver the outcome: a retired issued call or
-          // its successor's replay. An ancillary overlap alone is insufficient.
-          (retainsCollections(
-            this.config.collections,
-            owner.config.collections,
-          ) ||
-            retainsCollections(
-              owner.config.collections,
-              this.config.collections,
-            ))),
+        // Either executor may deliver the outcome: a retired issued call or
+        // its successor's replay. An ancillary overlap alone is insufficient.
+        retainsCollections(this.config.collections, owner.config.collections) ||
+        retainsCollections(owner.config.collections, this.config.collections),
     )
   }
 
@@ -901,7 +986,8 @@ export class OfflineExecutor {
     if (!this.outbox) {
       return
     }
-    await this.removeSaved([id])
+    if (this.forwardsRemovals) await this.forwardRemoval([id])
+    else await this.removeSaved([id])
   }
 
   /**
@@ -947,7 +1033,9 @@ export class OfflineExecutor {
     if (!this.outbox || !this.executor) {
       return
     }
-    await this.removeSaved(await this.outbox.ids())
+    const ids = await this.outbox.ids()
+    if (this.forwardsRemovals) await this.forwardRemoval(ids)
+    else await this.removeSaved(ids)
     this.executor.clear()
   }
 
@@ -975,6 +1063,11 @@ export class OfflineExecutor {
 
   dispose(): void {
     this.disposed = true
+    for (const removal of this.removals.values())
+      removal.reject(
+        new Error(`Offline executor disposed before the leader removed it`),
+      )
+    this.removals.clear()
     this.executor?.pause()
     for (const collection of Object.values(this.config.collections)) {
       collection.deferDataRefresh = null

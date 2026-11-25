@@ -469,7 +469,7 @@ export class TransactionExecutor {
       const error = new NonRetriableError(`Transaction excluded by beforeRetry`)
       await Promise.all(
         removedIds.map(async (id) => {
-          if (await this.cleanUpExcluded(id, error)) return
+          if (await this.cleanUpExcluded(id, error, term)) return
           // Until the retry succeeds, no admission runs it.
           this.failedCleanups.set(id, error)
           this.scheduleCleanupRetry()
@@ -479,9 +479,28 @@ export class TransactionExecutor {
   }
 
   /** Records and removes one excluded write; false when that failed. */
-  private async cleanUpExcluded(id: string, error: Error): Promise<boolean> {
+  private async cleanUpExcluded(
+    id: string,
+    error: Error,
+    term: number | undefined,
+  ): Promise<boolean> {
     try {
-      if (this.recordsFor(id)) await this.outbox.recordRejection(id, error)
+      const recorded = this.recordsFor(id)
+        ? await this.outbox.recordRejection(id, error)
+        : undefined
+      // A later leader decides the write once this term ends: this tab
+      // neither removes it nor settles it. While the row remains, that
+      // leader has not settled it, so this tab withdraws its own record. A
+      // row already gone was rejected by that leader, whose record this one
+      // may have replaced, or completed before this record landed.
+      if (
+        !this.offlineExecutor.isOfflineEnabled ||
+        term !== this.offlineExecutor.leadershipTerm
+      ) {
+        if (recorded !== undefined && (await this.outbox.has(id)))
+          await this.outbox.withdrawOutcome(id, recorded).catch(() => {})
+        return true
+      }
       await this.outbox.remove(id)
       this.excluding.delete(id)
       this.offlineExecutor.rejectTransaction(id, error)
@@ -517,11 +536,12 @@ export class TransactionExecutor {
   async retryFailedCleanups(): Promise<void> {
     if (this.cleaning || !this.offlineExecutor.isOfflineEnabled) return
     this.cleaning = true
+    const term = this.offlineExecutor.leadershipTerm
     try {
       for (const [id, error] of [...this.failedCleanups]) {
         // A change of leadership drops the rest; the next replay owns them.
         if (!this.failedCleanups.has(id)) continue
-        if (!(await this.cleanUpExcluded(id, error))) continue
+        if (!(await this.cleanUpExcluded(id, error, term))) continue
         // A change of leadership during the attempt already dropped it.
         this.failedCleanups.delete(id)
       }

@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { OUTCOME_RETENTION_MS } from '../src/outbox/OutboxManager'
 import { NonRetriableError } from '../src/types'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import type { OnlineDetector } from '../src/types'
 
-// Rejection records for writers in other tabs live for a bounded time. These
-// checks move the clock, which the durable follower oracle does not.
+// Rejection records for writers in other tabs live for seven days, as the
+// guide documents. These checks move the clock, which the durable follower
+// oracle does not, and state the duration on their own.
+
+const DAY = 24 * 60 * 60 * 1000
 
 const offline = (): OnlineDetector => ({
   subscribe: () => () => {},
@@ -33,17 +35,11 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it(`prunes outcome records older than the retention window when a tab leads`, async () => {
+it(`prunes outcome records older than seven days when a tab leads`, async () => {
   const storage = new FakeStorageAdapter()
   const now = Date.now()
-  await storage.set(
-    `outcome:old`,
-    record(`old`, now - OUTCOME_RETENTION_MS - 1),
-  )
-  await storage.set(
-    `outcome:recent`,
-    record(`recent`, now - OUTCOME_RETENTION_MS + 60_000),
-  )
+  await storage.set(`outcome:old`, record(`old`, now - 9 * DAY))
+  await storage.set(`outcome:recent`, record(`recent`, now - 6 * DAY))
   const env = createTestOfflineEnvironment({
     storage,
     config: { followerWrites: `durable`, onlineDetector: offline() },
@@ -54,16 +50,17 @@ it(`prunes outcome records older than the retention window when a tab leads`, as
       expect(await storage.get(`outcome:old`)).toBe(null)
     })
     expect(await storage.get(`outcome:recent`)).toBe(
-      record(`recent`, now - OUTCOME_RETENTION_MS + 60_000),
+      record(`recent`, now - 6 * DAY),
     )
   } finally {
     env.executor.dispose()
   }
 })
 
-it.each([false, true])(
-  `a saved write whose row left with no record completes only within the retention window, aged=%s`,
-  async (aged) => {
+it.each([6, 9])(
+  `a saved write whose row left with no record completes only within seven days, after %i days`,
+  async (days) => {
+    const aged = days > 7
     vi.useFakeTimers({ toFake: [`Date`] })
     const storage = new FakeStorageAdapter()
     const env = createTestOfflineEnvironment({
@@ -104,7 +101,7 @@ it.each([false, true])(
       env.leader.setLeader(false)
       // Another leader sent and removed the row; a success records nothing.
       await storage.delete(`tx:${id}`)
-      if (aged) vi.setSystemTime(Date.now() + OUTCOME_RETENTION_MS + 1)
+      vi.setSystemTime(Date.now() + days * DAY)
       env.leader.setLeader(true)
       for (let turn = 0; turn < 10; turn++)
         await new Promise((resolve) => setTimeout(resolve, 0))

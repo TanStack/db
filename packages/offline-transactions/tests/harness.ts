@@ -103,6 +103,8 @@ interface TestOfflineEnvironmentOptions {
   config?: Partial<OfflineConfig>
   // The collection's id, and the key the executor registers it under.
   collectionId?: string
+  // An existing collection to register, as a replacement executor does.
+  collection?: Collection<TestItem, string, {}>
   registryKey?: string
 }
 
@@ -150,12 +152,16 @@ export function createTestOfflineEnvironment(
   const mutationCalls: Array<OfflineMutationFnParams & { attempt: number }> = []
   const attemptCounter = new Map<string, number>()
 
-  const { collection, controller } = createDefaultCollection(
-    options.collectionId,
-  )
+  const created = options.collection
+    ? undefined
+    : createDefaultCollection(options.collectionId)
+  const collection = options.collection ?? created!.collection
+  const controller = created?.controller
   const serverState = new Map<string, TestItem>()
 
   const applyMutations = (mutations: ReadonlyArray<PendingMutation>) => {
+    // A reused collection keeps the sync of the environment that made it.
+    if (!controller) return
     controller.begin()
 
     for (const mutation of mutations) {
