@@ -1,0 +1,5 @@
+---
+'@tanstack/db': patch
+---
+
+Keep live query Effect callbacks behind the truncate replay when it starts as a subset acquisition completes. For Effects with `skipInitial`, suppress replay callbacks when the replay starts during initial acquisition.
