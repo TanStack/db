@@ -35,6 +35,7 @@ export class OutboxManager {
   private serializer: TransactionSerializer
   private keyPrefix = `tx:`
   private outcomePrefix = `outcome:`
+  private decisionPrefix = `decision:`
   private removalRevision = 0
   private activeReads = new Set<{ revision: number }>()
   private removedAtRevision = new Map<string, number>()
@@ -200,33 +201,22 @@ export class OutboxManager {
   }
 
   /**
-   * Persists a decision to reject a saved row, so any later leader's replay
-   * settles it as rejected instead of sending it. A row that already carries
-   * a phase keeps it; one that cannot be read is left as it is.
+   * Records a decision to reject a saved write, beside its row, which it
+   * never rewrites. A replay settles a row that has one instead of sending
+   * it; a decision whose row is gone means nothing.
    */
-  async markRejected(
-    id: string,
-    error: Error,
-  ): Promise<`marked` | `gone` | `unreadable`> {
-    const data = await this.storage.get(this.getStorageKey(id))
-    if (data === null) return `gone`
-    let transaction: OfflineTransaction
-    try {
-      transaction = this.serializer.deserialize(data)
-    } catch {
-      return `unreadable`
-    }
-    if (transaction.outboxPhase) return `marked`
-    await this.add({
-      ...transaction,
-      outboxPhase: `rejection-pending`,
-      lastError: {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-      },
-    })
-    return `marked`
+  async recordDecision(id: string, error: Error): Promise<void> {
+    await this.storage.set(
+      `${this.decisionPrefix}${encodeURIComponent(id)}`,
+      JSON.stringify({
+        error: { name: error.name, message: error.message },
+        at: Date.now(),
+      }),
+    )
+  }
+
+  async removeDecision(id: string): Promise<void> {
+    await this.storage.delete(`${this.decisionPrefix}${encodeURIComponent(id)}`)
   }
 
   /** Whether a row is saved, without decoding it. */
@@ -247,11 +237,25 @@ export class OutboxManager {
 
   async withAll<T>(
     consume: (transactions: Array<OfflineTransaction>) => T,
+    // Filled from the same key listing with every recorded decision.
+    decisions?: Map<string, { name: string; message: string }>,
   ): Promise<T> {
     const read = { revision: this.removalRevision }
     this.activeReads.add(read)
     try {
       const keys = await this.storage.keys()
+      if (decisions) {
+        for (const key of keys) {
+          if (!key.startsWith(this.decisionPrefix)) continue
+          const data = await this.storage.get(key)
+          if (data === null) continue
+          decisions.set(
+            decodeURIComponent(key.slice(this.decisionPrefix.length)),
+            (JSON.parse(data) as { error: { name: string; message: string } })
+              .error,
+          )
+        }
+      }
       const transactionKeys = keys.filter((key) =>
         key.startsWith(this.keyPrefix),
       )

@@ -51,6 +51,8 @@ type OutboxMessage =
       type: `removed`
       request: string
       error?: { name: string; message: string }
+      // The leader stopped leading before it decided; ask again.
+      retry?: true
     }
 
 function outboxMessageError(error: { name: string; message: string }): Error {
@@ -455,7 +457,7 @@ export class OfflineExecutor {
     // Removals this tab asked a former leader for are now its own to make.
     for (const [request, removal] of [...this.removals]) {
       this.removals.delete(request)
-      this.removeSaved(removal.ids).then(removal.resolve, removal.reject)
+      this.removeOrForward(removal.ids).then(removal.resolve, removal.reject)
     }
 
     // Replay completion is separate from initialization and durable admission.
@@ -492,6 +494,10 @@ export class OfflineExecutor {
     } else if (message.type === `removed`) {
       const removal = this.removals.get(message.request)
       if (!removal) return
+      if (message.retry) {
+        this.postRemoval(message.request, removal.ids)
+        return
+      }
       this.removals.delete(message.request)
       if (message.error) removal.reject(outboxMessageError(message.error))
       else removal.resolve()
@@ -509,10 +515,11 @@ export class OfflineExecutor {
   private removeForFollower(request: string, ids: Array<string>): void {
     if (!this.isOfflineEnabled) return
     this.removeSaved(ids).then(
-      () => {
+      (yielded) => {
         this.outboxChannel?.postMessage({
           type: `removed`,
           request,
+          ...(yielded.length > 0 ? { retry: true as const } : {}),
         } satisfies OutboxMessage)
       },
       (error: unknown) => {
@@ -1013,7 +1020,15 @@ export class OfflineExecutor {
       return
     }
     if (this.forwardsRemovals) await this.forwardRemoval([id])
-    else await this.removeSaved([id])
+    else await this.removeOrForward([id])
+  }
+
+  /** Removes here, or asks the leader for removals this tab yielded. */
+  private async removeOrForward(ids: Array<string>): Promise<void> {
+    const yielded = await this.removeSaved(ids)
+    if (yielded.length === 0) return
+    if (this.forwardsRemovals) return this.forwardRemoval(yielded)
+    throw new Error(`Leadership moved before the removal was decided`)
   }
 
   /**
@@ -1021,68 +1036,96 @@ export class OfflineExecutor {
    * removal error, which a writer in another tab also reads from its record;
    * a started call keeps the provider's outcome.
    */
-  private async removeSaved(ids: Array<string>): Promise<void> {
+  /**
+   * Removes saved transactions; returns those it left to the next leader
+   * because it stopped leading before deciding them.
+   */
+  private async removeSaved(ids: Array<string>): Promise<Array<string>> {
     const outbox = this.outbox!
     const error = removedError()
     // Off the queue before any await, so this tab cannot start them
     // meanwhile; the one already running keeps the provider's outcome.
     const unstarted = new Set(this.scheduler.removePendingTransactions(ids))
     // A leader's removal yields if it stops leading before its decision is
-    // written; the term only counts gains.
+    // recorded; the term only counts gains.
     const term = this.term
     const leading = this.isOfflineEnabled
     const stillLeads = () =>
       // Leadership can end during the awaits this check follows.
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       !leading || (this.isOfflineEnabled && term === this.term)
+    // A writer in another tab reads a record; this tab's own needs none.
+    const records = (id: string) => this.recordsOutcomes && !this.ownsWrite(id)
     const failures: Array<unknown> = []
+    const yielded: Array<string> = []
     // Each id settles by its own deletion.
     await Promise.all(
       ids.map(async (id) => {
-        let token: string | undefined
-        let decided = false
+        let committed = false
         try {
           if (!(await outbox.has(id))) {
             if (this.saving.has(id)) this.saving.set(id, true)
             return
           }
-          if (unstarted.has(id)) {
-            if (this.recordsOutcomes && !this.ownsWrite(id))
-              token = await outbox.recordRejection(id, error)
-            // The removal is persisted on the row first, so a later leader's
-            // replay rejects it rather than send it. A row this term has not
-            // marked belongs to the next leader.
-            const mark = await outbox.markRejected(id, error)
-            if (mark === `gone` || !stillLeads()) {
-              if (token !== undefined)
-                await outbox.withdrawOutcome(id, token).catch(() => {})
-              return
-            }
-            decided = mark === `marked`
-          } else if (this.recordsOutcomes && !this.ownsWrite(id)) {
+          if (!unstarted.has(id)) {
             // A writer in another tab reads that the call it cannot see is
             // still running.
-            token = await outbox.recordPending(id)
+            const token = records(id)
+              ? await outbox.recordPending(id)
+              : undefined
+            await outbox.remove(id)
+            if (this.saving.has(id)) this.saving.set(id, true)
+            if (token !== undefined) this.runningRemovals.set(id, token)
+            return
           }
+          // A row whose call already settled keeps that outcome.
+          const row = await outbox.get(id).catch(() => null)
+          if (row?.outboxPhase) {
+            const outcome =
+              row.outboxPhase === `rejection-pending` && row.lastError
+                ? outboxMessageError(row.lastError)
+                : undefined
+            if (outcome && records(id))
+              await outbox.recordRejection(id, outcome)
+            await outbox.remove(id)
+            if (outcome) this.rejectTransaction(id, outcome)
+            else this.resolveTransaction(id, undefined)
+            return
+          }
+          // The decision is recorded beside the row first, so a later
+          // leader's replay settles the row rather than send it. One that
+          // does not commit while this tab leads is withdrawn. Without
+          // recorded outcomes there are no decisions, and a write the next
+          // leader now decides is left to it.
+          if (this.recordsOutcomes) await outbox.recordDecision(id, error)
+          if (!stillLeads()) {
+            if (this.recordsOutcomes)
+              await outbox.removeDecision(id).catch(() => {})
+            yielded.push(id)
+            return
+          }
+          committed = true
+          if (records(id)) await outbox.recordRejection(id, error)
           await outbox.remove(id)
+          if (this.recordsOutcomes)
+            await outbox.removeDecision(id).catch(() => {})
         } catch (removalError) {
-          // A persisted decision stands: the queue finishes its deletion.
-          if (!decided) {
+          if (!committed) {
             failures.push(removalError)
-            if (token !== undefined)
-              await outbox.withdrawOutcome(id, token).catch(() => {})
+            // The row is read again, so a write another leader settled
+            // meanwhile is not queued again.
+            this.executor!.admitTransaction(id).catch(() => {})
+            return
           }
-          // The row is read again, so a write another leader settled meanwhile
-          // is not queued again.
-          this.executor!.admitTransaction(id).catch(() => {})
-          if (!decided) return
+          // A committed removal stands; its deletion is retried.
+          this.executor!.retryDecided(id, error)
         }
         if (this.saving.has(id)) this.saving.set(id, true)
-        if (unstarted.has(id)) this.rejectTransaction(id, error)
-        else if (token !== undefined) this.runningRemovals.set(id, token)
+        this.rejectTransaction(id, error)
       }),
     )
     if (failures.length > 0) throw failures[0]
+    return yielded
   }
 
   /** Withdraws the running marker of a removed write whose call finished. */
@@ -1108,7 +1151,7 @@ export class OfflineExecutor {
     // snapshot stays queued.
     const ids = await this.outbox.ids()
     if (this.forwardsRemovals) await this.forwardRemoval(ids)
-    else await this.removeSaved(ids)
+    else await this.removeOrForward(ids)
   }
 
   getPendingCount(): number {
