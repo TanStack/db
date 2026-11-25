@@ -8859,6 +8859,14 @@ oracle also reads the request ledger at bounded repair settlement, before a
 later graph pass. A superseded finite rejection requires a covering read at
 that cut when no joined demand or replay holds the chain.
 
+`ordered-loader.full-source-retry-replay` uses a real on-demand Collection
+and varies whether retry starts a truncate from the superseded finite lease's
+unload or the failed full-source lease's unload. It compares the one covering
+read, the replay's health verdict, the failed window's retained public result,
+and the rows and retained covering lease after a later explicit window move.
+The controlled authority ledger also recognizes a successfully replayed
+full-source demand whose older transport had failed.
+
 ### Initial Effect acquisition aborted by replay
 
 `includes-temporal.lagging-source` checks both an unordered root and a lazy

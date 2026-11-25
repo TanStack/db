@@ -355,11 +355,6 @@ export class OrderedSourceLoader {
         windowOperationGeneration !==
           this.failedRequest.windowOperationGeneration)
     if (!mayRetryFailure) return this.pending
-    // A failed full-source read stops owning the source before its lease is
-    // released, so a replay during or after a throwing release cannot count it.
-    if (this.work.kind === `full-source` && this.work.status === `failed`) {
-      this.moveWork({ kind: `idle` }, [`failed`])
-    }
     if (
       (this.failedRequest || this.failedAcquisitions.size > 0) &&
       windowOperationGeneration !== undefined &&
@@ -376,7 +371,7 @@ export class OrderedSourceLoader {
       }
       // Adapter cleanup can synchronously tear down this loader; every later
       // step checks that it is still active.
-      this.releaseOwned(this.failedAcquisitions, () => true)
+      this.releaseFailedAcquisitions()
     }
     if (
       this.work.kind !== `idle` &&
@@ -646,6 +641,7 @@ export class OrderedSourceLoader {
   private releaseOwned<TEntry>(
     owner: Map<ReleaseLoadSubset, TEntry>,
     selected: (release: ReleaseLoadSubset, entry: TEntry) => boolean,
+    beforeRelease?: (entry: TEntry) => void,
   ): void {
     const orderedLoadGeneration = this.orderedLoadGeneration
     const requesting = this.requesting
@@ -665,9 +661,10 @@ export class OrderedSourceLoader {
               `Ordered loader lease was released by another pass`,
             )
           }
+          beforeRelease?.(entry)
           owner.delete(release)
-          // A release that throws never changes a load, a window, or the
-          // loader's state; it is reported uncaught.
+          // Report the callback's failure without changing the release's
+          // ownership result, the load, or the window.
           try {
             release()
           } catch (error) {
@@ -678,6 +675,23 @@ export class OrderedSourceLoader {
     } finally {
       this.requesting = requesting
     }
+  }
+
+  private releaseFailedAcquisitions(): void {
+    // An earlier release can start replay and stop this pass. Keep the
+    // covering demand until the pass actually reaches its own lease.
+    this.releaseOwned(
+      this.failedAcquisitions,
+      () => true,
+      ({ kind }) => {
+        if (
+          kind === `full-source` &&
+          this.work.kind === `full-source` &&
+          this.work.status === `failed`
+        )
+          this.moveWork({ kind: `idle` }, [`failed`])
+      },
+    )
   }
 
   invalidateCursor(): void {
@@ -805,7 +819,6 @@ export class OrderedSourceLoader {
       if (!this.active || (!verifyJoinedWindow && !hasSupersededAcquisition)) {
         // A release can start a replay. Leave enough authority for that
         // replay to finish retiring older leases without releasing its own.
-        this.cancelRepairRetry()
         this.repairRetries = 0
         // Retirement can deliver a newer invalidation or raise the debt to a
         // full-source read. Keep that debt for the next pass; otherwise this
@@ -1053,8 +1066,7 @@ export class OrderedSourceLoader {
             this.failedRequest !== failedRequest
           )
             return
-          this.moveWork({ kind: `idle` }, [`idle`, `failed`])
-          this.releaseOwned(this.failedAcquisitions, () => true)
+          this.releaseFailedAcquisitions()
           // Release may dispose or start a new replay; neither belongs to this retry.
           if (
             // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- release callbacks can dispose the loader

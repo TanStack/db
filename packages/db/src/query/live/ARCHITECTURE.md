@@ -1073,11 +1073,13 @@ replacement, and clears the loader's completion marker so an explicit retry
 of the window can issue the request again. That explicit retry retires and
 releases the earlier failed acquisition before installing its replacement, so
 a later truncate replays one logical demand rather than both attempts. The
-failed read stops being the loader's source demand before its lease is
-released. A replay that settles during or after a throwing release therefore
-cannot count the released read as complete source coverage. A
-successful authoritative replay clears its source-recovery gate, but it does
-not clear an unrelated failed window operation. A later explicit window move
+failed read stops being the loader's source demand when the retry reaches
+its own lease, before calling its unload. If an earlier unload starts replay,
+the failed read's retained demand participates in that replay and already
+supplies its covering read. A replay that starts from the full-source lease's
+own unload needs a fresh covering read. A successful authoritative replay
+clears its source-recovery gate, but it does not clear an unrelated failed
+window operation. A later explicit window move
 revalidates that physical window before publishing it.
 
 A finite page or tie-boundary request can remain in flight when full-source

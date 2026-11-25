@@ -24,11 +24,13 @@ import {
   rejectAt,
 } from './ordered-comparison-oracle.js'
 import { checkRetirementProgress } from './ordered-source-loader-state-model-oracle.js'
+import { receiveFullSourceRetryReplay } from './ordered-full-source-replay-driver.js'
 import {
   createDeferred,
   createOrderByInfo,
 } from './ordered-source-loader-support.js'
 import type { DeltaEvent } from '../../src/query/effect.js'
+import type { FullSourceRetryReplayHistory } from './ordered-full-source-replay-driver.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
@@ -1782,7 +1784,10 @@ async function checkAuthorityCase(
     truncatePending = false
     replaySettledAt = ++clock
     for (const request of ledger) {
-      if (!request.released && request.outcome !== `failed`) {
+      if (
+        !request.released &&
+        (request.outcome !== `failed` || request.fullSource)
+      ) {
         request.replayed = true
       }
     }
@@ -4334,6 +4339,90 @@ describe(`Ordered source request authority`, () => {
         checkRetirementReceiver(plan.scenario, () => {}),
       ),
     check: (_plan, _observations, verdict) => verdict,
+  })
+
+  // Either a retained covering demand replays or a new covering demand
+  // replaces the released one. Only one whole-source read is necessary in
+  // either case. Replay recovers the source. The earlier failed window
+  // still retains its public result until an explicit move, whose rows
+  // come from sorting complete provider truth.
+  const fullSourceRetryReplayHistories: Array<FullSourceRetryReplayHistory> = (
+    [2, 3] as const
+  ).flatMap((width) =>
+    ([`superseded finite demand`, `failed full-source demand`] as const).map(
+      (truncateOn) => ({
+        width,
+        truncateOn,
+        initial: Array.from({ length: 8 }, (_, i) => ({
+          id: i + 1,
+          rank: i + 1,
+        })),
+        replacement: Array.from({ length: 8 }, (_, i) => ({
+          id: i + 21,
+          rank: i + 1,
+        })),
+      }),
+    ),
+  )
+  oracleProperty({
+    id: `ordered-loader.full-source-retry-replay`,
+    law: {
+      statement: `A retry-triggered replay takes over a retained covering demand without reading the full source twice. A later explicit window move keeps the recovered source lease and publishes its requested window.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Replay participants and failure.`,
+      limits: `An on-demand unindexed ordered Collection, one retry, one truncate, and held provider answers.`,
+    },
+    owns: [
+      `src/query/live/ordered-source-loader.ts`,
+      `src/query/live/collection-subscriber.ts`,
+      `src/query/live-query-collection.ts#createLiveQueryCollection`,
+    ],
+    histories: {
+      enumerated: fullSourceRetryReplayHistories,
+      states: [
+        `truncate on superseded finite demand`,
+        `truncate on failed full-source demand`,
+      ],
+    },
+    label: ({ truncateOn, width }) =>
+      `window width ${width}, truncate on ${truncateOn}`,
+    model: ({ initial, replacement, truncateOn, width }) => {
+      const window = (rows: typeof initial, size: number) =>
+        [...rows]
+          .sort((left, right) => left.rank - right.rank)
+          .slice(0, size)
+          .map(({ id }) => id)
+      const prior = window(initial, 1)
+      return {
+        initial: prior,
+        growthFailedWithOriginal: true,
+        originalFullFailure: true,
+        retryUnloaded: truncateOn,
+        held: { rows: prior, publications: [], fullLoads: 1 },
+        settled: { rows: prior, publications: [], clearedFailure: true },
+        moved: window(replacement, width + 1),
+        loadsAfterReplay: 0,
+        releasedReplayFullDemands: 0,
+        boundedRepair: true,
+      }
+    },
+    driver: async (history, observe) => {
+      const actual = await receiveFullSourceRetryReplay(history)
+      if (actual.retryUnloaded && actual.held.fullLoads > 0)
+        observe(`reach`, `truncate on ${actual.retryUnloaded}`)
+      observe(`retry replay`, actual)
+    },
+    check: (_history, observations, expected) => {
+      const actual = observations.find(
+        ({ checkpoint }) => checkpoint === `retry replay`,
+      )?.value
+      return isDeepStrictEqual(actual, expected)
+        ? { kind: `pass` }
+        : {
+            kind: `violation`,
+            checkpoint: `retry replay`,
+            difference: JSON.stringify({ actual, expected }),
+          }
+    },
   })
 
   // Calibrate the shared no-leak judgment with a retained-lease observation.

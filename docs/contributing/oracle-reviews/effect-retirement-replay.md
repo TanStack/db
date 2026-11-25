@@ -476,3 +476,70 @@ The follow-up production bundle adds 364 gzip and 271 Brotli bytes against
 `e53fd625a`, the typical app is 2 gzip and 89 Brotli bytes smaller. The
 Effect now takes the initial hold from replay's existing notification and
 drops the duplicate pending-replacement lookup on each acquisition.
+
+## Retry release interrupted by covering replay
+
+The ordered acquisition law keeps a failed full-source demand until retry
+releases its lease. The release pass can end early when a finite lease's
+unload starts truncate replay. That replay already holds the full-source
+demand. If the full-source lease's own unload starts replay, the new snapshot
+needs a fresh full-source acquisition.
+
+The receiving oracle crosses failed growth to widths two and three with
+those two unloads. It drives an actual Collection, advances the backoff, and
+holds the replay's covering answer. On the parent, the two retained-demand
+histories start two full-source reads and later release one of the recovered
+leases. The other two histories start one fresh covering read and retain it.
+The corrected loader keeps failed full-source authority until the release
+pass reaches its own lease. Each history then makes one covering read during
+replay and keeps it through the next explicit window move. The failed window
+stays visible while replay clears the source's health error. The later move
+publishes the ordered window for its requested size.
+
+The controlled authority ledger now marks a retained, successfully replayed
+full-source lease as covering even if its old transport failed. On the parent
+the fixed seed shrinks to an asynchronous history where a backoff release
+starts replay and the next explicit move releases its recovered full-source
+lease. The revised release pass retains that lease. The real receiver covers
+one unindexed ordered Collection, one backoff retry and one truncate. The
+controlled grammar also crosses index mode, release faults and explicit moves.
+
+A bounded retirement has no active retry timer to cancel. Timer creation
+follows a failure that upgrades its debt to a covering read. Explicit retry
+and cursor reset cancel the timer, and the timer clears itself before it
+starts retry. The broad retirement scan found no live timer at this
+cancellation site.
+
+Moving the authority change back to the start of the retry reproduces
+both receiving failures and the controlled ledger failure. The full
+replay and ordering pass covers 1,747 tests. The typical app adds 269 gzip
+and 277 Brotli bytes against `53770d6b5`. The database bundle adds 390 gzip
+and 208 Brotli bytes. Tracking the existing lease at its release point
+costs 27 gzip and 72 Brotli bytes in the typical app relative to the
+preceding fix. The
+release path reuses the failed lease record and adds no loader state.
+
+## Remaining mutation classifications
+
+The two failed-state guard mutations led to the interrupted release
+witness above. After the fix, the full-source failure record keeps the
+loader in failed work until its own release is selected. The transition
+and record removal occur before the adapter callback can reenter. Widening
+the replay cleanup guard then adds only scans of records whose demand is
+finite.
+
+A diagnostic run of 1,653 retirement, authority, and replay tests reached
+no call that attempted to finish an inactive repair. Replay and replacement
+check the current repair before calling it, and request and continuation
+stamps prevent reset or superseded work from restoring authority. The
+guard remains a boundary for stale internal callers. These histories give
+no warrant to force internal state merely to exercise the return arm.
+
+Changing the Effect's ordered participant rejection classification left
+366 selected tests unchanged. A current provider failure reports through
+the source subscription and disposes the Effect. Cancellation ends the
+participant, and a current replay inherits the hold before settlement
+classification. The explicit failure gate still protects the other
+internal paths. The receiving histories cover adapter outcomes and
+publication, within the architecture's existing limits for comparator
+exceptions.

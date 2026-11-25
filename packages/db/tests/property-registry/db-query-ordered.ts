@@ -156,6 +156,7 @@ const otherProperties: ReadonlyArray<string> = [
   `ordered-loader.request-authority-substitution`,
   `ordered-loader.request-authority-fixed`,
   `ordered-loader.retirement-receiver-fixed`,
+  `ordered-loader.full-source-retry-replay`,
   `ordered-loader.retained-lease`,
 ]
 const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
@@ -348,6 +349,11 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
     `ordered-loader`,
     `retirement-receiver-fixed`,
+  ],
+  [
+    `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+    `ordered-loader`,
+    `full-source-retry-replay`,
   ],
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
