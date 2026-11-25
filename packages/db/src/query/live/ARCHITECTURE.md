@@ -1240,8 +1240,10 @@ timeout. A request the provider never answers keeps its work slot, so an
 authoritative read that never settles holds its repair or recovery until the
 subscription ends; recovery from a provider that stops answering belongs to the
 adapter or the subscription lifecycle.
-A request issued before a cursor reset that later fails still raises the repair
-debt, but it cannot drop work staged after the reset.
+An aborted acquisition ends its ordered participant. Its transport can settle
+later without affecting the loader or holding publication. A request issued
+before a cursor reset that fails without abort can still raise the repair debt,
+but cannot drop work staged after the reset.
 A failed or canceled request, an invalidation before any request has
 settled, or a boundary that cannot be expressed still requires the full-source
 recovery above. A bounded repair failure likewise upgrades its

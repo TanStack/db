@@ -223,3 +223,55 @@ handler.
 | `tests/production-error-messages-oracle.test.ts` | `9250650ed7ad3ac61e06b2a9a380a45b72123d85` |
 
 Paths in the table are relative to `packages/db`.
+
+## Supersession of an aborted refill
+
+[Replay participants and failure](../../../packages/db/src/query/live/ARCHITECTURE.md#replay-participants-and-failure)
+requires an aborted acquisition to stop holding publication. A newer
+truncate replays its logical demand without waiting for the old transport.
+Both Collection and Effect formerly retained rows 1 and 2 after the newer
+replay installed rows 21 and 22. The old refill still owned an ordered
+participant. An ordered participant now ends when its acquisition aborts.
+The Effect resets the ordered cursor on truncate and resumes its loader
+when the current replay succeeds.
+
+- **Reach.** The same joined-refill property now enumerates 188 histories.
+  Sixty-four start a second truncate across both receivers, index settings,
+  initial widths, first-truncate triggers, current replay outcomes, and
+  obsolete fulfillment or rejection. There are 32 histories per receiver
+  with a real abort and unresolved old transport. The second replay installs
+  rows before its controlled fulfillment or rejection. After success, the
+  history delivers a new ordering change and checks bounded repair.
+- **RED.** On `c522d2ff8` the joined-refill command rejects all 32 histories
+  where the newer replay succeeds. The first differences are the settled
+  window in 24 histories and reads after the obsolete result in eight.
+- **GREEN.** The joined-refill command passes all 188 histories and two
+  runner checks. Nine related files passed 2,783 tests before the final
+  test-only expansion of the second replay outcome and later write. The
+  replay manifest checks also passed with both new properties registered.
+- **Mutants.** Keeping the participant pending on abort fails all eight
+  selected unindexed width-two cases. Omitting the Effect's call to settle
+  the loader on replay success fails three selected explicit cases at
+  the held-refill checkpoint. Allowing the aborted transport to reach
+  loader settlement passes all 64 repeated-replay cases before the later
+  write. With the write it fails all 16 successful-replay histories with
+  late rejection at `next repair starts bounded`.
+- **Size.** Compared with `53770d6b5`, the production package adds
+  235 gzip and 121 Brotli bytes. The typical app adds 154 gzip and 96
+  Brotli bytes. Resolving the participant on abort alone made 24 Effect
+  cases lose their refill. Those cases need the replay's own settlement
+  to resume ordered loading. The repair reuses the loader's existing
+  pending slot and the subscription's replay completion.
+- **Limits.** The second successful replay supplies a complete prefix.
+  The receiving histories exercise two truncates and one lazy join.
+  The second-truncate cases use a fixed window. The earlier histories
+  exercise the public window-move path separately.
+
+| Source | Git blob |
+| --- | --- |
+| `src/query/effect.ts` | `b768c40df333e3160bf56dedccf10c9accd16c60` |
+| `src/query/live/ordered-source-loader.ts` | `d1026285f5805ac5a4455e118c601a2fa48db7e1` |
+| `tests/query/ordered-joined-replay-driver.ts` | `11be25224b36610e4b7be32b216fdba81978f8c4` |
+| `tests/query/ordered-work-oracle.property.test.ts` | `3b3875687a51ad0b113db70c374c1d755718acc4` |
+
+Paths in the table are relative to `packages/db`.

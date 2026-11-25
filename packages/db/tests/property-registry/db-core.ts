@@ -182,7 +182,7 @@ export const owners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
     `db/tests/production-error-messages-oracle.test.ts`,
     `production-errors`,
-    `classes sites generated-docs`,
+    `classes effect-console sites generated-docs`,
   ],
   // IndexedDB and live-query observers
   [

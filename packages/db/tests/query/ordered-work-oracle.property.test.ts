@@ -211,6 +211,24 @@ const joinedReplaySchedules = ([`collection`, `effect`] as const).flatMap(
 const joinedReplayHistories: Array<JoinedReplayHistory> = [false, true].flatMap(
   (indexed) => [
     ...joinedReplaySchedules.map((schedule) => ({ ...schedule, indexed })),
+    ...joinedReplaySchedules
+      .filter(({ answer, holdJoined }) => answer === `refill` && holdJoined)
+      .flatMap((schedule) => {
+        const rows = schedule.replacement.map(({ id, rank }) => ({
+          id: id + 10,
+          rank,
+        }))
+        const subsequentWrite = { ...rows[0]!, rank: rows.length + 1 }
+        const settlements = [`fulfills`, `rejects`] as const
+        return settlements.flatMap((outcome) =>
+          settlements.map((obsoleteRefill) => ({
+            ...schedule,
+            indexed,
+            laterReplay: { rows, subsequentWrite, outcome, obsoleteRefill },
+            eligible: [...schedule.eligible, ...rows.map(({ id }) => id)],
+          })),
+        )
+      }),
     // Move while the replay is held. The positive windows all need a row
     // beyond the replayed prefix. A zero limit needs no replacement rows.
     ...joinedReplaySchedules
@@ -962,9 +980,9 @@ describe(`ordered source work oracle`, () => {
   oracleProperty({
     id: `ordered-work.joined-replay-refill`,
     law: {
-      statement: `An ordered repair retains the prior public window until the replacement replay and any root refill deferred by joined demand establish the complete window.`,
+      statement: `An ordered repair retains the prior public window until replay and any joined refill establish the complete window. A newer replay supersedes an aborted refill, whose late settlement has no authority.`,
       authority: `query/live/ARCHITECTURE.md: Atomic window publication, Ordered requests, continuation, and recovery, and Replay participants and failure.`,
-      limits: `One ascending root source with one lazy joined filter, controlled adapter answers, one truncate replay, and at most one Collection window move.`,
+      limits: `One ascending root source with one lazy joined filter, controlled adapter answers, at most two truncate replays or one replay with one Collection window move.`,
     },
     owns: [
       'src/query/effect.ts#createEffect',
@@ -978,11 +996,30 @@ describe(`ordered source work oracle`, () => {
         `collection held refill after joined replay`,
         `effect held refill after joined replay`,
         `window move held through joined replay and refill`,
+        `collection supersedes an aborted but unresolved refill`,
+        `effect supersedes an aborted but unresolved refill`,
       ],
     },
-    label: ({ receiver, trigger, indexed, limit, answer, holdJoined, move }) =>
-      `${receiver} ${trigger} ${indexed ? `indexed` : `unindexed`} window ${limit} with ${answer} and ${holdJoined ? `held` : `immediate`} joined demand${move ? ` moved to ${move.offset}+${move.limit}` : ``}`,
-    model: ({ initial, replacement, eligible, limit, answer, move }) => {
+    label: ({
+      receiver,
+      trigger,
+      indexed,
+      limit,
+      answer,
+      holdJoined,
+      move,
+      laterReplay,
+    }) =>
+      `${receiver} ${trigger} ${indexed ? `indexed` : `unindexed`} window ${limit} with ${answer} and ${holdJoined ? `held` : `immediate`} joined demand${move ? ` moved to ${move.offset}+${move.limit}` : ``}${laterReplay ? ` superseded before obsolete refill ${laterReplay.obsoleteRefill} and the new replay ${laterReplay.outcome}` : ``}`,
+    model: ({
+      initial,
+      replacement,
+      eligible,
+      limit,
+      answer,
+      move,
+      laterReplay,
+    }) => {
       const priorWindow = { offset: 0, limit }
       const window = (
         rows: JoinedReplayHistory[`initial`],
@@ -995,12 +1032,27 @@ describe(`ordered source work oracle`, () => {
           .filter(({ id }) => eligible.includes(id))
           .sort((left, right) => left.rank - right.rank)
           .slice(offset, offset + width)
-      const failed = answer === `refill-rejection`
+      const failed =
+        answer === `refill-rejection` || laterReplay?.outcome === `rejects`
+      const next = failed
+        ? window(initial)
+        : window(laterReplay?.rows ?? replacement, move)
       return {
         prior: window(initial),
-        next: failed ? window(initial) : window(replacement, move),
+        next,
+        publications: failed ? [] : [next],
         priorWindow,
         nextWindow: failed ? priorWindow : (move ?? priorWindow),
+        nextRepair:
+          laterReplay?.outcome === `fulfills`
+            ? window(
+                laterReplay.rows.map((row) =>
+                  row.id === laterReplay.subsequentWrite.id
+                    ? laterReplay.subsequentWrite
+                    : row,
+                ),
+              )
+            : undefined,
         error: failed ? `originating error` : `none`,
       }
     },
@@ -1014,6 +1066,16 @@ describe(`ordered source work oracle`, () => {
         trace.waitingForRefill.moveOutcome === `pending`
       ) {
         observe(`reach`, `window move held through joined replay and refill`)
+      }
+      if (
+        trace.laterReplay?.started &&
+        trace.laterReplay.obsoleteAborted &&
+        trace.laterReplay.obsoleteStillPending
+      ) {
+        observe(
+          `reach`,
+          `${history.receiver} supersedes an aborted but unresolved refill`,
+        )
       }
       observe(`joined replay trace`, trace)
     },
@@ -1107,15 +1169,62 @@ describe(`ordered source work oracle`, () => {
           ],
         )
       }
+      if (history.laterReplay) {
+        const later = trace.laterReplay
+        if (!later)
+          return violation(
+            `second replay trace`,
+            `missing receiver observations`,
+          )
+        comparisons.push(
+          [`second replay started`, later.started, true],
+          [`second raw truncate applied`, later.held.installed, []],
+          [`old refill aborted`, later.obsoleteAborted, true],
+          [
+            `old refill transport remains unresolved`,
+            later.obsoleteStillPending,
+            true,
+          ],
+          [`second replay held reads`, later.held.rows, expected.prior],
+          [`second replay held publications`, later.held.publications, []],
+          [
+            `second replay installed source rows`,
+            trace.settled.installed.length > 0,
+            true,
+          ],
+          [
+            `obsolete refill settlement reads`,
+            later.afterObsoleteSettlement.rows,
+            expected.next,
+          ],
+          [
+            `obsolete refill settlement publications`,
+            later.afterObsoleteSettlement.publications,
+            expected.publications,
+          ],
+        )
+      }
       comparisons.push(
         [`settled window`, trace.settled.rows, expected.next],
         [
           `settled publications`,
           trace.settled.publications,
-          history.answer === `refill-rejection` ? [] : [expected.next],
+          expected.publications,
         ],
         [`refill error identity`, trace.reportedError, expected.error],
       )
+      if (expected.nextRepair) {
+        const nextRepair = trace.laterReplay?.nextRepair
+        comparisons.push(
+          [`next repair starts bounded`, nextRepair?.bounded, true],
+          [
+            `next repair avoids a full-source read`,
+            nextRepair?.unbounded,
+            false,
+          ],
+          [`next repair rows`, nextRepair?.rows, expected.nextRepair],
+        )
+      }
       for (const [checkpoint, actual, expectedValue] of comparisons) {
         if (!isDeepStrictEqual(actual, expectedValue))
           return violation(

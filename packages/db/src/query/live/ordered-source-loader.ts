@@ -4,6 +4,7 @@ import {
 } from '../../utils/cursor.js'
 import { normalizeError } from '../../utils/error.js'
 import { reportUncaught, runAllCallbacks } from '../../utils/callbacks.js'
+import { createDeferred } from '../../deferred.js'
 import { normalizeOrderByPaths } from '../compiler/expressions.js'
 import type {
   CollectionSubscription,
@@ -1410,11 +1411,33 @@ export class OrderedSourceLoader {
         return this.pending
       }
       const transport: Promise<void> = settlesAsync ? result : Promise.resolve()
-      const tracked: Promise<void> = transport.then(
-        () => complete(tracked),
-        (error) => fail(error, tracked),
-      )
+      const participant = createDeferred<void>()
+      const tracked = participant.promise
+      const signal = options.signal
+      // Truncate replay can replace this acquisition before its transport
+      // answers. The retired request must leave the publication gate, and its
+      // later answer must neither complete the chain nor change its debt.
+      const abort = () => {
+        if (this.pending === tracked) this.pending = undefined
+        participant.resolve()
+      }
+      const settle = (apply: () => void) => {
+        signal?.removeEventListener(`abort`, abort)
+        if (signal?.aborted) return
+        try {
+          apply()
+          participant.resolve()
+        } catch (error) {
+          participant.reject(error)
+        }
+      }
       this.pending = tracked
+      if (signal?.aborted) abort()
+      else signal?.addEventListener(`abort`, abort, { once: true })
+      void transport.then(
+        () => settle(() => complete(tracked)),
+        (error) => settle(() => fail(error, tracked)),
+      )
       void tracked.catch(() => {})
       // Register each request separately. The operation tracker observes the
       // next request before this promise settles, so the logical chain remains

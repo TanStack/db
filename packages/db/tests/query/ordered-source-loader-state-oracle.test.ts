@@ -1607,7 +1607,7 @@ async function checkAuthorityCase(
         if (continuationOwed && !selfRelease) {
           reached?.(`release-pass-continuation`)
           deferredByReleasePass = { epochMoves, truncates }
-          const tie = ledger.at(-1)
+          const settledTie = ledger.at(-1)
           const prefix =
             currentChain === undefined ? undefined : ledger[currentChain]
           if (
@@ -1617,9 +1617,9 @@ async function checkAuthorityCase(
             prefix?.outcome === `ok` &&
             prefix.issuedTruncates === truncates &&
             prefix.issuedEpochMoves === epochMoves &&
-            tie?.chain === prefix.index &&
-            tie.outcome === `ok` &&
-            tieValue(tie.options) !== undefined
+            settledTie?.chain === prefix.index &&
+            settledTie.outcome === `ok` &&
+            tieValue(settledTie.options) !== undefined
           ) {
             deferredByReleasePass.repairPrefixLimit = prefix.options.limit
           }
@@ -2762,12 +2762,12 @@ async function checkAuthorityCase(
           for (const request of repair) {
             if (!request.authoritative) continue
             snapshotsRead.add(request.issuedTruncates)
-            const authority = JSON.stringify([
+            const costScope = JSON.stringify([
               request.issuedEpochMoves,
               request.issuedTruncates,
             ])
-            const reads = readsByAuthority.get(authority) ?? new Set<string>()
-            readsByAuthority.set(authority, reads)
+            const reads = readsByAuthority.get(costScope) ?? new Set<string>()
+            readsByAuthority.set(costScope, reads)
             const { options } = request
             const read = JSON.stringify([
               options.limit,
@@ -2778,7 +2778,7 @@ async function checkAuthorityCase(
               rejectAt(
                 `ordered-source-loader-state-oracle.test.ts:2258`,
                 new Error(
-                  `cost: repeated the read ${read} in one ordering epoch and source snapshot ${authority}`,
+                  `cost: repeated the read ${read} in one ordering epoch and source snapshot ${costScope}`,
                 ),
               )
             }
@@ -2787,7 +2787,7 @@ async function checkAuthorityCase(
               rejectAt(
                 `ordered-source-loader-state-oracle.test.ts:2240`,
                 new Error(
-                  `cost: issued more than ${maximum} authoritative reads in one ordering epoch and source snapshot ${authority}`,
+                  `cost: issued more than ${maximum} authoritative reads in one ordering epoch and source snapshot ${costScope}`,
                 ),
               )
             }

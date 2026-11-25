@@ -1,7 +1,7 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { createSourceRecord } from '../utils/source-record.js'
 import { createDeferred } from '../deferred.js'
-import { runAllCallbacks } from '../utils/callbacks.js'
+import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
 import { samePublishedValue } from '../utils.js'
 import { codedMessage, devBuild } from '../error-message.js'
@@ -770,6 +770,28 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
             ) ?? false,
         )
         this.orderedLoaders.set(sourceId, loader)
+        let replayCompletion: Promise<void> | undefined
+        this.unsubscribeCallbacks.add(
+          collection.on(`truncate`, () => {
+            loader.resetCursor()
+            const replay = subscription.pendingTruncateReplacement
+            if (!replay || replay === replayCompletion) return
+            replayCompletion = replay
+            void replay
+              .then(
+                () => {
+                  if (this.disposed || replayCompletion !== replay) return
+                  replayCompletion = undefined
+                  loader.settleFullSourceReplay()
+                  this.scheduleGraphRun()
+                },
+                () => {
+                  if (replayCompletion === replay) replayCompletion = undefined
+                },
+              )
+              .catch(reportUncaught)
+          }),
+        )
         loader.start()
         // The sync adapter reports that served pages may have shifted after
         // its own refetch. Re-establish the window with a bounded repair.

@@ -8818,6 +8818,16 @@ continuation, and recovery. The [versioned review](oracle-reviews/effect-retirem
 records the parent counterexamples and distinguishes this checkpoint
 from the existing held-replay and initial-readiness checks.
 
+The same property also starts a second truncate while the first replay's
+refill transport is held. Both consumers observe the abort, retain the
+preceding public window during the newer replay, and apply its successful
+replacement before the obsolete transport settles. A failed newer replay
+retains the preceding window and reports its own error after private writes.
+Both late transport outcomes leave that verdict intact. After a successful
+second replay, a later ordering change must still start a bounded repair.
+This catches an obsolete rejection that raises hidden recovery debt while its
+immediate reads and publications remain correct.
+
 ### Effect callback diagnostics
 
 `production-errors.effect-console` invokes the Effect entry and batch

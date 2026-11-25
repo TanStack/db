@@ -28,6 +28,12 @@ export type JoinedReplayHistory = {
   replacement: ReadonlyArray<Row>
   eligible: ReadonlyArray<number>
   move?: { offset: number; limit: number }
+  laterReplay?: {
+    rows: ReadonlyArray<Row>
+    subsequentWrite: Row
+    outcome: `fulfills` | `rejects`
+    obsoleteRefill: `fulfills` | `rejects`
+  }
 }
 
 type MoveOutcome = `pending` | `fulfilled` | `rejected` | `different error`
@@ -55,6 +61,18 @@ export type JoinedReplayTrace = {
   reportedError: `none` | `originating error` | `different error`
   rowsAtMoveFulfillment?: Array<Row>
   windowAtMoveFulfillment?: JoinedReplayHistory[`move`]
+  laterReplay?: {
+    held: Cut
+    started: boolean
+    obsoleteAborted: boolean
+    obsoleteStillPending: boolean
+    afterObsoleteSettlement: Cut
+    nextRepair?: {
+      rows: Array<Row>
+      bounded: boolean
+      unbounded: boolean
+    }
+  }
 }
 
 type Sync<T extends object> = Parameters<SyncConfig<T, number>[`sync`]>[0]
@@ -89,25 +107,35 @@ export async function receiveJoinedReplay(
   const markers = history.eligible.map((id) => ({ id, rowId: id }))
   const repair = createDeferred<void>()
   const replay = createDeferred<void>()
+  const laterReplay = createDeferred<void>()
   const joined = createDeferred<void>()
   const refill = createDeferred<void>()
   const failure = new Error(`root refill rejected`)
+  const laterFailure = new Error(`second root replay rejected`)
   const requests = {
-    phase: `initial` as `initial` | `repair` | `replay`,
+    phase: `initial` as
+      `initial` | `repair` | `replay` | `later replay` | `after replay`,
     repairStarted: false,
     replay: 0,
+    laterReplay: 0,
     pendingJoined: 0,
     pendingRefill: 0,
     refillRevalidates: undefined as boolean | undefined,
+    nextRepairBounded: false,
+    nextRepairUnbounded: false,
   }
+  let refillSignal: AbortSignal | undefined
 
-  const startReplay = () => {
-    requests.phase = `replay`
-    providerRows = history.replacement
+  const truncateTo = (rows: ReadonlyArray<Row>) => {
+    providerRows = rows
     installed.clear()
     rootSync.begin()
     rootSync.truncate()
     return rootSync.commit()
+  }
+  const startReplay = () => {
+    requests.phase = `replay`
+    return truncateTo(history.replacement)
   }
 
   const source = createCollection<Row, number>({
@@ -123,6 +151,19 @@ export async function receiveJoinedReplay(
           loadSubset: async (options) => {
             rootSubscription = options.subscription
             const phase = requests.phase
+            if (phase === `after replay`) {
+              requests.nextRepairUnbounded ||=
+                options.orderBy === undefined && options.where === undefined
+              requests.nextRepairBounded ||=
+                options.refetch === true &&
+                options.orderBy !== undefined &&
+                options.limit !== undefined &&
+                options.cursor === undefined
+            }
+            if (phase === `later replay`) {
+              requests.laterReplay++
+              await laterReplay.promise
+            }
             if (phase === `repair`) {
               requests.repairStarted ||=
                 options.refetch === true &&
@@ -136,10 +177,15 @@ export async function receiveJoinedReplay(
               await replay.promise
             } else if (phase === `replay` && history.answer !== `complete`) {
               requests.refillRevalidates ??= options.refetch === true
+              refillSignal ??= options.signal
               requests.pendingRefill++
               await refill.promise
               requests.pendingRefill--
-              if (history.answer === `refill-rejection`) throw failure
+              if (
+                history.answer === `refill-rejection` ||
+                history.laterReplay?.obsoleteRefill === `rejects`
+              )
+                throw failure
             }
             if (options.signal?.aborted) return
             const offset = options.cursor ? 0 : (options.offset ?? 0)
@@ -162,6 +208,12 @@ export async function receiveJoinedReplay(
               installed.set(value.id, value)
             }
             await operations.commit(options.signal)
+            if (
+              phase === `later replay` &&
+              history.laterReplay?.outcome === `rejects` &&
+              !options.signal?.aborted
+            )
+              throw laterFailure
           },
           unloadSubset: () => {
             if (requests.phase === `repair` && history.trigger === `retirement`)
@@ -309,10 +361,55 @@ export async function receiveJoinedReplay(
       const waitingForRefill = cut()
       const heldRefill = requests.pendingRefill > 0
 
-      refill.resolve()
-      await flushPromises()
-      const settled = cut()
+      let settled: Cut
+      let laterReplayTrace: JoinedReplayTrace[`laterReplay`]
+      if (history.laterReplay) {
+        requests.phase = `later replay`
+        await truncateTo(history.laterReplay.rows)
+        await flushPromises()
+        const held = cut()
+        const started = requests.laterReplay > 0
+        const obsoleteAborted = refillSignal?.aborted === true
+        laterReplay.resolve()
+        await flushPromises()
+        settled = cut()
+        const obsoleteStillPending = requests.pendingRefill > 0
+        refill.resolve()
+        await flushPromises()
+        laterReplayTrace = {
+          held,
+          started,
+          obsoleteAborted,
+          obsoleteStillPending,
+          afterObsoleteSettlement: cut(),
+        }
+        // A subsequent valid ordering write exposes repair debt that a late
+        // aborted rejection could have silently left behind.
+        if (history.laterReplay.outcome === `fulfills`) {
+          requests.phase = `after replay`
+          const moved = history.laterReplay.subsequentWrite
+          providerRows = providerRows.map((row) =>
+            row.id === moved.id ? moved : row,
+          )
+          installed.set(moved.id, moved)
+          rootSync.begin()
+          rootSync.write({ type: `update`, value: moved })
+          await rootSync.commit()
+          await flushPromises()
+          laterReplayTrace.nextRepair = {
+            rows: visible(),
+            bounded: requests.nextRepairBounded,
+            unbounded: requests.nextRepairUnbounded,
+          }
+        }
+      } else {
+        refill.resolve()
+        await flushPromises()
+        settled = cut()
+      }
       const error = live ? live.utils.lastSubsetError : errors[0]
+      const originatingError =
+        history.laterReplay?.outcome === `rejects` ? laterFailure : failure
       return {
         initial,
         waitingForReplay,
@@ -327,10 +424,11 @@ export async function receiveJoinedReplay(
         refillRevalidates: requests.refillRevalidates,
         rowsAtMoveFulfillment: move.rowsAtFulfillment,
         windowAtMoveFulfillment: move.windowAtFulfillment,
+        laterReplay: laterReplayTrace,
         reportedError:
           error === undefined
             ? `none`
-            : error === failure
+            : error === originatingError
               ? `originating error`
               : `different error`,
       }
@@ -338,6 +436,7 @@ export async function receiveJoinedReplay(
     () => {
       repair.resolve()
       replay.resolve()
+      laterReplay.resolve()
       joined.resolve()
       refill.resolve()
       return [
