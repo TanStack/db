@@ -410,24 +410,25 @@ interface EffectPipelineRunnerConfig<
 }
 
 /**
- * Report how a held acquisition ends. A truncate replay rejects the
- * acquisition it supersedes and starts a replacement, which inherits the hold.
+ * A pending truncate replay inherits the hold. It can abort the acquisition
+ * or start in an adapter unload as that acquisition finishes successfully.
  */
 function followHeldAcquisition(
   acquisition: Promise<unknown>,
-  replacementAfterFailure: () => Promise<void> | undefined,
+  pendingReplacement: () => Promise<void> | undefined,
   handlers: {
     settled: (succeeded: boolean) => void
     replaced: (replacement: Promise<void>) => void
   },
 ): void {
+  const settle = (succeeded: boolean) => {
+    const replacement = pendingReplacement()
+    if (replacement) handlers.replaced(replacement)
+    else handlers.settled(succeeded)
+  }
   void acquisition.then(
-    () => handlers.settled(true),
-    () => {
-      const replacement = replacementAfterFailure()
-      if (replacement) handlers.replaced(replacement)
-      else handlers.settled(false)
-    },
+    () => settle(true),
+    () => settle(false),
   )
 }
 
@@ -924,7 +925,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   /** Keep the Effect's gate, and `skipInitial` suppression, open until a pending initial load settles. */
   private trackInitialLoad(
     result: true | Promise<unknown>,
-    replacementAfterFailure: () => Promise<void> | undefined,
+    pendingReplacement: () => Promise<void> | undefined,
   ): void {
     if (!(result instanceof Promise) || this.reachedReady || this.disposed)
       return
@@ -938,11 +939,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // query's tracked rejection does. Any other rejection comes from an
     // obsolete or aborted acquisition, so the hold fails open: it releases
     // unless a truncate replacement takes it over.
-    followHeldAcquisition(result, replacementAfterFailure, {
+    followHeldAcquisition(result, pendingReplacement, {
       settled: (succeeded) =>
         succeeded ? release() : void Promise.resolve().then(release),
       replaced: (replacement) => {
-        this.trackInitialLoad(replacement, replacementAfterFailure)
+        this.trackInitialLoad(replacement, pendingReplacement)
         release()
       },
     })
@@ -951,7 +952,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   /** Hold Effect callback publication across one authoritative repair chain. */
   private trackOrderedPublication(
     promise: Promise<unknown>,
-    replacementAfterFailure: () => Promise<void> | undefined,
+    pendingReplacement: () => Promise<void> | undefined,
   ): void {
     if (this.disposed) return
     if (this.pendingOrderedPublications.size === 0) {
@@ -975,11 +976,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // A failed repair chain fails closed until a fresh chain starts. A
     // replacement settles after replay rows reach this Effect's private D2
     // state, so it takes over the same publication hold.
-    followHeldAcquisition(promise, replacementAfterFailure, {
+    followHeldAcquisition(promise, pendingReplacement, {
       settled: finish,
       replaced: (replacement) => {
         if (this.pendingOrderedPublications.delete(promise) && !this.disposed)
-          this.trackOrderedPublication(replacement, replacementAfterFailure)
+          this.trackOrderedPublication(replacement, pendingReplacement)
       },
     })
   }

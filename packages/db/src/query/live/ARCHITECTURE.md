@@ -1511,9 +1511,9 @@ that repair finishes inside the graph run that publishes its window, so no
 callback can observe a partial window and no participant is needed. At flush, equal insert/delete counts are classified against the
 last callback-visible membership and value: absent-to-absent produces no event,
 while present-to-present produces an update only when the value changed.
-If truncate replay aborts an obsolete repair participant, its replacement
-completion inherits the same callback hold; the abort alone does not freeze or
-dispose the still-live Effect. Any unhandled participant failure never exposes
+When a repair participant settles during truncate replay, the pending
+replacement inherits the callback hold. This includes an aborted participant
+and a successful repair whose acquisition release started the replay. Any unhandled participant failure never exposes
 the private intermediate state: source-error handling disposes the Effect and
 clears the retained delta and participants. With `skipInitial`, an asynchronous
 initial ordered chain also stays behind the gate until all initial participants

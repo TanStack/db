@@ -28,6 +28,7 @@ import {
   createDeferred,
   createOrderByInfo,
 } from './ordered-source-loader-support.js'
+import type { DeltaEvent } from '../../src/query/effect.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
@@ -594,6 +595,7 @@ type RetirementReceiverCase = {
   kind: `collection` | `collection-window` | `effect`
   offset: 0 | 1
   holdReplacement: boolean
+  replacementOutcome: `success` | `failure` | `superseded`
   // The unload moves the repaired prefix, deletes its rows before the
   // boundary, or deletes the boundary row itself: each is new source
   // information. Or it evicts a sent row past the boundary that only a
@@ -602,7 +604,13 @@ type RetirementReceiverCase = {
   // `delete-tie` deletes only a prefix row that ties with the boundary row,
   // which the repair also holds.
   unloadChange:
-    `move` | `delete` | `delete-boundary` | `delete-tie` | `evict` | `evict-tie`
+    | `move`
+    | `delete`
+    | `delete-boundary`
+    | `delete-tie`
+    | `evict`
+    | `evict-tie`
+    | `truncate`
   // A row that ties with the repair's boundary row. Ties order by key
   // (ARCHITECTURE, pooled live queries publish what the live-query Collection
   // would), so row 0 sorts before the boundary row, inside the prefix, and
@@ -617,20 +625,26 @@ type RetirementReceiverCase = {
 // the prior complete snapshot until the newer repair completes. A window move
 // cannot report success until its chosen window is visible (ARCHITECTURE.md,
 // Atomic window publication), so it stays pending behind a held replacement
-// and settles with the moved window installed.
+// and settles with the moved window installed. A newer ordering write
+// supersedes a held answer. The next acquisition starts its own prefix
+// before any tie or refill. If the held answer rejects after applying writes,
+// the raw source can advance and the preceding complete window stays public.
 async function checkRetirementReceiver(
   scenario: RetirementReceiverCase,
   reached: (
     cut:
       | `release`
       | `held-answer`
+      | `failed-after-writes`
+      | `superseded-answer`
       | `delete-release`
       | `delete-held-answer`
       | `delete-boundary-release`
       | `tie-delete-boundary`
       | `delete-tie-release`
       | `evict-release`
-      | `evict-tie-release`,
+      | `evict-tie-release`
+      | `held-replay`,
   ) => void,
 ): Promise<void> {
   type Row = { id: number; rank: number }
@@ -657,11 +671,18 @@ async function checkRetirementReceiver(
   const starts: Array<number> = []
   const publications: Array<{ at: number; rows: Array<Row> }> = []
   const effectRows = new Map<number, Row>()
+  const effectEvents: Array<DeltaEvent<Row, number>> = []
   const replacement = createDeferred()
+  const successor = createDeferred()
+  const replacementError = new Error(`replacement acquisition failed`)
+  const effectErrors: Array<Error> = []
   let heldAnswers = 0
   let clock = 0
   let unloaded: number | undefined
   let invalidation: number | undefined
+  let retiredIntoReplay = false
+  let supersedingInvalidation: number | undefined
+  let firstSuccessorStartsRepair: boolean | undefined
   let armed = false
   let sync!: Parameters<SyncConfig<Row, number>[`sync`]>[0]
   const source = createCollection<Row, number>({
@@ -679,14 +700,16 @@ async function checkRetirementReceiver(
             // A repair reissues the window's whole prefix. A larger refetch
             // prefix is a step of a running chain, such as unindexed growth,
             // so it cannot start the replacement.
-            if (
+            const startsRepair =
               options.refetch === true &&
               options.where === undefined &&
               options.cursor === undefined &&
               (options.limit === scenario.offset + scenario.limit ||
                 options.limit === windowOffset + scenario.limit)
-            )
-              starts.push(at)
+            if (startsRepair) starts.push(at)
+            if (supersedingInvalidation !== undefined) {
+              firstSuccessorStartsRepair ??= startsRepair
+            }
             const deliver = () => {
               if (options.signal?.aborted) return true
               const matching = [...truth.values()]
@@ -720,10 +743,19 @@ async function checkRetirementReceiver(
               }
               return operations.commit()
             }
-            if (invalidation !== undefined && scenario.holdReplacement) {
+            if (
+              (invalidation !== undefined || retiredIntoReplay) &&
+              scenario.holdReplacement
+            ) {
               heldAnswers++
-              return replacement.promise.then(async () => {
+              const gate =
+                supersedingInvalidation === undefined ? replacement : successor
+              return gate.promise.then(async () => {
+                // An adapter may apply rows before a failed acquisition. That
+                // advances the raw source but does not establish coverage.
                 await deliver()
+                if (scenario.replacementOutcome === `failure`)
+                  throw replacementError
               })
             }
             return scenario.synchronous
@@ -736,6 +768,25 @@ async function checkRetirementReceiver(
             if (!armed || unloaded !== undefined) return
             unloaded = ++clock
             reached(`release`)
+            if (scenario.unloadChange === `truncate`) {
+              // The source discards its installed baseline while the loader
+              // retires superseded acquisitions. The held replay answers
+              // serve a different provider snapshot.
+              retiredIntoReplay = true
+              const replacementRows = [...truth.values()].map(
+                ({ id, rank }) => ({
+                  id: id + 20,
+                  rank,
+                }),
+              )
+              truth.clear()
+              for (const row of replacementRows) truth.set(row.id, row)
+              installed.clear()
+              operations.begin()
+              operations.truncate()
+              operations.commit()
+              return
+            }
             if (
               scenario.unloadChange !== `move` &&
               scenario.unloadChange !== `evict-tie`
@@ -814,13 +865,22 @@ async function checkRetirementReceiver(
       ? undefined
       : createLiveQueryCollection({ query })
   let move:
-    { at: number; rows: Array<Row> } | `pending` | `rejected` | undefined
+    | {
+        at: number
+        rows: Array<Row>
+        window: { offset: number; limit: number } | undefined
+      }
+    | { error: unknown }
+    | `pending`
+    | undefined
   const visible = () => {
     const rows = (live ? live.toArray : [...effectRows.values()]).map(
       ({ id, rank }) => ({ id, rank }),
     )
     return live ? rows : rows.sort(byOrder)
   }
+  const rawRows = () =>
+    source.toArray.map(({ id, rank }) => ({ id, rank })).sort(byOrder)
   const recordPublication = () => {
     if (armed) publications.push({ at: ++clock, rows: visible() })
   }
@@ -831,7 +891,9 @@ async function checkRetirementReceiver(
     scenario.kind === `effect`
       ? createEffect<Row, number>({
           query,
+          onSourceError: (error) => effectErrors.push(error),
           onBatch: (events) => {
+            if (armed) effectEvents.push(...events)
             for (const event of events) {
               if (event.type === `exit`) effectRows.delete(event.key)
               else effectRows.set(event.key, { ...event.value })
@@ -846,7 +908,7 @@ async function checkRetirementReceiver(
       .slice(offset, offset + scenario.limit)
       .map((row) => ({ ...row }))
   const settleMove = () => {
-    move = { at: ++clock, rows: visible() }
+    move = { at: ++clock, rows: visible(), window: live?.utils.getWindow() }
   }
   try {
     if (live) await live.preload()
@@ -857,6 +919,7 @@ async function checkRetirementReceiver(
       ),
     )
     const prior = visible()
+    const priorWindow = live?.utils.getWindow()
     armed = true
     const moved = { id: 1, rank: 10 }
     truth.set(1, moved)
@@ -872,8 +935,8 @@ async function checkRetirementReceiver(
       if (settled === true) settleMove()
       else {
         move = `pending`
-        void settled.then(settleMove, () => {
-          move = `rejected`
+        void settled.then(settleMove, (error: unknown) => {
+          move = { error }
         })
       }
     }
@@ -885,7 +948,11 @@ async function checkRetirementReceiver(
         `real subscription retirement was reached`,
       ).toBeDefined(),
     )
-    if (scenario.holdReplacement && invalidation !== undefined) {
+    const beforeAnswer = rawRows()
+    if (
+      scenario.holdReplacement &&
+      (invalidation !== undefined || retiredIntoReplay)
+    ) {
       compareAt(`ordered-source-loader-state-oracle.test.ts:850`, () =>
         expect(
           heldAnswers,
@@ -910,17 +977,89 @@ async function checkRetirementReceiver(
             `pending`,
           ),
         )
+        compareAt(`retirement receiver: window during held replacement`, () =>
+          expect(live?.utils.getWindow()).toEqual(priorWindow),
+        )
       }
       reached(`held-answer`)
+      if (retiredIntoReplay) {
+        compareAt(`retirement receiver: raw truncate applied`, () =>
+          expect(rawRows()).toEqual([]),
+        )
+        reached(`held-replay`)
+      }
       // Every delete unload owes the replacement this held answer delays.
       if (scenario.unloadChange.startsWith(`delete`)) {
         reached(`delete-held-answer`)
       }
+      if (scenario.replacementOutcome === `superseded`) {
+        // Row 1 is still sent after a moving or deleting unload. Move it to
+        // the head while the successor's prefix answer is held. Its read
+        // started before this write and cannot pay the new invalidation.
+        const updated = { id: 1, rank: 0 }
+        truth.set(1, updated)
+        installed.set(1, updated)
+        supersedingInvalidation = ++clock
+        sync.begin()
+        sync.write({ type: `update`, value: updated })
+        await sync.commit()
+      }
       replacement.resolve()
       await flushPromises()
+      if (supersedingInvalidation !== undefined) {
+        compareAt(
+          `retirement receiver: first acquisition after supersession`,
+          () =>
+            expect(
+              firstSuccessorStartsRepair,
+              `the first acquisition after supersession starts the replacement prefix`,
+            ).toBe(true),
+        )
+        checkRetirementProgress(
+          supersedingInvalidation,
+          starts,
+          publications[0]?.at,
+        )
+        compareAt(`retirement receiver: held successor publication`, () => {
+          expect(visible()).toEqual(prior)
+          expect(publications).toEqual([])
+          if (scenario.kind === `collection-window`) {
+            expect(move).toBe(`pending`)
+            expect(live?.utils.getWindow()).toEqual(priorWindow)
+          }
+        })
+        reached(`superseded-answer`)
+        successor.resolve()
+        await flushPromises()
+      }
     }
     checkRetirementProgress(invalidation, starts, publications[0]?.at)
-    if (invalidation === undefined) {
+    if (scenario.replacementOutcome === `failure`) {
+      compareAt(`retirement receiver: failed replacement publication`, () => {
+        expect(visible()).toEqual(prior)
+        expect(publications).toEqual([])
+      })
+      compareAt(`retirement receiver: failed replacement outcome`, () => {
+        if (effect) {
+          expect(effectErrors).toHaveLength(1)
+          expect(effectErrors[0]).toBe(replacementError)
+          expect(effect.disposed).toBe(true)
+        } else {
+          expect(live?.utils.lastSubsetError).toBe(replacementError)
+          expect(live?.utils.getWindow()).toEqual(priorWindow)
+        }
+        if (scenario.kind === `collection-window`) {
+          expect(
+            move && move !== `pending` && `error` in move && move.error,
+          ).toBe(replacementError)
+        }
+      })
+      if (!isDeepStrictEqual(rawRows(), beforeAnswer)) {
+        reached(`failed-after-writes`)
+      }
+      return
+    }
+    if (invalidation === undefined && !retiredIntoReplay) {
       compareAt(`ordered-source-loader-state-oracle.test.ts:877`, () =>
         expect(
           starts.filter((at) => at > unloaded!),
@@ -943,12 +1082,43 @@ async function checkRetirementReceiver(
         `one complete replacement publication`,
       ).toEqual(changed ? [expected()] : []),
     )
+    if (effect) {
+      // Derive net callback events from the two complete windows. Key order
+      // within the batch is free, but classification and previous values
+      // are observable even when applying the events produces the right rows.
+      const before = new Map(prior.map((row) => [row.id, row]))
+      const after = new Map(expected().map((row) => [row.id, row]))
+      const changes: Array<DeltaEvent<Row, number>> = []
+      for (const [key, value] of before) {
+        const next = after.get(key)
+        if (!next) changes.push({ type: `exit`, key, value })
+        else if (next.rank !== value.rank)
+          changes.push({
+            type: `update`,
+            key,
+            value: next,
+            previousValue: value,
+          })
+      }
+      for (const [key, value] of after) {
+        if (!before.has(key)) changes.push({ type: `enter`, key, value })
+      }
+      const byKey = (a: DeltaEvent<Row, number>, b: DeltaEvent<Row, number>) =>
+        a.key - b.key
+      compareAt(`retirement receiver: Effect callback deltas`, () =>
+        expect(effectEvents.sort(byKey)).toEqual(changes.sort(byKey)),
+      )
+    }
     if (move !== undefined) {
       compareAt(`ordered-source-loader-state-oracle.test.ts:894`, () =>
         expect(
           move,
           `the window move settles with its chosen window visible`,
-        ).toEqual({ at: expect.any(Number), rows: expected() }),
+        ).toEqual({
+          at: expect.any(Number),
+          rows: expected(),
+          window: { offset: windowOffset, limit: scenario.limit },
+        }),
       )
     }
     compareAt(`ordered-source-loader-state-oracle.test.ts:899`, () =>
@@ -957,6 +1127,7 @@ async function checkRetirementReceiver(
   } finally {
     armed = false
     replacement.resolve()
+    successor.resolve()
     listener?.unsubscribe()
     await effect?.dispose()
     await live?.cleanup()
@@ -3719,14 +3890,66 @@ describe(`Ordered source request authority`, () => {
   // evicting a row past its boundary, including the boundary's tie, owes none.
   // A tie with the boundary row makes the boundary row and its tie differ
   // only by key. Each
-  // grammar runs 600 histories so held answers and ties stay well above
+  // grammar runs 1200 histories so held answers and ties stay well above
   // their minimum.
   // A Collection window move in the same turn as the ordering write must
   // wait for the replacement before it reports success.
   // Held replacement answers and offsets add timing and source-prefix cuts;
   // every completed history must reach its consumer's adapter callback.
-  // Separate held-answer reach for each consumer requires generated histories
-  // to exercise the prior-snapshot and no-publication comparisons too.
+  // Each consumer reaches a held answer, rejection after applied writes, and
+  // another invalidation while the replacement is held. A failed move keeps
+  // the settled window and exposes the request error. An Effect ends with
+  // that error and no partial callback batch. A superseding invalidation
+  // needs a newer read and keeps the same gate. A truncate from the unload
+  // keeps that gate closed until replay has applied (ARCHITECTURE.md,
+  // Ordered requests, Atomic window publication, and laws 9 and 16).
+  // Deleting the tie needs the before-tie, and evicting it the after-tie. A
+  // delete before the boundary and a before-tie both need a two-row prefix.
+  // A same-turn window move may repair either window's prefix, so it keeps
+  // the unloads independent of that prefix: an ordering move, row 1's
+  // eviction, and a truncate.
+  const normalizeRetirementCase = (
+    drawn: RetirementReceiverCase,
+  ): RetirementReceiverCase => {
+    const generated =
+      drawn.kind === `collection-window`
+        ? {
+            ...drawn,
+            boundaryTie: `none` as const,
+            unloadChange:
+              drawn.unloadChange === `evict` ||
+              drawn.unloadChange === `truncate`
+                ? drawn.unloadChange
+                : (`move` as const),
+          }
+        : drawn
+    const boundaryTie =
+      generated.unloadChange === `delete-tie`
+        ? (`before` as const)
+        : generated.unloadChange === `evict-tie`
+          ? (`after` as const)
+          : generated.boundaryTie
+    const windowOffset =
+      generated.kind === `collection-window`
+        ? 1 - generated.offset
+        : generated.offset
+    const needsTwo =
+      generated.unloadChange === `delete` || boundaryTie === `before`
+    return {
+      ...generated,
+      boundaryTie,
+      replacementOutcome:
+        !generated.holdReplacement ||
+        generated.unloadChange.startsWith(`evict`) ||
+        (generated.unloadChange === `truncate` &&
+          generated.replacementOutcome === `superseded`)
+          ? `success`
+          : generated.replacementOutcome,
+      ...(needsTwo && windowOffset + generated.limit < 2
+        ? { limit: 2 as const }
+        : {}),
+    }
+  }
   const retirementReceiverCase = fc
     .record({
       indexed: fc.boolean(),
@@ -3743,6 +3966,13 @@ describe(`Ordered source request authority`, () => {
         { weight: 2, arbitrary: fc.constant(true) },
         { weight: 1, arbitrary: fc.constant(false) },
       ),
+      replacementOutcome: fc.constantFrom(
+        `failure` as const,
+        `superseded` as const,
+        `failure` as const,
+        `superseded` as const,
+        `success` as const,
+      ),
       // The boundary-row delete also needs a tie to reach its tie state, so
       // it is drawn twice as often as each other unload.
       unloadChange: fc.oneof(
@@ -3752,6 +3982,7 @@ describe(`Ordered source request authority`, () => {
         { weight: 1, arbitrary: fc.constant(`delete-tie` as const) },
         { weight: 1, arbitrary: fc.constant(`evict` as const) },
         { weight: 1, arbitrary: fc.constant(`evict-tie` as const) },
+        { weight: 2, arbitrary: fc.constant(`truncate` as const) },
       ),
       // Ties need the deterministic prefix of the other kinds, so they are
       // drawn more often than no tie.
@@ -3761,41 +3992,13 @@ describe(`Ordered source request authority`, () => {
         { weight: 2, arbitrary: fc.constant(`after` as const) },
       ),
     })
-    // Deleting the tie needs the before-tie, and evicting it the after-tie. A
-    // delete before the boundary and a before-tie both need a two-row prefix.
-    // A same-turn window move may repair either window's prefix, so it keeps
-    // the unloads that do not name that prefix: a move and row 1's eviction.
-    .map((drawn): RetirementReceiverCase => {
-      const generated =
-        drawn.kind === `collection-window`
-          ? {
-              ...drawn,
-              boundaryTie: `none` as const,
-              unloadChange:
-                drawn.unloadChange === `evict`
-                  ? (`evict` as const)
-                  : (`move` as const),
-            }
-          : drawn
-      const boundaryTie =
-        generated.unloadChange === `delete-tie`
-          ? (`before` as const)
-          : generated.unloadChange === `evict-tie`
-            ? (`after` as const)
-            : generated.boundaryTie
-      const windowOffset =
-        generated.kind === `collection-window`
-          ? 1 - generated.offset
-          : generated.offset
-      const needsTwo =
-        generated.unloadChange === `delete` || boundaryTie === `before`
-      return {
-        ...generated,
-        boundaryTie,
-        ...(needsTwo && windowOffset + generated.limit < 2
-          ? { limit: 2 as const }
-          : {}),
-      }
+    .map(normalizeRetirementCase, (value): RetirementReceiverCase => {
+      // Normalized inputs are also draws of the primitive record. Reject a
+      // constructed history that normalization would change.
+      const scenario = value as RetirementReceiverCase
+      if (!isDeepStrictEqual(normalizeRetirementCase(scenario), scenario))
+        throw new Error(`not a legal retirement receiver history`)
+      return scenario
     })
   // A shrink path belongs to one arbitrary and driver. The receiving grammar
   // has its own identity so replay never applies a controlled history's path.
@@ -3811,6 +4014,15 @@ describe(`Ordered source request authority`, () => {
       `collection-held-answer`,
       `collection-window-held-answer`,
       `effect-held-answer`,
+      `collection-failed-after-writes`,
+      `collection-window-failed-after-writes`,
+      `effect-failed-after-writes`,
+      `collection-superseded-answer`,
+      `collection-window-superseded-answer`,
+      `effect-superseded-answer`,
+      `collection-held-replay`,
+      `collection-window-held-replay`,
+      `effect-held-replay`,
       `delete-release`,
       `delete-held-answer`,
       `delete-boundary-release`,
@@ -3843,12 +4055,67 @@ describe(`Ordered source request authority`, () => {
           `${state} history minimum`,
         ).toBeGreaterThanOrEqual(20)
     })
+    // The pinned runner binds every constructed base to its own required
+    // cuts. Generated campaigns still measure the natural overlap separately.
+    const kinds = [`collection`, `collection-window`, `effect`] as const
+    const constructions = [
+      {
+        name: (kind: RetirementReceiverCase[`kind`]) =>
+          `an adapter unload starts a held truncate replay for ${kind}`,
+        unloadChange: `truncate`,
+        replacementOutcome: `success`,
+        cuts: [`release`, `held-answer`, `held-replay`],
+      },
+      {
+        name: (kind: RetirementReceiverCase[`kind`]) =>
+          `a held replacement rejects after applying writes for ${kind}`,
+        unloadChange: `move`,
+        replacementOutcome: `failure`,
+        cuts: [`failed-after-writes`],
+      },
+      {
+        name: (kind: RetirementReceiverCase[`kind`]) =>
+          `a held truncate replay rejects after applying writes for ${kind}`,
+        unloadChange: `truncate`,
+        replacementOutcome: `failure`,
+        cuts: [`held-replay`, `failed-after-writes`],
+      },
+      {
+        name: (kind: RetirementReceiverCase[`kind`]) =>
+          `a newer ordering write supersedes a held answer for ${kind}`,
+        unloadChange: `move`,
+        replacementOutcome: `superseded`,
+        cuts: [`superseded-answer`],
+      },
+    ] as const
+    const constructed = constructions.flatMap(
+      ({ name, unloadChange, replacementOutcome, cuts }) =>
+        kinds.map((kind) => ({
+          name: name(kind),
+          enters: cuts.map((cut) => `${kind}-${cut}` as const),
+          build: (
+            scenario: RetirementReceiverCase,
+          ): RetirementReceiverCase => ({
+            ...scenario,
+            kind,
+            holdReplacement: true,
+            replacementOutcome,
+            boundaryTie: `none`,
+            unloadChange,
+            // A growing window needs rows beyond the old window's coverage.
+            ...(kind === `collection-window` && replacementOutcome === `failure`
+              ? { offset: 0 as const }
+              : {}),
+          }),
+        })),
+    )
+    const required = new Set<State>(constructed.flatMap(({ enters }) => enters))
     oracleProperty({
       id: retirementReceiverProperty,
       law: {
         statement: `repairs retirement invalidation through a real subscription`,
         authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Atomic window publication.`,
-        limits: `The existing request-ledger and receiving grammars retain their bounded laws and observation checkpoints; no coverage expansion.`,
+        limits: `One ascending numeric source, one real Collection or Effect, at most one retirement-triggered replay or one additional ordering invalidation, and controlled adapter answers. No joined demand, network provider, or overlapping sync runs.`,
       },
       owns: [
         'src/collection/index.ts#createCollection',
@@ -3859,33 +4126,36 @@ describe(`Ordered source request authority`, () => {
       ],
       histories: {
         arbitrary: retirementReceiverCase,
-        runs: 600,
+        runs: 1200,
         fixedSeeds: [20261029],
+        states: [...required],
+        measured: states.filter((state) => !required.has(state)),
+        constructed,
+        bases: 20,
       },
       model: (history, observations) =>
         recordedComparison(history, observations),
-      driver: async (history, observe) =>
-        observeComparison(history, observe, async () => {
+      driver: async (scenario, observe) => {
+        const entered = new Set<State>()
+        await observeComparison(scenario, observe, async () => {
           executed++
-          const entered = new Set<State>()
-          const enter = (state: State) => {
-            if (!counts.has(state))
-              throw new Error(`Undeclared loader state: ${state}`)
+          await checkRetirementReceiver(scenario, (cut) => {
+            const state: State =
+              cut === `release` ||
+              cut === `held-answer` ||
+              cut === `failed-after-writes` ||
+              cut === `superseded-answer` ||
+              cut === `held-replay`
+                ? `${scenario.kind}-${cut}`
+                : cut
             if (!entered.has(state)) {
               entered.add(state)
               counts.set(state, counts.get(state)! + 1)
             }
-          }
-          const scenario = history
-
-          await checkRetirementReceiver(scenario, (cut) =>
-            enter(
-              cut === `release` || cut === `held-answer`
-                ? `${scenario.kind}-${cut}`
-                : cut,
-            ),
-          )
-        }),
+          })
+        })
+        for (const state of entered) observe(`reach`, state)
+      },
       check: (_history, _observations, verdict) => verdict,
     })
   })
@@ -3902,6 +4172,8 @@ describe(`Ordered source request authority`, () => {
     [`collection`, `delete-tie`],
     [`collection`, `evict`],
     [`collection`, `evict-tie`],
+    [`collection`, `truncate`],
+    [`effect`, `truncate`],
   ] as const
   // The scenario of one held receiving case, as the old fixed test built it.
   const heldReceiverScenario = ([
@@ -3913,6 +4185,7 @@ describe(`Ordered source request authority`, () => {
     synchronous: false,
     offset: 0,
     holdReplacement: true,
+    replacementOutcome: `success`,
     kind,
     unloadChange,
     boundaryTie:

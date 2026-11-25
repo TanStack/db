@@ -517,6 +517,9 @@ async function expectDemandReactivationRetriesAfterReleaseFailure(
 // treats an aborted lazy-demand load as a failure enters error. Between a
 // truncate and its settlement the replay barrier owns publication, so the
 // model does not judge live-query rows there; the metamorphic twin does.
+// The direct Effect also receives a fulfilled acquisition and a truncate in
+// the same turn, before fulfillment observers run. The replacement's rows
+// belong to initial suppression, while the first later matching write emits.
 //
 // The driver uses real Collections, a live-query preload or `createEffect`,
 // and controlled source writes. Each step is followed by a timer turn. Each
@@ -551,7 +554,14 @@ const isReadConsumer = (consumer: LaggingSourceConsumer): boolean =>
   consumer === `state-when-ready`
 
 type LaggingSourceStep =
-  `deliver` | `settle` | `source-ready` | `change` | `rekey` | `truncate`
+  | `deliver`
+  | `settle`
+  | `source-ready`
+  | `change`
+  | `rekey`
+  | `truncate`
+  | `settle-and-truncate`
+  | `deliver-replay`
 
 const LAGGING_SOURCE_SHAPES: Record<LaggingSourceShape, LaggingSourceMode> = {
   direct: `on-demand`,
@@ -620,9 +630,24 @@ function disturbedHistories(
   ]
 }
 
+// Keep the initial delivery and the source-ready and ordinary-write positions.
+// Replace its settlement with a same-turn truncate, one replay delivery, and
+// the actual settlement that opens the initial gate.
+function sameTurnReplayHistories(): Array<Array<LaggingSourceStep>> {
+  return laggingSourceHistories(`on-demand`).map((history) =>
+    history.flatMap((step) =>
+      step === `settle`
+        ? [`settle-and-truncate`, `deliver-replay`, `settle`]
+        : [step],
+    ),
+  )
+}
+
 const INITIAL_POST_ID = 2
 
 const CHANGED_POST_ID = 4
+
+const REPLAY_POST_ID = 6
 
 type LaggingSourceFacts = {
   delivered: boolean
@@ -999,21 +1024,33 @@ function applyLaggingSourceStep(
   { shape, main, twin, facts, rekeyUsers }: LaggingSourceContext,
 ): void {
   const sources = [main.source, ...(twin ? [twin.source] : [])]
-  if (step === `deliver` || step === `change`) {
-    const post =
-      step === `deliver`
-        ? { id: INITIAL_POST_ID, userId: 2 }
-        : { id: CHANGED_POST_ID, userId: facts.parentId }
+  if (step === `deliver` || step === `change` || step === `deliver-replay`) {
+    const post = {
+      id:
+        step === `deliver`
+          ? INITIAL_POST_ID
+          : step === `deliver-replay`
+            ? REPLAY_POST_ID
+            : CHANGED_POST_ID,
+      userId: step === `change` ? facts.parentId : 2,
+    }
     for (const source of sources) source.write(post)
     if (step === `deliver`) facts.delivered = true
-    else facts.changed = true
+    else if (step === `change`) facts.changed = true
     recordLaggingSourceWrite(shape, facts, post)
   } else if (step === `rekey`) {
     rekeyUsers!()
     facts.parentId = 3
     facts.disturbed = true
-  } else if (step === `truncate`) {
-    for (const source of sources) source.truncate()
+  } else if (step === `truncate` || step === `settle-and-truncate`) {
+    for (const source of sources) {
+      if (step === `settle-and-truncate`) {
+        expect(source.acquisitions).toHaveLength(1)
+        expect(source.acquisitions[0]!.isPending()).toBe(true)
+        source.acquisitions[0]!.resolve()
+      }
+      source.truncate()
+    }
     facts.posts = []
     facts.disturbed = true
     facts.replayPending = true
@@ -1041,6 +1078,7 @@ function applyLaggingSourceStep(
 function createLaggingSourceDriver(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
+  reach: () => void,
 ): TraceDriver<LaggingSourceStep, LaggingSourceContext> {
   const mode = LAGGING_SOURCE_SHAPES[shape]
   return {
@@ -1114,6 +1152,13 @@ function createLaggingSourceDriver(
         context.main.source,
         ...(context.twin ? [context.twin.source] : []),
       ]
+      if (step === `settle-and-truncate`) {
+        for (const source of sources) {
+          expect(source.acquisitions).toHaveLength(2)
+          expect(source.acquisitions[1]!.isPending()).toBe(true)
+        }
+        reach()
+      }
       while (
         step === `settle` &&
         sources.some((source) =>
@@ -1238,10 +1283,11 @@ async function expectLaggingSourceTraceMatches(
   consumer: LaggingSourceConsumer,
   shape: LaggingSourceShape,
   steps: ReadonlyArray<LaggingSourceStep>,
+  reach: () => void,
 ): Promise<void> {
   await runTrace({
     steps,
-    driver: createLaggingSourceDriver(consumer, shape),
+    driver: createLaggingSourceDriver(consumer, shape, reach),
     projection: laggingSourceProjection(consumer, shape),
   })
 }
@@ -1442,7 +1488,12 @@ describe(`includes temporal oracle`, () => {
     }
     const cells = Object.entries(consumers).flatMap(([consumer, shapes]) =>
       shapes.flatMap((shape) =>
-        disturbedHistories(shape).map((steps) => ({
+        [
+          ...disturbedHistories(shape),
+          ...(consumer === `effect` && shape === `direct`
+            ? sameTurnReplayHistories()
+            : []),
+        ].map((steps) => ({
           consumer: consumer as LaggingSourceConsumer,
           shape,
           steps,
@@ -1465,19 +1516,29 @@ describe(`includes temporal oracle`, () => {
         `src/query/live/subset-demand-controller.ts`,
         `src/query/query-once.ts#queryOnce`,
       ],
-      histories: cells,
+      histories: {
+        enumerated: cells,
+        states: [`held replay after same-turn initial fulfillment`],
+      },
       label: ({ consumer, shape, history }) =>
         `${consumer} ${shape}: ${history}`,
       resolve: (cell) => ({ ...cell }),
       model: recordedAssertionJudgment,
-      driver: (plan, observe) =>
-        recordAssertionJudgment(laggingSourceLaw, plan, observe, () =>
+      driver: async (plan, observe) => {
+        let entered = false
+        await recordAssertionJudgment(laggingSourceLaw, plan, observe, () =>
           expectLaggingSourceTraceMatches(
             plan.consumer,
             plan.shape,
             plan.steps,
+            () => {
+              entered = true
+            },
           ),
-        ),
+        )
+        if (entered)
+          observe(`reach`, `held replay after same-turn initial fulfillment`)
+      },
       check: forwardAssertionJudgment,
     })
   })
