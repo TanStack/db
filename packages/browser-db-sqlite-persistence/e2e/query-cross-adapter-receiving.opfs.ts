@@ -12,6 +12,7 @@ import {
 } from '../src'
 import { recordQueryHistory } from './query-ownership-browser-support'
 import { removeStartupOPFSArtifacts } from './persisted-startup-opfs-cleanup'
+import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
 import type {
   EagerGateHistory,
   EagerReloadHistory,
@@ -40,7 +41,11 @@ const runQuerySelectFailures = (history: FailingQueryHistory) =>
         ),
       [
         () => database.close?.(),
-        () => removeStartupOPFSArtifacts(databaseName),
+        () =>
+          removeClosedArtifacts(
+            () => removeStartupOPFSArtifacts(databaseName),
+            observe,
+          ),
       ],
     )
   })
