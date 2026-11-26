@@ -9485,4 +9485,4 @@ and run budgets. This is an instrument repair, with no new provider or product
 behavior claim. The original next-receipt guard fails the generated instrument;
 a targeted mutant accepting an unrelated receipt and a mutant losing the final
 observation both fail. This targeted evidence is not a complete mutation audit of
-the lifecycle driver. See issue #2484 and its versioned review record.
+the lifecycle driver. See [issue #2484 evidence](oracle-reviews/issue-2484-event-checkpoint.md).
