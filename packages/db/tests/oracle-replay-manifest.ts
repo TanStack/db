@@ -540,6 +540,11 @@ const ownerGroups: ReadonlyArray<
     `controlled node-sqlite`,
   ],
   [
+    `db-adapter-conformance/tests/persisted-baseline-checkpoint-oracle.test.ts`,
+    `adapter-conformance.persisted-baseline-lifecycle`,
+    `checkpoint`,
+  ],
+  [
     `powersync-db-collection/tests/persisted-baseline-lifecycle-oracle.test.ts`,
     `adapter-conformance.persisted-baseline-lifecycle.powersync`,
     `controlled node-sqlite`,

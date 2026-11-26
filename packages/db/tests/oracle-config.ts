@@ -525,6 +525,7 @@ const staticOracleProperties = [
   `adapter-conformance.eager-live-source.rxdb`,
   `adapter-conformance.eager-live-source.powersync`,
   `adapter-conformance.persisted-baseline-lifecycle.rxdb.controlled`,
+  `adapter-conformance.persisted-baseline-lifecycle.checkpoint`,
   `adapter-conformance.persisted-baseline-lifecycle.rxdb.node-sqlite`,
   `adapter-conformance.persisted-baseline-lifecycle.rxdb.chromium-opfs`,
   `adapter-conformance.persisted-baseline-lifecycle.powersync.controlled`,

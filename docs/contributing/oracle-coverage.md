@@ -9463,3 +9463,26 @@ records exact counts, commands, the receiving replay and type-collector setup.
 This proves the observed-work premise on the stated paths. Unobserved work,
 unbounded chains and real browser-process completion remain outside this
 instrument claim; the multi-tab owner's existing peer-notice limits remain.
+
+### Persisted lifecycle source-event checkpoint, issue #2484
+
+Owner: `packages/db-adapter-conformance/tests/persisted-baseline-lifecycle-oracle.ts`
+retains the row and lifecycle judgment. The instrument receiver
+`packages/db-adapter-conformance/tests/persisted-baseline-checkpoint-oracle.test.ts`
+checks `observeBaselineLifecycle` itself: a legal empty source transaction cannot
+satisfy the wait for a later source event. Its controlled provider changes backend
+rows first, commits one to three empty transactions, and delivers the event after
+one to four tasks. Generated histories vary saved, old and replacement memberships across
+three keys. The real Collection and persistence wrapper still apply the writes.
+The state `source-event-held-after-empty-commit` is declared and constructed; both
+campaigns reach it in five constructed and 24 generated histories. Bound controls
+reject a missing premise and the observation before the event applies.
+
+The driver records the applied receipt of the transaction containing the event's
+unique row. It awaits that receipt before taking `afterEvent`. Existing PowerSync,
+RxDB, Node SQLite and Chromium OPFS receivers keep their laws, comparisons, states
+and run budgets. This is an instrument repair, with no new provider or product
+behavior claim. The original next-receipt guard fails the generated instrument;
+a targeted mutant accepting an unrelated receipt and a mutant losing the final
+observation both fail. This targeted evidence is not a complete mutation audit of
+the lifecycle driver. See issue #2484 and its versioned review record.
