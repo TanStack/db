@@ -1301,7 +1301,8 @@ Such a window also forwards its joined filter on every `loadSubset` as
 `relations`, a semi/anti-join hint, when every cross-alias conjunct maps to one.
 An existence check is `some` or `none`. A conjunct that fails on a missing joined
 row is `some(where)`. One that passes on a missing row is `none(not where)`, only
-when the join is on the joined collection's key. An adapter may apply the hint
+when the join is on the joined collection's key. A subquery root sends no hint,
+since its projection can rename the paths a hint names. An adapter may apply the hint
 or ignore it and return a superset, and it must not drop a row that passes. Local
 evaluation stays authoritative. The hint is part of the demand key. Windows that
 share a source send it only when they ask for the same joined filter.
