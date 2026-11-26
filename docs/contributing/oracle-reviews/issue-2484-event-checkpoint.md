@@ -75,7 +75,7 @@ function changed, and no existing product law or comparison was narrowed.
 The temporary config merged the package's `vite.config.ts` with:
 
 ```ts
-{ test: { include: ['**/persisted-baseline-checkpoint-oracle.test.ts'],
+const config = { test: { include: ['**/persisted-baseline-checkpoint-oracle.test.ts'],
   coverage: { enabled: false }, maxWorkers: 2 } }
 ```
 
