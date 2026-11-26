@@ -1380,6 +1380,10 @@ If an explicit window operation consumes a staged boundary continuation and
 that continuation has no boundary row, it starts no acquisition. The operation
 must continue normal demand selection for the enlarged window; consuming the
 empty continuation does not settle that window operation.
+Pending joined demand holds a joined filter's ordered requests, its first
+request included: the graph pass after that demand settles issues them. A
+synchronous answer that stages a refill behind joined demand returns to its
+caller and leaves the refill staged for that pass.
 If joined demand blocks an explicit retry, the loader retains its window
 generation and repair intent until it can select the request. A new failure or
 cursor reset discards that blocked intent.

@@ -290,6 +290,10 @@ export class OrderedSourceLoader {
     const { index, limit, offset, requiresFullSource } = this.info
     if (index) this.subscription.setOrderByIndex(index)
     if (limit === 0) return
+    // As in loadMore, a joined filter's first request waits for joined work;
+    // the graph pass after that work settles issues it.
+    if (this.info.joinedFilterSourceIds?.length && this.hasPendingJoinedWork())
+      return
     if (requiresFullSource) {
       this.loadFullSource()
       return
