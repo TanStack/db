@@ -8802,6 +8802,44 @@ The existing laws, comparisons, and run budgets remain unchanged. This is a
 driver correction and establishes no new production behavior or resource-leak
 claim. See [the evidence record](oracle-reviews/issue-2480-replay-settlement.md).
 
+### Ordered-loader retirement checkpoint, PR #2481 follow-up
+
+Owner: `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+properties `ordered-loader.request-authority` and
+`ordered-loader.replay-retirement`. CI seed `332327919`, path
+`9283:0:0:0:0:5:5:9:10:9`, kept a finite lease while an unanswered current
+acquisition blocked replay. The no-leak check judged that active replay as
+quiet after a full-source transport succeeded.
+
+ARCHITECTURE.md, "Ordered requests, continuation, and recovery", requires
+covering retirement to await replay completion. Both successful and
+superseded-failed no-leak comparisons now require that checkpoint. Decision
+`ordered-loader-replay-retirement-checkpoint-2026-11-26`: the maintainer
+approved this check correction in PR #2481's investigation and delegated
+model, history, and check repairs under unchanged laws. This decision
+changes no product law and grants no resource-leak allowance.
+
+The request ledger tracks finite leases acquired inside replay. Their
+release callbacks reject premature covering retirement while replay remains
+pending; explicit retry may still replace failed demand. Public `loadMore`
+arguments record that permission through asynchronous retry continuations.
+After covering replay or subsequent full-source recovery, the same ledger
+requires retirement, including across a superseding truncate. Disposal ends
+that obligation and retains the no-post-disposal-release comparison.
+
+A directed grammar constructs successful and superseded-failed finite
+histories with held finite and authoritative acquisitions. It varies unload
+errors, reentrant passes, completion versus disposal, and success-history
+window width and offset. The failed-history schedule starts at width one,
+offset zero so the repair produces the held tie. Both constructions have
+separate missing-retention and missing-completion controls. The original
+shrunk history remains a fixed regression through the shared comparison.
+The existing run budgets remain unchanged; the directed campaign adds 100
+histories per fixed and random campaign. Four authored mutants reject early
+and retained successful/failed leases. This is controlled loader evidence;
+no public window timing, provider behavior, or universal leak claim follows.
+See [the evidence record](oracle-reviews/issue-2481-replay-retirement.md).
+
 ### Ordered-loader authority CI counterexample, 2026-11-03
 
 Owner: `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts`,

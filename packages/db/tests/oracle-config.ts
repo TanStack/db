@@ -366,6 +366,7 @@ const staticOracleProperties = [
   `ordered-loader.unproven-report`,
   `ordered-loader.replay-continuation`,
   `ordered-loader.replay-settlement`,
+  `ordered-loader.replay-retirement`,
   `ordered-loader.retirement-invalidation`,
   `ordered-loader.retirement-receiver`,
   `replay.new-sibling-demand`,
