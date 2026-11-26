@@ -3703,6 +3703,19 @@ describe(`Ordered source request authority`, () => {
     releaseReenters: false,
     suffix: [],
   }
+  async function driveReplaySettlement(
+    history: AuthorityCase,
+    observe: (checkpoint: string, value: unknown) => void,
+  ): Promise<void> {
+    const reached = new Set<string>()
+    await observeComparison(history, observe, () =>
+      checkAuthorityCase(history, (state) => {
+        if (state === `current-acquisition-before-replay-success`)
+          reached.add(state)
+      }),
+    )
+    for (const state of reached) observe(`reach`, state)
+  }
   oracleProperty({
     id: `ordered-loader.replay-settlement`,
     law: {
@@ -3750,17 +3763,47 @@ describe(`Ordered source request authority`, () => {
       ],
     }),
     model: (history, observations) => recordedComparison(history, observations),
-    driver: async (history, observe) => {
-      const reached = new Set<string>()
-      await observeComparison(history, observe, () =>
-        checkAuthorityCase(history, (state) => {
-          if (state === `current-acquisition-before-replay-success`)
-            reached.add(state)
-        }),
+    driver: driveReplaySettlement,
+    check: (_history, observations, verdict) => {
+      // Every input retains the replay-success prefix. Its state is owed
+      // before generated later work, for constructed and random histories.
+      // Preserve a product-law failure before judging this grammar obligation.
+      if (verdict.kind === `violation`) return verdict
+      return observations.some(
+        ({ checkpoint, value }) =>
+          checkpoint === `reach` &&
+          value === `current-acquisition-before-replay-success`,
       )
-      for (const state of reached) observe(`reach`, state)
+        ? verdict
+        : {
+            kind: `violation`,
+            law: `replay settlement reach`,
+            checkpoint: `replay participation`,
+            difference: `history did not enter current-acquisition-before-replay-success`,
+          }
     },
-    check: (_history, _observations, verdict) => verdict,
+    // The bound construction must pass unchanged. Removing replay success
+    // then runs the same driver without entering the state it promised.
+    calibrations: [
+      {
+        name: `rejects a construction without replay success`,
+        law: `replay settlement reach`,
+        difference: `current-acquisition-before-replay-success`,
+        history: {
+          constructed: `a pending replacement prefix before replay success with generated later work`,
+        },
+        driver: (history, observe) =>
+          driveReplaySettlement(
+            {
+              ...history,
+              history: history.history.filter(
+                ({ type }) => type !== `replaySucceeds`,
+              ),
+            },
+            observe,
+          ),
+      },
+    ],
   })
 
   // The fixed regressions above use the authority helper directly. The

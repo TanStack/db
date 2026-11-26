@@ -8794,6 +8794,10 @@ passes, and later work. Its declared state
 `current-acquisition-before-replay-success` is reached by a constructed
 history with a generated suffix. Each campaign reaches it in all five
 constructed histories and all 100 generated histories at seed `1040058663`.
+The shared check requires that state for every directed history, after the
+request-ledger comparison. A bound calibration removes every `replaySucceeds`
+command from the constructed history and runs the same production driver;
+the check rejects its missing state under `replay settlement reach`.
 The existing laws, comparisons, and run budgets remain unchanged. This is a
 driver correction and establishes no new production behavior or resource-leak
 claim. See [the evidence record](oracle-reviews/issue-2480-replay-settlement.md).
