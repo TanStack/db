@@ -56,15 +56,30 @@ const createLocks = () => {
   }
 }
 
+// Disposed after each test too, so a failed assertion stops their retries.
+const environments: Array<ReturnType<typeof createTestOfflineEnvironment>> = []
+const createEnvironment = (
+  options: Parameters<typeof createTestOfflineEnvironment>[0],
+) => {
+  const environment = createTestOfflineEnvironment(options)
+  environments.push(environment)
+  return environment
+}
+
 describe(`Web Locks failover through the executor`, () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    for (const environment of environments.splice(0)) {
+      environment.executor.dispose()
+    }
+    vi.unstubAllGlobals()
+  })
 
   it(`a waiting executor takes over and replays the outbox`, async () => {
     vi.stubGlobal(`navigator`, { locks: createLocks() })
     const storage = new FakeStorageAdapter()
     const leadership: Array<boolean> = []
 
-    const first = createTestOfflineEnvironment({
+    const first = createEnvironment({
       storage,
       config: { leaderElection: new WebLocksLeader(`failover`) },
       mutationFn: () => {
@@ -92,7 +107,7 @@ describe(`Web Locks failover through the executor`, () => {
     )
 
     const replayed: Array<string> = []
-    const second = createTestOfflineEnvironment({
+    const second = createEnvironment({
       storage,
       config: {
         leaderElection: new WebLocksLeader(`failover`),
@@ -124,7 +139,7 @@ describe(`Web Locks failover through the executor`, () => {
     vi.stubGlobal(`navigator`, { locks: createLocks() })
     const warn = vi.spyOn(console, `warn`).mockImplementation(() => {})
     const storage = new FakeStorageAdapter()
-    const first = createTestOfflineEnvironment({
+    const first = createEnvironment({
       storage,
       config: { leaderElection: new WebLocksLeader(`failover-callback`) },
       mutationFn: () => {
@@ -150,7 +165,7 @@ describe(`Web Locks failover through the executor`, () => {
     )
 
     const replayed: Array<string> = []
-    const second = createTestOfflineEnvironment({
+    const second = createEnvironment({
       storage,
       config: {
         leaderElection: new WebLocksLeader(`failover-callback`),
