@@ -215,8 +215,8 @@ function tieValue(options: RequestOptions): unknown {
  * - `joinedBusy` and `joinedIdle` hold and finish LEFT-joined work, which
  *   defers ordinary loading, and the pass the subscriber runs after it;
  * - `truncate` resets the cursor and holds ordinary passes behind a pending
- *   replay; `replaySucceeds` settles the replay and `replayFails` leaves it
- *   pending;
+ *   replay; `replaySucceeds` answers acquisitions started during replay
+ *   before completing it, and `replayFails` leaves it pending;
  * - `optimisticDeparture` hides the window's row behind an optimistic
  *   overlay, and `sourceDelete` deletes it from the source;
  * - `timer` runs the bounded backoff retry when that scenario enables it;
@@ -230,7 +230,9 @@ function tieValue(options: RequestOptions): unknown {
  *   releases no lease, even as earlier requests settle; the end laws then
  *   judge nothing more.
  * Passes are ordinary graph passes, which the subscriber skips while a
- * truncate replay is pending; a window move still runs. Scenarios cross an
+ * truncate replay is pending; an explicit loader retry still runs. Unlike
+ * this component call, the public window API waits for replay before moving
+ * (ARCHITECTURE.md, "Atomic window publication"). Scenarios cross an
  * indexed loader (pages and ties) with an unindexed one (prefix reads),
  * window limits 1 and 2, whether the first page settles before the history
  * (a bounded repair needs a settled request), whether the first release
@@ -1151,7 +1153,8 @@ async function checkAuthorityCase(
       | `reset-continuation`
       | `release-pass-continuation`
       | `release-pass-refill-resumed`
-      | `release-pass-refill-revalidation`,
+      | `release-pass-refill-revalidation`
+      | `current-acquisition-before-replay-success`,
   ) => void,
   observeRejection?: (reason: unknown) => unknown,
   observeRelease: (released: boolean) => boolean = (released) => released,
@@ -1776,7 +1779,17 @@ async function checkAuthorityCase(
   let clock = 0
   let replaySettledAt = -1
   let replayCoverage = new Set<LedgerRequest>()
+  // Requests begun inside replay join its barrier. Pre-truncate transports
+  // may remain in flight because replay reacquires their logical demands.
+  const currentReplayRequest = () =>
+    ledger.find(
+      (request) =>
+        request.index >= replayOwnedBefore &&
+        request.outcome === `inflight` &&
+        !request.released,
+    )
   const settleReplay = () => {
+    if (currentReplayRequest()) return false
     if (continuationOwed) {
       replayContinuationHandoffs++
       reached?.(`deferred-refill`)
@@ -1803,6 +1816,7 @@ async function checkAuthorityCase(
     } finally {
       settlingReplay = false
     }
+    return true
   }
   let unexpressibleBoundaries = 0
   let joinedDeferrals = 0
@@ -2175,7 +2189,7 @@ async function checkAuthorityCase(
         continue
       }
       if (truncatePending) {
-        settleReplay()
+        if (!settleReplay()) return
         // Replay retirement can release leases that a later read in this
         // drain covers, so the held law is checked at each drain event.
         checkHeld(`after the drain's replay settles`)
@@ -2521,12 +2535,28 @@ async function checkAuthorityCase(
         case `truncate`:
           truncate()
           break
-        case `replaySucceeds`:
+        case `replaySucceeds`: {
           if (!replayPending()) break
+          // Answer acquisitions that joined replay before reporting success,
+          // including any continuation those answers start. Keep the same
+          // per-request held-law checkpoint that the drain uses.
+          for (let round = 0; ; round++) {
+            const request = currentReplayRequest()
+            if (!request || request.hung) break
+            reached?.(`current-acquisition-before-replay-success`)
+            if (round === 40)
+              rejectAt(
+                `replay acquisition fixed point`,
+                new Error(`replay acquisitions did not reach a fixed point`),
+              )
+            await settle(request, true)
+            checkHeld(`before replay completes after request ${request.index}`)
+          }
           settleReplay()
           graphPass()
           await flush()
           break
+        }
         case `replayFails`:
           if (replayPending()) {
             replayFailures++
@@ -3618,6 +3648,120 @@ describe(`Ordered source request authority`, () => {
       ],
     },
   }
+
+  // A release starts replay, then an explicit loader retry starts a repair
+  // inside it. Its next prefix is still in flight when replay success is
+  // requested. Replay must wait for that acquisition before retiring leases.
+  // Source: https://github.com/TanStack/db/issues/2480
+  const replaySettlementRegression: AuthorityCase = {
+    ...ordinaryScenario,
+    indexed: false,
+    limit: 1,
+    settledFirst: true,
+    releaseFault: false,
+    syncRepair: false,
+    releaseTruncates: true,
+    releaseInvalidates: true,
+    history: [
+      { type: `settle`, pick: 0, ok: true },
+      { type: `settle`, pick: 0, ok: true },
+      { type: `move`, delta: -1 },
+      { type: `settleNewest` },
+      { type: `unexpressibleBoundary` },
+      { type: `settle`, pick: 0, ok: true },
+      { type: `replaySucceeds` },
+      { type: `timer` },
+    ],
+  }
+  const replaySettlementCase = fc.record({
+    delta: fc.constantFrom(-1 as const, 0 as const, 1 as const),
+    offset: fc.constantFrom(0 as const, 1 as const),
+    releaseFault: fc.boolean(),
+    releaseReenters: fc.boolean(),
+    suffix: fc.array(
+      fc.record({
+        type: fc.constantFrom(
+          `pass` as const,
+          `truncate` as const,
+          `replaySucceeds` as const,
+          `unexpressibleBoundary` as const,
+          `settleNewest` as const,
+          `timer` as const,
+        ),
+      }),
+      { maxLength: 8 },
+    ),
+  })
+  type ReplaySettlementCase =
+    typeof replaySettlementCase extends fc.Arbitrary<infer History>
+      ? History
+      : never
+  const pendingReplayCase: ReplaySettlementCase = {
+    delta: -1,
+    offset: 0,
+    releaseFault: false,
+    releaseReenters: false,
+    suffix: [],
+  }
+  oracleProperty({
+    id: `ordered-loader.replay-settlement`,
+    law: {
+      statement: `Successful repair acquisitions stay held until a covering acquisition or replay succeeds.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Replay participants and failure.`,
+      limits: `Controlled loader calls and the shared request-ledger comparisons. The public window API defers moves behind replay; this component driver also exercises loader retries during replay.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+    ],
+    histories: {
+      arbitrary: replaySettlementCase,
+      runs: 100,
+      fixedSeeds: [1040058663],
+      states: [`current-acquisition-before-replay-success`],
+      fixed: [
+        {
+          name: `replay success requested while its replacement prefix is in flight`,
+          history: pendingReplayCase,
+        },
+      ],
+      constructed: [
+        {
+          name: `a pending replacement prefix before replay success with generated later work`,
+          enters: [`current-acquisition-before-replay-success`],
+          build: (base): ReplaySettlementCase => ({
+            ...pendingReplayCase,
+            suffix: base.suffix,
+          }),
+        },
+      ],
+    },
+    resolve: ({ delta, suffix, ...axes }): AuthorityCase => ({
+      ...replaySettlementRegression,
+      ...axes,
+      history: [
+        ...replaySettlementRegression.history.map((command) =>
+          command.type === `move` ? { ...command, delta } : command,
+        ),
+        ...suffix,
+      ],
+    }),
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: async (history, observe) => {
+      const reached = new Set<string>()
+      await observeComparison(history, observe, () =>
+        checkAuthorityCase(history, (state) => {
+          if (state === `current-acquisition-before-replay-success`)
+            reached.add(state)
+        }),
+      )
+      for (const state of reached) observe(`reach`, state)
+    },
+    check: (_history, _observations, verdict) => verdict,
+  })
 
   // The fixed regressions above use the authority helper directly. The
   // generated authority grammar maps its values without an unmapper, so it

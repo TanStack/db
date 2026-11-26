@@ -8770,6 +8770,34 @@ client-cache behavior and is not generated, because the model starts a
 restarted run empty. A fixed-seed campaign runs the React client
 (`watchQuery`).
 
+### Ordered-loader replay completion, issue #2480
+
+Owner: `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+properties `ordered-loader.request-authority` and
+`ordered-loader.replay-settlement`. PR #2420's seed `1040058663`, path
+`5586:1:1:1:5:4:8:8:10:11:20:22`, reported a repair tie released before a
+covering read succeeded. The driver had reported replay success while a
+replacement prefix acquired inside that replay was still pending. This
+contradicts ARCHITECTURE.md, "Replay participants and failure": every
+acquisition started inside replay joins its publication barrier.
+
+The success command now answers those acquisitions and their continuations
+before completing replay. It checks the held law after each answer. A hung
+current acquisition keeps replay pending. Pre-truncate transports may remain
+in flight because replay reacquires their logical demand. The component
+driver retains explicit loader retries during replay to exercise those
+acquisitions; the public window API defers moves until replay completes.
+
+The original trace is a fixed regression through the shared request ledger.
+A directed grammar varies window deltas, offsets, cleanup faults, reentrant
+passes, and later work. Its declared state
+`current-acquisition-before-replay-success` is reached by a constructed
+history with a generated suffix. Each campaign reaches it in all five
+constructed histories and all 100 generated histories at seed `1040058663`.
+The existing laws, comparisons, and run budgets remain unchanged. This is a
+driver correction and establishes no new production behavior or resource-leak
+claim. See [the evidence record](oracle-reviews/issue-2480-replay-settlement.md).
+
 ### Ordered-loader authority CI counterexample, 2026-11-03
 
 Owner: `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts`,
