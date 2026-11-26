@@ -4,7 +4,7 @@
     "baseUrl": ".",
     "module": "ES2022",
     "jsx": "preserve",
-    "jsxImportSource": "solid-js",
+    "jsxImportSource": "@solidjs/web",
     "moduleResolution": "bundler",
     "paths": {
       "@/*": ["./src/*"]

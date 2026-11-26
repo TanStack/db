@@ -7,15 +7,18 @@
  * sync adapter's cause is an Error, the boundary receives that exact object.
  * When it is not, such as an HTTP response body, the boundary receives an
  * Error whose message is the problem's message (`health.error.message`) and
- * whose `cause` is the exact value the adapter reported. Solid's own resource
- * wrapper would otherwise turn a non-Error into a generic "Unknown error".
- * The failure can happen while sync starts or after the query has suspended.
- * A crash during the first load follows the same rule.
+ * whose `cause` is the exact value the adapter reported. A wrapper that turned
+ * a non-Error into a generic "Unknown error" would lose both.
+ * The failure can happen while sync starts or after the query has begun
+ * waiting. A crash during the first load follows the same rule.
+ *
+ * Production path: `useLiveQuery` on the Solid 2 host. The gated read
+ * `query.loaded()` waits under `<Loading>` and throws at `<Errored>`.
  */
 import { describe, expect, it } from 'vitest'
 import { render, waitFor } from '@solidjs/testing-library'
 import { createCollection } from '@tanstack/db'
-import { ErrorBoundary, Suspense } from 'solid-js'
+import { Errored, Loading } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 
 type Post = { id: string; title: string }
@@ -46,19 +49,19 @@ describe(`useLiveQuery first-load failure at an error boundary`, () => {
       const caught: Array<unknown> = []
       function Titles() {
         const query = useLiveQuery((q) => q.from({ post: source }))
-        return <div>{query().length} posts</div>
+        return <div>{query.loaded().length} posts</div>
       }
       const view = render(() => (
-        <ErrorBoundary
-          fallback={(error) => {
-            caught.push(error)
+        <Errored
+          fallback={(err) => {
+            caught.push(err())
             return <div>Boundary caught</div>
           }}
         >
-          <Suspense fallback={<div>Loading</div>}>
+          <Loading fallback={<div>Loading</div>}>
             <Titles />
-          </Suspense>
-        </ErrorBoundary>
+          </Loading>
+        </Errored>
       ))
       try {
         if (deferred) {
@@ -78,6 +81,68 @@ describe(`useLiveQuery first-load failure at an error boundary`, () => {
           expect((thrown as Error).message).toBe(source.health.error?.message)
           expect((thrown as Error).cause).toBe(cause)
         }
+      } finally {
+        view.unmount()
+        await source.cleanup()
+      }
+    },
+  )
+
+  // A Collection can fail without reporting a cause. With no problem value to
+  // describe, the boundary still receives an Error, and it names the
+  // Collection that failed.
+  it.each([{ deferred: false }, { deferred: true }])(
+    `names the failed Collection when the first load fails without a cause (deferred: $deferred)`,
+    async ({ deferred }) => {
+      let fail: ((error: unknown) => void) | undefined
+      const source = createCollection<Post>({
+        id: `solid-first-load-no-cause-${deferred}`,
+        getKey: (post) => post.id,
+        sync: {
+          sync: (params) => {
+            if (deferred) fail = params.fail
+            else params.fail(undefined)
+          },
+        },
+      })
+      const caught: Array<unknown> = []
+      // The failing Collection is the query's own. A query derived from it
+      // reports core's error about its source as the cause instead.
+      function Titles() {
+        const query = useLiveQuery(() => source)
+        return <div>{query.loaded().length} posts</div>
+      }
+      const view = render(() => (
+        <Errored
+          fallback={(err) => {
+            caught.push(err())
+            return <div>Boundary caught</div>
+          }}
+        >
+          <Loading fallback={<div>Loading</div>}>
+            <Titles />
+          </Loading>
+        </Errored>
+      ))
+      try {
+        if (deferred) {
+          await waitFor(() => expect(fail).toBeDefined())
+          fail!(undefined)
+        }
+        await waitFor(() =>
+          expect(view.getByText(`Boundary caught`)).toBeTruthy(),
+        )
+        expect(source.status).toBe(`error`)
+        expect(source.health.error?.cause).toBeUndefined()
+        const thrown = caught[0]
+        expect(
+          thrown,
+          `a missing cause is named by its Collection`,
+        ).toBeInstanceOf(Error)
+        expect((thrown as Error).message).toBe(
+          `Collection "${source.id}" failed to load`,
+        )
+        expect((thrown as Error).cause).toBeUndefined()
       } finally {
         view.unmount()
         await source.cleanup()
@@ -116,19 +181,19 @@ describe(`useLiveQuery first-load failure at an error boundary`, () => {
       const caught: Array<unknown> = []
       function Titles() {
         const query = useLiveQuery((q) => q.from({ post: source }))
-        return <div>{query().length} posts</div>
+        return <div>{query.loaded().length} posts</div>
       }
       const view = render(() => (
-        <ErrorBoundary
-          fallback={(error) => {
-            caught.push(error)
+        <Errored
+          fallback={(err) => {
+            caught.push(err())
             return <div>Boundary caught</div>
           }}
         >
-          <Suspense fallback={<div>Loading</div>}>
+          <Loading fallback={<div>Loading</div>}>
             <Titles />
-          </Suspense>
-        </ErrorBoundary>
+          </Loading>
+        </Errored>
       ))
       try {
         if (deferred) {
@@ -158,4 +223,58 @@ describe(`useLiveQuery first-load failure at an error boundary`, () => {
       }
     },
   )
+
+  // A crash throws at any time, and that includes one that lands in the same
+  // tick as the readiness the gate is waiting for: the wait has then settled,
+  // and the read that follows must still throw the crash.
+  it(`sends a crash that lands together with the readiness the gate awaited`, async () => {
+    const cause = new Error(`local store broke as it became ready`)
+    let reportReady: (() => void) | undefined
+    const source = createCollection<Post>({
+      id: `solid-crash-with-readiness`,
+      getKey: (post) => post.id,
+      sync: {
+        sync: (params) => {
+          reportReady = params.markReady
+        },
+      },
+    })
+    const caught: Array<unknown> = []
+    function Titles() {
+      const query = useLiveQuery((q) => q.from({ post: source }))
+      return <div>{query.loaded().length} posts</div>
+    }
+    const view = render(() => (
+      <Errored
+        fallback={(err) => {
+          caught.push(err())
+          return <div>Boundary caught</div>
+        }}
+      >
+        <Loading fallback={<div>Loading</div>}>
+          <Titles />
+        </Loading>
+      </Errored>
+    ))
+    try {
+      await waitFor(() => expect(reportReady).toBeDefined())
+      // Nothing runs between these two calls: the gate's wait settles, and the
+      // crash is already there when that wait's continuation resumes.
+      reportReady!()
+      ;(
+        source as unknown as {
+          _lifecycle: { crash: (error: unknown) => void }
+        }
+      )._lifecycle.crash(cause)
+      await waitFor(() =>
+        expect(view.getByText(`Boundary caught`)).toBeTruthy(),
+      )
+      expect(source.status).toBe(`crashed`)
+      expect(source.health.error?.cause).toBe(cause)
+      expect(caught[0], `the crash cause is thrown as is`).toBe(cause)
+    } finally {
+      view.unmount()
+      await source.cleanup().catch(() => undefined)
+    }
+  })
 })

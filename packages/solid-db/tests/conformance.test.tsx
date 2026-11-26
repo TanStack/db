@@ -25,12 +25,13 @@ import {
   sum,
 } from '@tanstack/db'
 import {
-  createRenderEffect,
+  createEffect,
   createRoot,
   createSignal,
+  createStore,
+  flush,
   onCleanup,
 } from 'solid-js'
-import { createStore } from 'solid-js/store'
 import {
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
@@ -232,20 +233,30 @@ function mountControllable<P>(
   initial: P,
   opts?: { pool?: PooledLiveQueries },
 ): ControllableHandle<P> {
-  const [param, setParam] = createSignal<P>(initial)
+  // A parameter is data. Solid 2 reads a function value as the writable
+  // derived form, so the signal holds `unknown` and narrows at its reads.
+  const [param, setParam] = createSignal<unknown>(initial)
   const published = createPublicationLog()
   const { getResult, dispose } = inRoot(() => {
     const query =
       opts?.pool !== undefined
         ? // Reading param() in the config accessor makes Solid recompute on change.
           useLiveQuery(() => {
-            const value = param()
+            const value = param() as P
             return { query: (q: any) => build(q, value), pool: opts.pool }
           })
         : // Reading param() inside the query fn makes Solid recompute on change.
-          useLiveQuery((q: any) => build(q, param()))
-    // Solid renders the value each render effect reads.
-    createRenderEffect(() => published.record(query(), query.state))
+          useLiveQuery((q: any) => build(q, param() as P))
+    // Each read the binding publishes is recorded. The copy reads the rows
+    // and the keyed map's values, so it belongs to the tracked phase; Solid 2
+    // runs the effect in the turn the change landed in, and the driver flushes
+    // and records at its cut as well. A rejected input throws from the read:
+    // that publishes no rows and must not escape as an uncaught error, which
+    // Solid 2 answers by halting the reactive system.
+    createEffect(() => published.record(query(), query.state), {
+      effect: () => {},
+      error: () => {},
+    })
     return query
   })
   const handle = makeHandle(getResult, dispose)
@@ -255,9 +266,10 @@ function mountControllable<P>(
     statePublications: published.stateValues,
     async setParam(next: P, observe?: () => void) {
       setParam(() => next)
+      // Solid 2 propagates on flush: apply the change now so the first paint
+      // after it has run the framework's reactive work, but no later task.
+      flush()
       observe?.()
-      // The first paint after the change: the framework ran its reactive
-      // work synchronously, but no later task has run.
       published.record(getResult()(), getResult().state)
       await settle()
     },
@@ -273,7 +285,8 @@ const solidDriver: LiveQueryDriver = {
   ops: { eq, gt, count, sum, coalesce, groupKeys, createOptimisticAction },
   indexTypes: { basic: BasicIndex, btree: BTreeIndex },
   makeSource,
-  wrapSnapshotValue: <T extends object>(value: T) => createStore(value)[0],
+  wrapSnapshotValue: <T extends object>(value: T) =>
+    createStore(value as Record<PropertyKey, unknown>)[0] as T,
   makeDeferredSource,
   makeLaggingSource: <T extends { id: string }>() =>
     makeLaggingSource<T>(

@@ -22,11 +22,16 @@
  */
 import { createCollection } from '@tanstack/db'
 import { render, waitFor } from '@solidjs/testing-library'
-import { For, createRenderEffect, createRoot, createSignal } from 'solid-js'
-import { createStore } from 'solid-js/store'
+import {
+  For,
+  createRenderEffect,
+  createRoot,
+  createSignal,
+  createStore,
+} from 'solid-js'
 import { expect, vi } from 'vitest'
 import { useLiveQuery } from '../src/useLiveQuery'
-import { createRowStore } from '../src/store-materialization'
+import { createRowView } from '../src/row-view'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import { oracleProperty } from '../../db/tests/oracle-config'
 import {
@@ -246,9 +251,12 @@ async function runHistory(history: History, observe: Observer) {
         let observed: Array<number> = []
         createRoot((dispose) => {
           resources.defer(dispose)
-          createRenderEffect(() => {
-            observed = elements(current()).map((element) => element.value)
-          })
+          createRenderEffect(
+            () => elements(current()).map((element) => element.value),
+            (values) => {
+              observed = values
+            },
+          )
         })
         view = render(() => (
           <For each={elements(current())}>
@@ -410,10 +418,14 @@ async function runHistory(history: History, observe: Observer) {
         ))
         createRoot((dispose) => {
           disposeEffects = dispose
-          createRenderEffect(() => {
-            void elements(current())[0]
-            reads++
-          })
+          // The count law needs the read itself: an unchanged reference must
+          // not invalidate this observer.
+          createRenderEffect(
+            () => elements(current())[0],
+            () => {
+              reads++
+            },
+          )
         })
         compare(current(), 0, admitted, mounts, reads)
       }
@@ -474,7 +486,9 @@ async function runHistory(history: History, observe: Observer) {
       // A native source write supplies a tracked read premise, not a Collection
       // change. Its liveness policy is outside this law; binding lifetime is not.
       const starts = subscriptions.mock.calls.length
-      setNativePayload(`value`, 1)
+      setNativePayload((draft) => {
+        draft.value = 1
+      })
       await new Promise<void>((resolve) => queueMicrotask(resolve))
       oracleAssertion(`row reads cannot rebind the hook`, () =>
         expect(
@@ -525,10 +539,7 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing callback/config/Collection finite grammar at settled Solid host cuts; no changed-element identity, native-source-only value liveness, cycles or elapsed-time claim.`,
   },
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
+  owns: [`src/useLiveQuery.ts#useLiveQuery`, `src/row-view.ts#createRowView`],
   histories: [...histories()],
   driver: (history: Parameters<typeof runHistory>[0], observe) =>
     recordAssertionJudgment(`solid.row-materialization`, history, observe, () =>
@@ -545,10 +556,7 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing same-parent and parent-transition cases at one or two array levels through three public inputs.`,
   },
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
+  owns: [`src/useLiveQuery.ts#useLiveQuery`, `src/row-view.ts#createRowView`],
   histories: [...nativeParentHistories()],
   driver: (history: Parameters<typeof runHistory>[0], observe) =>
     recordAssertionJudgment(
@@ -644,15 +652,18 @@ async function runVisibilityHistory(
   const resources = new ScenarioLifetime()
   await resources.run(async () => {
     const original = sourceRow(initial)
-    const entry = createRowStore(original)
+    const entry = createRowView(original)
     const row = entry.value
     const admitted = row[key]
     let observed: Array<string> = []
     createRoot((dispose) => {
       resources.defer(dispose)
-      createRenderEffect(() => {
-        observed = Object.keys(row)
-      })
+      createRenderEffect(
+        () => Object.keys(row),
+        (keys) => {
+          observed = keys
+        },
+      )
     })
     compareVisibility(observed, row, initial, key)
     for (const visible of [initial, !initial, initial, !initial]) {
@@ -698,10 +709,7 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite helper-only visibility grammar; no public descriptor admission, accessors, symbols or in-place source edits.`,
   },
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
+  owns: [`src/useLiveQuery.ts#useLiveQuery`, `src/row-view.ts#createRowView`],
   histories: [...visibilityHistories()],
   driver: (history: Parameters<typeof runVisibilityHistory>[0], observe) =>
     recordAssertionJudgment(
@@ -834,14 +842,25 @@ async function runGetterHistory(history: GetterHistory, observe: Observer) {
       let keys: Array<string> = []
       createRoot((dispose) => {
         resources.defer(dispose)
-        createRenderEffect(() => {
-          observed = query()[0]?.config?.label
-        })
-        createRenderEffect(() => {
-          const config = query()[0]?.config
-          member = config !== null && config !== undefined && `label` in config
-          keys = config ? Object.keys(config) : []
-        })
+        createRenderEffect(
+          () => query()[0]?.config?.label,
+          (label) => {
+            observed = label
+          },
+        )
+        createRenderEffect(
+          () => {
+            const config = query()[0]?.config
+            return [
+              config !== null && config !== undefined && `label` in config,
+              config ? Object.keys(config) : [],
+            ] as const
+          },
+          ([isMember, ownKeys]) => {
+            member = isMember
+            keys = ownKeys
+          },
+        )
       })
       for (let value = history.later ? 0 : 1; value <= 2; value++) {
         source.utils.begin()
@@ -935,10 +954,7 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite object/scalar, early/later and stable/fresh getter grammar through three public inputs at settled host cuts.`,
   },
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
+  owns: [`src/useLiveQuery.ts#useLiveQuery`, `src/row-view.ts#createRowView`],
   histories: [...getterHistories()],
   driver: (history: Parameters<typeof runGetterHistory>[0], observe) =>
     recordAssertionJudgment(`solid.live-getters`, history, observe, () =>
@@ -1067,10 +1083,7 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing three crossed-depth calibration inputs and unchanged graph comparison; no new mutation campaign.`,
   },
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
+  owns: [`src/useLiveQuery.ts#useLiveQuery`, `src/row-view.ts#createRowView`],
   histories: [...graphHistories()].filter((history) => history.crossed),
   driver: (history: Parameters<typeof runGraphCalibration>[0], observe) =>
     recordAssertionJudgment(
@@ -1259,10 +1272,7 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite graph grammar and unchanged 32 enumerations per distinct admitted container; no public SLO, alias topology or cyclic support claim.`,
   },
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
+  owns: [`src/useLiveQuery.ts#useLiveQuery`, `src/row-view.ts#createRowView`],
   histories: [...graphHistories()],
   driver: (history: Parameters<typeof runGraphHistory>[0], observe) =>
     recordAssertionJudgment(`solid.shared-graphs`, history, observe, () =>
@@ -1503,15 +1513,22 @@ async function runCallableHistory(history: CallableHistory, observe: Observer) {
       // comparison cannot establish callable usability or dependency tracking.
       createRoot((dispose) => {
         resources.defer(dispose)
-        createRenderEffect(() => {
-          const current = container(requiredFirstRow(query()))
-          observed = { callable: current.format, value: current.format?.() }
-          reads++
-        })
-        createRenderEffect(() => {
-          void query()[0]!.unchanged
-          unchangedReads++
-        })
+        createRenderEffect(
+          () => {
+            const current = container(requiredFirstRow(query()))
+            return { callable: current.format, value: current.format?.() }
+          },
+          (next) => {
+            observed = next
+            reads++
+          },
+        )
+        createRenderEffect(
+          () => query()[0]!.unchanged,
+          () => {
+            unchangedReads++
+          },
+        )
       })
       compareCallable(observed, expectedCallable(history, 0, signal(), choices))
       entered.add(`tracked-initial`)
@@ -1643,10 +1660,7 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite callable grammar through three public inputs; no arbitrary function/getter bodies, mutable-source writes, cycles or browser rendering.`,
   },
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
+  owns: [`src/useLiveQuery.ts#useLiveQuery`, `src/row-view.ts#createRowView`],
   histories: [...callableHistories()],
   driver: (history: Parameters<typeof runCallableHistory>[0], observe) =>
     recordAssertionJudgment(`solid.callable-fields`, history, observe, () =>
@@ -1814,17 +1828,28 @@ async function runReservedFieldHistory(
       let unchangedReads = 0
       createRoot((dispose) => {
         resources.defer(dispose)
-        createRenderEffect(() => {
-          observed = query()[0]![history.key]
-        })
-        createRenderEffect(() => {
-          observedKeys = Object.keys(requiredFirstRow(query()))
-          observedOwn = Object.hasOwn(requiredFirstRow(query()), history.key)
-        })
-        createRenderEffect(() => {
-          void query()[0]!.unchanged
-          unchangedReads++
-        })
+        createRenderEffect(
+          () => query()[0]![history.key],
+          (value) => {
+            observed = value
+          },
+        )
+        createRenderEffect(
+          () => {
+            const row = requiredFirstRow(query())
+            return [Object.keys(row), Object.hasOwn(row, history.key)] as const
+          },
+          ([ownKeys, own]) => {
+            observedKeys = ownKeys
+            observedOwn = own
+          },
+        )
+        createRenderEffect(
+          () => query()[0]!.unchanged,
+          () => {
+            unchangedReads++
+          },
+        )
       })
       compareReservedField(
         observed,
@@ -1946,10 +1971,7 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite ordinary/reserved-name, initial-ownness and scalar/signed-zero/object/array grammar through three public inputs.`,
   },
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
+  owns: [`src/useLiveQuery.ts#useLiveQuery`, `src/row-view.ts#createRowView`],
   histories: [...reservedFieldHistories()],
   driver: (history: Parameters<typeof runReservedFieldHistory>[0], observe) =>
     recordAssertionJudgment(`solid.reserved-fields`, history, observe, () =>
@@ -2109,13 +2131,18 @@ async function runMethodHistory(history: MethodHistory, observe: Observer) {
       }
       createRoot((dispose) => {
         resources.defer(dispose)
-        createRenderEffect(() => {
-          observed = readMethods(query()[0]!.values)
-        })
-        createRenderEffect(() => {
-          void query()[0]!.unchanged
-          unchangedReads++
-        })
+        createRenderEffect(
+          () => readMethods(query()[0]!.values),
+          (methods) => {
+            observed = methods
+          },
+        )
+        createRenderEffect(
+          () => query()[0]!.unchanged,
+          () => {
+            unchangedReads++
+          },
+        )
       })
       compareMethods(observed, 0)
       entered.add(`tracked-methods`)
@@ -2166,10 +2193,7 @@ oracleProperty({
     authority: `Existing fine-grained result contract and maintainer decisions recorded in docs/contributing/oracle-coverage.md under the Solid row-materialization receiving owner.`,
     limits: `The existing finite array/subclass and user-shadow grammar through three public inputs; no arbitrary class instances or prototype edits.`,
   },
-  owns: [
-    `src/useLiveQuery.ts#useLiveQuery`,
-    `src/store-materialization.ts#createRowStore`,
-  ],
+  owns: [`src/useLiveQuery.ts#useLiveQuery`, `src/row-view.ts#createRowView`],
   histories: [...methodHistories()],
   driver: (history: Parameters<typeof runMethodHistory>[0], observe) =>
     recordAssertionJudgment(`solid.array-methods`, history, observe, () =>

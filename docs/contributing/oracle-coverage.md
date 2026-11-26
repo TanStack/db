@@ -7655,6 +7655,31 @@ original 32-per-distinct-container work budget and preceding limits remain.
 The [compatibility record](oracle-reviews/2026-11-09-dependency-compatibility.md)
 separates original-code RED, repaired GREEN, hostile controls, and host limits.
 
+The Solid 2.0 migration (2026-11-24) moves this owner off the store. A result
+row is the Collection's own row behind one stable view, as the React, Vue and
+Svelte adapters serve their rows: nothing is copied, and a signal is made for
+a field by the first read of it in a tracking scope. The nine properties keep
+their laws, statements, histories and budgets; only the driver's host calls
+changed. Core evaluates a row's own accessors before it admits it, so an own
+accessor is refused where a signal would hold its value and is served live to
+every other read. Under the same oracle build, the fixed-seed reach reports
+of the five `framework.solid.*` properties are identical to `main`'s. The
+[Solid 2 record](oracle-reviews/2026-11-24-solid-2-row-view.md) holds source
+fingerprints, RED, GREEN, mutants, the gap report, size and cost. Three items
+stay open for a maintainer decision. First, the gap report cannot baseline
+`solid.shared-graphs` on this host: the capture of `oracle-gaps` renders each
+asserted value, which enumerates it, and the graph nodes the law asserts on
+are its own counting proxies, served by reference, so the capture's
+enumerations count against the law's budget (508 of a budget of 288 at shared
+depth 8, where a plain Vitest run passes). That property is set aside for the
+scan, and its mutants are unclassified by the tool. Second, no law of this
+owner tells a nested copy from a nested reference: both designs pass every
+law. A law is needed for one of the two designs, or an allowance for the
+other. Third, the gap report credits a kill to a law only, and three sites
+are reached by ordinary examples alone: an Array as the row itself, `in` on a
+root row view, and the read-only view. Those examples reject the mutants
+aimed there; laws for the sites, or an allowance, are a maintainer decision.
+
 **Core source-field and destination preservation:** the maintainer authorized
 fixing the sibling Core boundary in this PR. The existing context-transport
 owner now imports its public-field model/grammar from

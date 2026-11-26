@@ -7,11 +7,15 @@
  * readiness at that point, with the rows present, and stay ready after the
  * source becomes ready or changes. Model D in
  * `packages/db/tests/query/includes-temporal-oracle.test.ts` owns the law.
+ *
+ * Production path: `useLiveQuery` on the Solid 2 host. The rows come from
+ * `query()`, which never waits; the boundary reads `query.loaded()`, the
+ * opt-in gate that waits for initial-query readiness.
  */
 import { describe, expect, it } from 'vitest'
 import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import { createCollection, eq } from '@tanstack/db'
-import { Suspense } from 'solid-js'
+import { Loading } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -66,7 +70,7 @@ function createLaggingSource(id: string) {
 }
 
 describe(`useLiveQuery initial readiness over a lagging on-demand source`, () => {
-  it(`releases isReady and Suspense when the subset settles and stays ready`, async () => {
+  it(`releases isReady and Loading when the subset settles and stays ready`, async () => {
     const source = createLaggingSource(`solid-exposure-lagging`)
     const statusView = renderHook(() =>
       useLiveQuery((q) =>
@@ -76,19 +80,19 @@ describe(`useLiveQuery initial readiness over a lagging on-demand source`, () =>
       ),
     )
     let cleanupSuspended: (() => Promise<void>) | undefined
-    function SuspendedTitle() {
+    function GatedTitle() {
       const query = useLiveQuery((q) =>
         q
           .from({ post: source.collection })
           .where(({ post }) => eq(post.id, `p1`)),
       )
       cleanupSuspended = () => query.collection.cleanup()
-      return <div data-testid="title">{query()[0]?.title}</div>
+      return <div data-testid="title">{query.loaded()[0]?.title}</div>
     }
     const view = render(() => (
-      <Suspense fallback={<div data-testid="waiting">Waiting</div>}>
-        <SuspendedTitle />
-      </Suspense>
+      <Loading fallback={<div data-testid="waiting">Waiting</div>}>
+        <GatedTitle />
+      </Loading>
     ))
     try {
       await waitFor(() => expect(source.loadStarted()).toBe(true))

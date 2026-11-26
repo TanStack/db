@@ -6,6 +6,7 @@ import { createLiveQueryCollection, eq } from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery'
 import type { Prettify } from '../../db/src/query/index'
 import type { Collection, CollectionStatus } from '@tanstack/db'
+import type { Accessor } from 'solid-js'
 import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
@@ -115,6 +116,10 @@ describe(`useLiveQuery type assertions`, () => {
     > | null>()
     expectTypeOf(rendered.result.status).toEqualTypeOf<
       CollectionStatus | `disabled`
+    >()
+    expectTypeOf(rendered.result.isReady).toEqualTypeOf<boolean>()
+    expectTypeOf(rendered.result.loaded).toEqualTypeOf<
+      Accessor<Array<Prettify<OutputWithVirtual<Person>>>>
     >()
 
     // @ts-expect-error Disabled callbacks expose a null collection until enabled.
