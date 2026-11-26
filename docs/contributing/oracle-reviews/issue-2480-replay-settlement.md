@@ -118,3 +118,65 @@ checkpoints. It adds no model state. Answering acquisitions that joined replay p
 the driver's success-command meaning without filtering histories or
 discarding component continuation coverage. Existing run budgets remain
 unchanged; the directed campaign adds 100 histories per campaign.
+
+## Review follow-up, 2026-11-26
+
+This entry records implementation commit
+`423b80728e1c4500ffaaec54bebd01baf0b94ddc`, following reviewed head
+`aa26aae05ace1509a720a244cfa44d2a6e595363`. It supplements the earlier
+self-review without changing that record's evidence.
+
+CodeRabbit identified a missing replay-manifest owner. The new property was
+registered, but the explicit ordered-loader owner tuple omitted its suffix.
+The existing `names an owner for every registered property` test failed with
+`ordered-loader.replay-settlement`. Adding the suffix makes that gate pass.
+This closes the CI registration failure without changing replay selection.
+
+The independent PR review also found that the earlier ORC-015 account supplied
+positive counts without a missing-state control. The shared check now requires
+`current-acquisition-before-replay-success` after the request-ledger verdict.
+Every directed input retains the replay-success prefix, so this obligation
+also applies to generated histories. A product-law violation still wins.
+The framework preserves an escaping driver error over a missing-state verdict
+whose checkpoint the driver did not record.
+
+A bound calibration selects the existing randomized construction. Its clean
+run must pass and reach the state. The mutant removes every `replaySucceeds`
+command, including any in the generated suffix, and runs the same driver.
+With the original pass-through check, the calibration fails because the check
+passes that missing state. With the reach check, it rejects the mutant under
+`replay settlement reach`, at `replay participation`. This is a reach-control
+kill, not a new production-mutant claim.
+
+Validation used the repository's pinned Node 22.13.1:
+
+```sh
+# RED with the new calibration and the original pass-through check:
+pnpm --filter @tanstack/db exec vitest run \
+  tests/query/ordered-source-loader-state-oracle.test.ts \
+  -t 'ordered-loader.replay-settlement.*calibration' \
+  --coverage.enabled=false --typecheck.enabled=false --maxWorkers=2
+
+# GREEN after the reach check:
+pnpm --filter @tanstack/db exec vitest run \
+  tests/query/ordered-source-loader-state-oracle.test.ts \
+  --coverage.enabled=false --typecheck.enabled=false --maxWorkers=2
+```
+
+The RED run fails one calibration with `but the check passed it`. The GREEN
+run passes all 143 loader-state tests, including that calibration. Each fixed
+and random campaign reaches the state in five constructed histories and
+100 generated histories. No existing run budget changed.
+
+The full replay suite passes 123 of 124 tests under shell Node 26. Its remaining
+browser-alias check fails before comparison because the local SQLite binary
+targets Node 22. That exact check and the replay-owner gate pass together under
+Node 22.13.1: two passed, 122 skipped. DB test-source typecheck, ESLint,
+`pnpm lint:changed`, Prettier, and the run-budget check pass.
+
+The follow-up closes the review's ORC-015 gap and adds its permanent calibration
+through `oracleProperty` (ORC-016). The earlier ORC-001–014 evidence and controlled
+boundary limits remain in force. CodeRabbit supplied one actionable finding;
+the PR review supplied the distinct reach-control finding. Both are fixed.
+No simplification was warranted. This branch needs no release changeset because
+it changes test tooling and documentation only.
