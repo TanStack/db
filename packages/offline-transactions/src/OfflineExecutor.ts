@@ -134,8 +134,9 @@ export class OfflineExecutor {
   private readonly saving = new Map<string, boolean>()
   // Ids whose call this executor is running.
   private readonly issued = new Set<string>()
-  // Running markers this leader recorded for removed writes, by id.
-  private readonly runningRemovals = new Map<string, string>()
+  // Running markers this leader recorded for removed writes, by id; each
+  // overlapping removal leaves its own.
+  private readonly runningRemovals = new Map<string, Set<string>>()
   // Removals this follower asked the leader for, by request.
   private readonly removals = new Map<
     string,
@@ -326,6 +327,11 @@ export class OfflineExecutor {
       if (this.reconcileFailed) this.reconcileFollowerWrites()
       if (this.isOfflineEnabled && this.executor) {
         this.executor.resetRetryDelays()
+        // A failed replay of this term runs again; admissions wait for it.
+        if (this.executor.replayFailed)
+          this.loadAndReplayTransactions().catch((error) => {
+            console.warn(`Failed to load and replay transactions:`, error)
+          })
         this.retryAdmissions()
         void this.executor.retryFailedCleanups()
 
@@ -1136,9 +1142,11 @@ export class OfflineExecutor {
               ? await outbox.recordPending(id)
               : undefined
             if (token !== undefined) {
-              if (this.scheduler.isRunning(id))
-                this.runningRemovals.set(id, token)
-              else await outbox.withdrawOutcome(id, token).catch(() => {})
+              if (this.scheduler.isRunning(id)) {
+                let tokens = this.runningRemovals.get(id)
+                if (!tokens) this.runningRemovals.set(id, (tokens = new Set()))
+                tokens.add(token)
+              } else await outbox.withdrawOutcome(id, token).catch(() => {})
             }
             await outbox.remove(id)
             if (this.saving.has(id)) this.saving.set(id, true)
@@ -1200,12 +1208,16 @@ export class OfflineExecutor {
     return yielded
   }
 
-  /** Withdraws the running marker of a removed write whose call finished. */
+  /** Withdraws the running markers of a removed write whose call finished. */
   async finishRunningRemoval(id: string): Promise<void> {
-    const token = this.runningRemovals.get(id)
-    if (token === undefined) return
+    const tokens = this.runningRemovals.get(id)
+    if (!tokens) return
     this.runningRemovals.delete(id)
-    await this.outbox!.withdrawOutcome(id, token).catch(() => {})
+    await Promise.all(
+      [...tokens].map((token) =>
+        this.outbox!.withdrawOutcome(id, token).catch(() => {}),
+      ),
+    )
   }
 
   async peekOutbox(): Promise<Array<OfflineTransaction>> {

@@ -219,6 +219,9 @@ export function createTestOfflineEnvironment(
     return { ok: true, mutations }
   }
 
+  // The default provider syncs only a Collection this environment made.
+  if (options.collection && !options.mutationFn)
+    throw new Error(`A reused collection needs its own mutationFn`)
   const mutationFn: TestMutationFn = options.mutationFn ?? defaultMutation
 
   const leader = new FakeLeaderElection()

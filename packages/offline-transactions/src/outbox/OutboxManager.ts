@@ -30,6 +30,33 @@ export type OutboxOutcome = {
  */
 export const OUTCOME_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
+/** A stored error, or undefined when the value does not hold one. */
+function readError(
+  value: unknown,
+): { name: string; message: string } | undefined {
+  if (typeof value !== `object` || value === null) return undefined
+  const { name, message } = value as Record<string, unknown>
+  return typeof name === `string` && typeof message === `string`
+    ? { name, message }
+    : undefined
+}
+
+/** A stored outcome, or undefined when it cannot be read. */
+function readOutcome(data: string): OutboxOutcome | undefined {
+  let value: unknown
+  try {
+    value = JSON.parse(data)
+  } catch {
+    return undefined
+  }
+  if (typeof value !== `object` || value === null) return undefined
+  const { error, pending, at } = value as Record<string, unknown>
+  if (typeof at !== `number`) return undefined
+  const recorded = readError(error)
+  if (recorded) return { error: recorded, at }
+  return pending === true ? { pending: true, at } : undefined
+}
+
 export class OutboxManager {
   private storage: StorageAdapter
   private serializer: TransactionSerializer
@@ -159,17 +186,28 @@ export class OutboxManager {
     await this.storage.delete(`${this.outcomeKeyPrefix(id)}${token}`)
   }
 
-  /** A rejection if any recording holds one, else a running marker. */
+  /**
+   * A rejection if any recording holds one, else a running marker. A record
+   * that cannot be read leaves the outcome unknown, so it reads as running.
+   */
   async getOutcome(id: string): Promise<OutboxOutcome | null> {
-    let found: OutboxOutcome | null = null
-    for (const key of await this.outcomeKeys(id)) {
-      const data = await this.storage.get(key)
-      if (data === null) continue
-      const outcome = JSON.parse(data) as OutboxOutcome
-      if (outcome.error) return outcome
-      found = outcome
+    for (;;) {
+      let found: OutboxOutcome | null = null
+      let withdrawn = false
+      for (const key of await this.outcomeKeys(id)) {
+        const data = await this.storage.get(key)
+        // A marker is withdrawn only after any rejection that replaces it
+        // is recorded, so a listing that lost a record is taken again.
+        if (data === null) {
+          withdrawn = true
+          continue
+        }
+        const outcome = readOutcome(data) ?? { pending: true, at: 0 }
+        if (outcome.error) return outcome
+        found = outcome
+      }
+      if (!withdrawn) return found
     }
-    return found
   }
 
   async removeOutcome(id: string): Promise<void> {
@@ -185,8 +223,8 @@ export class OutboxManager {
     )
     for (const key of keys) {
       const data = await this.storage.get(key)
-      if (data !== null && (JSON.parse(data) as OutboxOutcome).at < before)
-        await this.storage.delete(key)
+      const outcome = data === null ? undefined : readOutcome(data)
+      if (outcome && outcome.at < before) await this.storage.delete(key)
     }
   }
 
@@ -288,9 +326,9 @@ export class OutboxManager {
           try {
             const data = await this.storage.get(key)
             if (data === null) continue
-            error = (
-              JSON.parse(data) as { error: { name: string; message: string } }
-            ).error
+            error =
+              readError((JSON.parse(data) as { error?: unknown }).error) ??
+              error
           } catch {
             // The unread decision still rejects its row.
           }

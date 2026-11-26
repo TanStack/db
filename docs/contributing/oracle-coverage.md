@@ -4260,8 +4260,12 @@ The post-merge review added three missing domains to existing owners:
   exclusion, a write removed before it was sent, a save acknowledged after a
   handover, a faulted former leader that saves for its successor, a failed
   start, a save that ends after its tab closed, and tabs that name their
-  collections differently under one key. It does not cover real browser
-  contexts.
+  collections differently under one key. It also covers a failed replay
+  that runs again on connectivity, a replay that outlives its term,
+  overlapping removals of a running write, a rejection recorded after its
+  writer listed the outcome records, unreadable outcome records and
+  decisions, and a removed running write whose call fails with a retryable
+  error. It does not cover real browser contexts.
 - Settlement-time drop of optimistic state is owned by the
   [optimistic history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
   and

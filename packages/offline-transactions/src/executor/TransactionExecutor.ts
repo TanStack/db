@@ -326,9 +326,17 @@ export class TransactionExecutor {
       // Public removal can finish while the named mutation function runs.
       // The removed row cannot be retried, but its caller still owns the
       // provider failure and later queued work must be able to run.
+      // A writer in another tab reads the error from its record, as for a
+      // rejection, and the running marker goes; a failed record is retried
+      // without calling the provider again.
       if (persistError instanceof OutboxTransactionNotFoundError) {
-        this.scheduler.markCompleted(transaction)
-        this.offlineExecutor.rejectTransaction(transaction.id, error)
+        const failed: OfflineTransaction = {
+          ...updatedTransaction,
+          outboxPhase: `rejection-pending`,
+        }
+        this.scheduler.updateTransaction(failed)
+        if (await this.removeSettledTransaction(failed, false))
+          this.offlineExecutor.rejectTransaction(transaction.id, error)
         return
       }
       throw persistError
@@ -446,11 +454,26 @@ export class TransactionExecutor {
     this.replay = replay
     const term = this.offlineExecutor.leadershipTerm
     try {
-      if (await this.loadPending()) this.replayedTerm = term
+      // A replay that outlived its term must not reopen admission for an
+      // older one.
+      if (
+        (await this.loadPending()) &&
+        term === this.offlineExecutor.leadershipTerm
+      )
+        this.replayedTerm = term
     } finally {
       if (this.replay === replay) this.replay = null
       finish()
     }
+  }
+
+  /** Whether this term's replay failed and none is running. */
+  get replayFailed(): boolean {
+    return (
+      this.offlineExecutor.isOfflineEnabled &&
+      this.replay === null &&
+      this.replayedTerm !== this.offlineExecutor.leadershipTerm
+    )
   }
 
   /** False when the read was stale for this term and changed nothing. */
