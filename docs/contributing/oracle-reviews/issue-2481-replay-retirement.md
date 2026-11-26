@@ -103,7 +103,7 @@ mutants are not shipped. Authored mutant replacements are:
 | --- | --- |
 | Early successful retirement | Replace the pending-replay clause in `retireSettledFiniteAcquisitions` with `false`. |
 | Early failed retirement | Replace `if (this.subscription.hasPendingTruncateReplacement) return` with `if (false) return`. |
-| Retained successful lease | Replace `: this.coversSource() ||` with `: false ||`. |
+| Retained successful lease | Replace `: this.coversSource() \|\|` with `: false \|\|`. |
 | Retained failed lease | Replace `(_, { superseded }) => superseded` with `() => false`. |
 
 ## Rubric and limits
