@@ -124,6 +124,7 @@ const otherProperties: ReadonlyArray<string> = [
   `ordered-source-loader.staged-window`,
   `deferred-loaded-subset.window`,
   `deferred-loaded-subset.joined`,
+  `deferred-loaded-subset.joined-first-request`,
   `deferred-loaded-subset.source-ready`,
   `mixed-index-order.public-order`,
   `mixed-index-order.on-demand-window`,
@@ -196,7 +197,7 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
   [
     `db/tests/query/deferred-loaded-subset-oracle.test.ts`,
     `deferred-loaded-subset`,
-    `window joined source-ready`,
+    `window joined joined-first-request source-ready`,
   ],
   [
     `db/tests/query/mixed-index-order-oracle.test.ts`,

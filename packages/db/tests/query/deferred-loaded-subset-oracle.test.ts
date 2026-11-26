@@ -9,43 +9,54 @@
  * local rows cannot prove a window. `isSubsetLoaded` is the sync adapter's
  * local statement that the Collection already holds every row of a subset.
  * With that statement the deferred window publishes those rows at once.
- * Acquisition still starts when the query resumes.
+ * Acquisition still starts when the query resumes. "Ordered requests,
+ * continuation, and recovery": joined demand holds a joined filter's ordered
+ * requests, including its first one, until that demand settles.
  *
  * ## Limits
  *
- * The cells vary the hook over one ordered window on one on-demand source: no
- * hook, a hook that says held, one that says not held, one that throws, and one
- * that returns a truthy non-boolean. A
- * hook that claims rows the Collection does not hold is outside the contract.
- * One joined window covers a held root whose joined source has not answered.
- * An open truncate replay is not exercised here.
+ * The hook cells vary the hook over one ordered window on one on-demand
+ * source: no hook, a hook that says held, one that says not held, one that
+ * throws, and one that returns a truthy non-boolean. A hook that claims rows
+ * the Collection does not hold is outside the contract. The joined cells cover
+ * a held root whose joined source has not answered, and, on the loader alone,
+ * a first request answered synchronously or not while joined work is pending
+ * or idle. The source-ready cells cover a source that becomes ready after the
+ * hook answered. An open truncate replay is not exercised here.
  *
  * ## Model
  *
- * `publishesBeforeSubscribe` follows from the hook alone: only a `held` answer
- * publishes before a subscriber. Every cell issues no provider request before
- * its subscriber and at least one after it.
+ * Each model computes the owed observations from the history's axes alone.
+ * Only a `held` answer publishes before a subscriber, and every cell issues no
+ * provider request before its subscriber and at least one after it. A
+ * deferred joined window returns and reaches the filtered window after its
+ * subscriber. A first request waits while joined work is pending and runs at
+ * the pass after it settles. A source-ready demand is loading exactly while
+ * the hook does not vouch for its rows.
  *
  * ## Production path and observation
  *
- * The driver runs a real live query twice over one source: the first preload
- * installs the rows, and the second query is observed before and after its
- * first subscriber through public status, rows and `loadSubset` calls.
+ * The drivers run real live queries, or `OrderedSourceLoader` over a fake
+ * subscription, and record public status, rows, `isLoadingSubset`, provider
+ * calls and the loader's requests at fixed checkpoints. A spin issues no
+ * request, so the joined-work callback carries a read budget: exceeding it
+ * ends the loop and is observed instead of hanging the runner.
  */
-import { describe, expect, vi } from 'vitest'
+import { describe, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
+import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
 import { BTreeIndex } from '../../src/indexes/btree-index.js'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { compileSingleRowExpression } from '../../src/query/compiler/evaluators.js'
 import { PropRef } from '../../src/query/ir.js'
 import { oracleProperty } from '../oracle-config.js'
-import {
-  forwardAssertionJudgment,
-  recordAssertionJudgment,
-  recordedAssertionJudgment,
-} from '../oracle-assertion-adapter.js'
+import { differs, pass } from '../oracle-property.js'
+import { createOrderByInfo } from './ordered-source-loader-support.js'
+import type { Observation, Verdict } from '../oracle-property.js'
+import type { CollectionSubscription } from '../../src/collection/subscription.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
+import type { RequestOptions } from './ordered-source-loader-support.js'
 
 type Row = { id: number; rank: number; group: string }
 
@@ -59,6 +70,45 @@ const expectedIds = rows
   .slice(0, 3)
   .map(({ id }) => id)
 
+// More reads than any terminating drain makes.
+const joinedReadBudget = 1000
+
+/** Compare the trace with the owed observations, checkpoint by checkpoint. */
+function compareOwed(law: string) {
+  return (
+    _plan: unknown,
+    observations: ReadonlyArray<Observation>,
+    owed: ReadonlyArray<Observation>,
+  ): Verdict => {
+    for (const [index, { checkpoint, value }] of owed.entries()) {
+      const observed = observations[index]
+      const verdict =
+        differs(checkpoint, law, observed?.checkpoint, checkpoint) ??
+        differs(checkpoint, law, observed?.value, value)
+      if (verdict) return verdict
+    }
+    return differs(`trace`, law, observations.length, owed.length) ?? pass
+  }
+}
+
+const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Provider answers chain through timers, so after its delay a cell also waits
+// until the collection reports no subset work.
+const quiescent = (collection: { status: string; isLoadingSubset: boolean }) =>
+  vi.waitFor(
+    () => {
+      if (collection.status !== `ready` || collection.isLoadingSubset)
+        throw new Error(`still loading`)
+    },
+    { timeout: 2000, interval: 1 },
+  )
+
+const ids = (collection: { values: () => Iterable<{ id: number }> }) =>
+  Array.from(collection.values(), ({ id }) => id)
+
+// ## Hook answers over one deferred window
+
 const hookCases = [
   { hook: `none` },
   { hook: `held` },
@@ -67,8 +117,6 @@ const hookCases = [
   { hook: `truthy` },
 ] as const
 type HookCase = (typeof hookCases)[number]
-
-const publishesBeforeSubscribe = ({ hook }: HookCase) => hook === `held`
 
 function hookFor({ hook }: HookCase, holdsSubset: () => boolean) {
   switch (hook) {
@@ -89,7 +137,29 @@ function hookFor({ hook }: HookCase, holdsSubset: () => boolean) {
   }
 }
 
-async function runHookCell(cell: HookCase): Promise<void> {
+// Only a `held` answer is the adapter's statement that it holds the subset.
+function hookModel({ hook }: HookCase): Array<Observation> {
+  const publishes = hook === `held`
+  return [
+    {
+      checkpoint: `before a subscriber`,
+      value: {
+        ready: publishes,
+        rows: publishes ? expectedIds : [],
+        providerRequests: 0,
+      },
+    },
+    {
+      checkpoint: `after a subscriber`,
+      value: { acquires: true, rows: expectedIds },
+    },
+  ]
+}
+
+async function runHookCell(
+  cell: HookCase,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
   const loads: Array<LoadSubsetOptions> = []
   // The adapter's statement is true only once a load has installed the rows.
   let holdsSubset = false
@@ -153,25 +223,18 @@ async function runHookCell(cell: HookCase): Promise<void> {
 
   const again = query()
   try {
-    if (publishesBeforeSubscribe(cell)) {
-      expect(again.status, `ready before a subscriber`).toBe(`ready`)
-      expect(
-        Array.from(again.values(), ({ id }) => id),
-        `rows before a subscriber`,
-      ).toEqual(expectedIds)
-    } else {
-      expect(again.status, `not ready before a subscriber`).not.toBe(`ready`)
-      expect(again.size, `no rows before a subscriber`).toBe(0)
-    }
-    expect(loads.length, `no provider work before a subscriber`).toBe(before)
-
+    observe(`before a subscriber`, {
+      ready: again.status === `ready`,
+      rows: ids(again),
+      providerRequests: loads.length - before,
+    })
     const subscription = again.subscribeChanges(() => {})
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(loads.length, `acquisition starts on resume`).toBeGreaterThan(before)
-    expect(
-      Array.from(again.values(), ({ id }) => id),
-      `rows after a subscriber`,
-    ).toEqual(expectedIds)
+    await settle(10)
+    await quiescent(again)
+    observe(`after a subscriber`, {
+      acquires: loads.length > before,
+      rows: ids(again),
+    })
     subscription.unsubscribe()
   } finally {
     await again.cleanup()
@@ -179,17 +242,23 @@ async function runHookCell(cell: HookCase): Promise<void> {
   }
 }
 
-// More reads than any terminating drain makes.
-const joinedReadBudget = 1000
+// ## A deferred joined window over a held root
 
-// A held root answers its page and tie synchronously while its joined source
-// has started no work. The refill then waits for that work: the deferred query
-// must return, and its first subscriber must still reach the right window.
-async function runJoinedHeldCell({
-  root: history,
-}: {
-  root: `held` | `held-later`
-}): Promise<void> {
+type JoinedCase = { root: `held` | `held-later` }
+
+// The root answers its page and tie synchronously while its joined source has
+// started no work, so the refill waits for that work.
+function joinedModel(_cell: JoinedCase): Array<Observation> {
+  return [
+    { checkpoint: `the deferred query returns`, value: true },
+    { checkpoint: `window after a subscriber`, value: expectedIds },
+  ]
+}
+
+async function runJoinedHeldCell(
+  { root: history }: JoinedCase,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
   let holds = history === `held`
   let ready = () => {}
   const owners = rows.map(({ id }) => ({ id, active: id % 2 === 0 }))
@@ -279,20 +348,18 @@ async function runJoinedHeldCell({
         root.startSyncImmediate()
         holds = true
         ready()
-        await new Promise((resolve) => setTimeout(resolve, 2))
+        await settle(2)
       }
-    } catch {
-      // The read budget ended a spinning drain; the comparison below names it.
+    } catch (error) {
+      // Only a spin the read budget ended is an observation.
+      if (joinedReads <= joinedReadBudget) throw error
     }
-    expect(joinedReads, `the deferred query returns`).toBeLessThanOrEqual(
-      joinedReadBudget,
-    )
-    const subscription = live!.subscribeChanges(() => {})
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(
-      Array.from(live!.values(), ({ id }) => id),
-      `window after a subscriber`,
-    ).toEqual(expectedIds)
+    observe(`the deferred query returns`, joinedReads <= joinedReadBudget)
+    if (!live) return
+    const subscription = live.subscribeChanges(() => {})
+    await settle(20)
+    await quiescent(live)
+    observe(`window after a subscriber`, ids(live))
     subscription.unsubscribe()
   } finally {
     reads.mockRestore()
@@ -302,23 +369,141 @@ async function runJoinedHeldCell({
   }
 }
 
-// A source that becomes ready after the hook settled a deferred demand owes
-// that demand nothing: its window is published and it is not loading.
-async function runSourceReadyCell({
-  source: history,
-}: {
+// ## A joined filter's first request
+
+const firstRequestCases = [{ joined: `idle` }, { joined: `pending` }] as const
+type FirstRequestCase = (typeof firstRequestCases)[number]
+
+// Every page and tie answers synchronously. The first page, its tie and one
+// refill page run once nothing holds them; joined work holds all of them.
+function firstRequestModel({ joined }: FirstRequestCase): Array<Observation> {
+  const chain = [`page`, `tie`, `page`]
+  return [
+    { checkpoint: `start returns`, value: true },
+    {
+      checkpoint: `requests while joined work is ${joined}`,
+      value: joined === `pending` ? [] : chain,
+    },
+    { checkpoint: `requests after joined work settles`, value: chain },
+  ]
+}
+
+async function runFirstRequestCell(
+  cell: FirstRequestCase,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
+  const requests: Array<`page` | `tie`> = []
+  let joinedPending = cell.joined === `pending`
+  let joinedReads = 0
+  const subscription = {
+    setOrderByIndex: () => {},
+    readOrderedSnapshot: () => [{ value: { rank: 1 } }],
+    requestLimitedSnapshot: (options: RequestOptions) => {
+      requests.push(`page`)
+      options.onLoadSubsetResult?.(true, options, () => {})
+    },
+    requestSnapshot: (options: RequestOptions) => {
+      requests.push(`tie`)
+      options.onLoadSubsetResult?.(true, options, () => {})
+    },
+  }
+  const loader = new OrderedSourceLoader(
+    createOrderByInfo({ joinedFilterSourceIds: [`joined`] }),
+    subscription as unknown as CollectionSubscription,
+    `row`,
+    () => {},
+    () => false,
+    () => 0,
+    () => {
+      if (++joinedReads > joinedReadBudget) {
+        throw new Error(`joined-work read budget exceeded`)
+      }
+      return joinedPending
+    },
+  )
+  try {
+    try {
+      loader.start()
+    } catch (error) {
+      if (joinedReads <= joinedReadBudget) throw error
+    }
+    observe(`start returns`, joinedReads <= joinedReadBudget)
+    observe(`requests while joined work is ${cell.joined}`, [...requests])
+    joinedPending = false
+    // The graph pass that follows the joined settlement.
+    loader.loadMore()
+    await settle(0)
+    observe(`requests after joined work settles`, [...requests])
+  } finally {
+    loader.dispose()
+  }
+}
+
+// ## A source that becomes ready after the hook answered
+
+type SourceReadyCase = {
   source:
     `late-ready` | `released` | `held-later` | `never-held` | `ready-in-sync`
-}): Promise<void> {
+}
+
+// The axes each history fixes: whether the source starts only after a deferred
+// demand asked, what the hook answers when the source starts and once it is
+// ready, and whether it is ready before its sync() returns the hook.
+function sourceReadyAxes({ source }: SourceReadyCase) {
+  const startsLate = source !== `late-ready` && source !== `released`
+  return {
+    startsLate,
+    holdsAtStart: !startsLate || source === `ready-in-sync`,
+    holdsAtReady:
+      source === `late-ready` ||
+      source === `held-later` ||
+      source === `ready-in-sync`,
+    readyInSync: source === `ready-in-sync`,
+  }
+}
+
+// A demand is loading exactly while the hook does not vouch for its rows, and
+// a window publishes once the hook vouched for them while the query asked.
+function sourceReadyModel(cell: SourceReadyCase): Array<Observation> {
+  const { startsLate, holdsAtStart, holdsAtReady, readyInSync } =
+    sourceReadyAxes(cell)
+  const owed: Array<Observation> = []
+  if (startsLate && !readyInSync) {
+    owed.push({
+      checkpoint: `deferred demand once the source starts`,
+      value: holdsAtStart ? `ready` : `loadingSubset`,
+    })
+  }
+  if (startsLate) {
+    owed.push({
+      checkpoint: `deferred demand once the source is ready`,
+      value: holdsAtReady ? `ready` : `loadingSubset`,
+    })
+  }
+  const published = startsLate ? holdsAtReady : holdsAtStart || holdsAtReady
+  owed.push({
+    checkpoint: `window once the source is ready`,
+    value: {
+      rows: published ? expectedIds : [],
+      loading: !holdsAtReady,
+      // An unpublished page never settled, so the loader asked for no tie.
+      tieAsked: published,
+    },
+  })
+  return owed
+}
+
+async function runSourceReadyCell(
+  cell: SourceReadyCase,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
+  const { startsLate, holdsAtStart, holdsAtReady, readyInSync } =
+    sourceReadyAxes(cell)
   let ready!: () => void
-  const startsLate =
-    history === `held-later` ||
-    history === `never-held` ||
-    history === `ready-in-sync`
-  let holds = !startsLate
+  let holds = !startsLate && holdsAtStart
   const asked: Array<LoadSubsetOptions> = []
   const source = createCollection<Row>({
-    id: `deferred-loaded-subset-source-${history}`,
+    id: `deferred-loaded-subset-source-${cell.source}`,
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: !startsLate,
@@ -331,7 +516,7 @@ async function runSourceReadyCell({
         commit()
         ready = markReady
         // The adapter is ready before it returns its hook.
-        if (history === `ready-in-sync`) markReady()
+        if (readyInSync) markReady()
         return {
           loadSubset: () => true as const,
           isSubsetLoaded: (options: LoadSubsetOptions) => {
@@ -352,67 +537,55 @@ async function runSourceReadyCell({
         .limit(3)
         .select(({ row }) => ({ id: row.id })),
   })
+  const deferred = startsLate
+    ? source.subscribeChanges(() => {}, { deferAcquisition: true })
+    : undefined
   try {
-    // Once the adapter no longer vouches for the rows, the demand is
-    // unanswered and the deferred query is waiting on it.
-    if (history === `released`) holds = false
-    // The source starts while the hook says not held, so the demand is
-    // reported as loading. Once the hook holds it and the source is ready,
-    // nothing is left to load until a subscriber resumes acquisition.
-    const deferred = startsLate
-      ? source.subscribeChanges(() => {}, { deferAcquisition: true })
-      : undefined
     if (deferred) {
       deferred.requestSnapshot({ where: eq(new PropRef([`group`]), `even`) })
-      if (history === `ready-in-sync`) holds = true
+      holds = holdsAtStart
       source.startSyncImmediate()
-      if (history !== `ready-in-sync`)
-        expect(deferred.status, `loading while not held`).toBe(`loadingSubset`)
-      holds = history !== `never-held`
+      if (!readyInSync) {
+        observe(`deferred demand once the source starts`, deferred.status)
+      }
     }
-    if (history !== `ready-in-sync`) ready()
-    await new Promise((resolve) => setTimeout(resolve, 5))
-    if (history === `never-held`) {
-      expect(deferred!.status, `an unheld demand keeps loading`).toBe(
-        `loadingSubset`,
-      )
-      expect(live.size, `an unheld window stays unpublished`).toBe(0)
-      // Its first page never settled, so the loader asked for no tie.
-      expect(
-        asked.filter(
-          (options) =>
-            options.subscription !== deferred && options.limit === undefined,
-        ),
-        `an unheld page starts no tie`,
-      ).toEqual([])
-      expect(live.isLoadingSubset, `an unheld window is loading`).toBe(true)
-      deferred!.unsubscribe()
-    } else if (history === `held-later` || history === `ready-in-sync`) {
-      expect(deferred!.status, `a held demand stops loading`).toBe(`ready`)
-      expect(
-        Array.from(live.values(), ({ id }) => id),
-        `a demand that became held publishes its window`,
-      ).toEqual(expectedIds)
-      expect(live.isLoadingSubset, `the held window is not loading`).toBe(false)
-      deferred!.unsubscribe()
-    } else if (history === `released`) {
-      expect(live.isLoadingSubset, `an unanswered demand is loading`).toBe(true)
-    } else {
-      expect(
-        Array.from(live.values(), ({ id }) => id),
-        `published window`,
-      ).toEqual(expectedIds)
-      expect(live.isLoadingSubset, `a settled demand is not loading`).toBe(
-        false,
-      )
+    holds = holdsAtReady
+    if (!readyInSync) ready()
+    await settle(5)
+    if (deferred) {
+      observe(`deferred demand once the source is ready`, deferred.status)
     }
+    observe(`window once the source is ready`, {
+      rows: ids(live),
+      loading: live.isLoadingSubset,
+      tieAsked: asked.some(
+        (options) =>
+          options.subscription !== deferred && options.limit === undefined,
+      ),
+    })
   } finally {
+    deferred?.unsubscribe()
     await live.cleanup()
     await source.cleanup()
   }
 }
 
 describe(`deferred window over a held subset`, () => {
+  oracleProperty({
+    id: `deferred-loaded-subset.window`,
+    law: {
+      statement: `A deferred ordered window publishes before a subscriber only when isSubsetLoaded says the source holds its subset, starts no provider work before then, and still acquires after.`,
+      authority: `query/live/ARCHITECTURE.md: Deferred acquisition.`,
+      limits: `Five hook answers over one ordered window; joined windows and an open truncate replay are not exercised.`,
+    },
+    owns: ['src/collection/subscription.ts', 'src/collection/sync.ts'],
+    histories: hookCases,
+    label: ({ hook }) => `with hook ${hook}`,
+    model: hookModel,
+    driver: runHookCell,
+    check: compareOwed(`deferred held window`),
+  })
+
   oracleProperty({
     id: `deferred-loaded-subset.joined`,
     law: {
@@ -421,17 +594,26 @@ describe(`deferred window over a held subset`, () => {
       limits: `One LEFT-joined filter whose root answers synchronously.`,
     },
     owns: ['src/query/live/ordered-source-loader.ts'],
-    histories: [{ root: `held` }, { root: `held-later` }] as Array<{
-      root: `held` | `held-later`
-    }>,
+    histories: [{ root: `held` }, { root: `held-later` }] as Array<JoinedCase>,
     label: ({ root }) => `${root} root with an unanswered joined source`,
-    resolve: (cell) => ({ cell }),
-    model: recordedAssertionJudgment,
-    driver: (plan, observe) =>
-      recordAssertionJudgment(`deferred joined window`, plan, observe, () =>
-        runJoinedHeldCell(plan.cell),
-      ),
-    check: forwardAssertionJudgment,
+    model: joinedModel,
+    driver: runJoinedHeldCell,
+    check: compareOwed(`deferred joined window`),
+  })
+
+  oracleProperty({
+    id: `deferred-loaded-subset.joined-first-request`,
+    law: {
+      statement: `A joined filter's first ordered request waits while joined work is pending: start returns without a request, and the pass after the joined work settles issues the page and its synchronous tie and refill once.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
+      limits: `Joined work idle or pending at start, on a fake subscription whose pages and ties answer synchronously.`,
+    },
+    owns: ['src/query/live/ordered-source-loader.ts'],
+    histories: firstRequestCases,
+    label: ({ joined }) => `first request with joined work ${joined}`,
+    model: firstRequestModel,
+    driver: runFirstRequestCell,
+    check: compareOwed(`joined first request`),
   })
 
   oracleProperty({
@@ -448,40 +630,10 @@ describe(`deferred window over a held subset`, () => {
       { source: `held-later` },
       { source: `never-held` },
       { source: `ready-in-sync` },
-    ] as Array<{
-      source:
-        | `late-ready`
-        | `released`
-        | `held-later`
-        | `never-held`
-        | `ready-in-sync`
-    }>,
+    ] as Array<SourceReadyCase>,
     label: ({ source }) => `${source} source`,
-    resolve: (cell) => ({ cell }),
-    model: recordedAssertionJudgment,
-    driver: (plan, observe) =>
-      recordAssertionJudgment(`deferred source ready`, plan, observe, () =>
-        runSourceReadyCell(plan.cell),
-      ),
-    check: forwardAssertionJudgment,
-  })
-
-  oracleProperty({
-    id: `deferred-loaded-subset.window`,
-    law: {
-      statement: `A deferred ordered window publishes before a subscriber only when isSubsetLoaded says the source holds its subset, starts no provider work before then, and still acquires after.`,
-      authority: `query/live/ARCHITECTURE.md: Deferred acquisition.`,
-      limits: `Five hook answers over one ordered window; joined windows and an open truncate replay are not exercised.`,
-    },
-    owns: ['src/collection/subscription.ts', 'src/collection/sync.ts'],
-    histories: hookCases,
-    label: ({ hook }) => `with hook ${hook}`,
-    resolve: (cell) => ({ cell }),
-    model: recordedAssertionJudgment,
-    driver: (plan, observe) =>
-      recordAssertionJudgment(`deferred held window`, plan, observe, () =>
-        runHookCell(plan.cell),
-      ),
-    check: forwardAssertionJudgment,
+    model: sourceReadyModel,
+    driver: runSourceReadyCell,
+    check: compareOwed(`deferred source ready`),
   })
 })
