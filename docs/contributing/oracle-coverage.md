@@ -2494,7 +2494,8 @@ serialized at most once. Three more generated properties use small models.
 `serialized-value.truncate-replay` gives up to three rows a probe reference, a
 deep-equal copy or no row before a direct subscriber's truncate and after its
 replay, and requires the replay to publish exactly the rows that stopped or
-started matching. `serialized-value.effect-joined-load` opens an on-demand
+started matching, both to a filtered subscription and to an Effect that joins
+on the probe. `serialized-value.effect-joined-load` opens an on-demand
 join load with a deep-equal or normal update; the provider moves one to three
 rows by real updates or deep-equal replacements and may dispose the Effect,
 and the model gives the one batch. `serialized-value.pooled-residual-swap`

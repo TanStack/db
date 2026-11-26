@@ -15,6 +15,7 @@ import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
   isSilentReplacement,
+  markSilentReplacement,
 } from './change-events.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
@@ -862,6 +863,16 @@ export class CollectionSubscription
           value,
           previousValue,
         })
+      } else if (value !== previousValue && this.options.observesRowIdentity) {
+        // A query reads rows by reference, so it follows a deep-equal replacement.
+        replacement.push(
+          markSilentReplacement({
+            type: `update`,
+            key,
+            value,
+            previousValue,
+          }),
+        )
       }
     }
     for (const [key, value] of finalRows) {

@@ -2261,9 +2261,10 @@ describe(`value classes order arrays by their serialized value`, () => {
 // diff when it completes. A row's reference may be the probe instance or a
 // deep-equal copy, before the truncate and at the end of the replay; a copy
 // may first arrive as the probe and then be replaced. Model: a filter on the
-// probe instance shows exactly the rows that hold it, and the replay publishes
-// a delete for each row that stopped matching and an insert for each that
-// started, and nothing for a row that still matches.
+// probe instance, and an Effect joining on it, show exactly the rows that hold
+// it, and the replay publishes a delete (exit) for each row that stopped
+// matching and an insert (enter) for each that started, and nothing for a row
+// that still matches.
 type RefState = `absent` | `probe` | `copy`
 type ReplayRowSpec = { before: RefState; after: RefState; viaProbe: boolean }
 type ReplayHistory = { rows: Array<ReplayRowSpec> }
@@ -2306,7 +2307,8 @@ async function runReplayHistory(
   let commit!: () => void
   let truncate!: () => void
   const replay = createDeferred<void>()
-  let loads = 0
+  let loaded = false
+  let replaying = false
   const collection = createCollection<ReplayRow>({
     id: `serialized-value-replay-${replayRuns++}`,
     getKey: ({ id }) => id,
@@ -2317,8 +2319,9 @@ async function runReplayHistory(
         operations.markReady()
         return {
           loadSubset: () => {
-            loads++
-            if (loads > 1) return replay.promise
+            if (replaying) return replay.promise
+            if (loaded) return true
+            loaded = true
             begin()
             for (const [index, row] of history.rows.entries()) {
               if (row.before === `absent`) continue
@@ -2354,11 +2357,43 @@ async function runReplayHistory(
   )
   const matching = (state: (row: ReplayRowSpec) => RefState) =>
     ids.filter((_, index) => state(history.rows[index]!) === `probe`)
+  // An Effect reads rows by reference: its join holds a row only while the
+  // row's reference is the probe instance.
+  const probeSide = createCollection(
+    mockSyncCollectionOptions<{ id: string; ref: Map<string, number> }>({
+      id: `serialized-value-replay-probe-${replayRuns}`,
+      getKey: ({ id }) => id,
+      initialData: [{ id: `p`, ref: probe }],
+    }),
+  )
+  const held = new Set<string>()
+  const effectEvents: Array<string> = []
+  let effect: ReturnType<typeof createEffect> | undefined
   try {
     subscription.requestSnapshot({ optimizedOnly: false })
     expect([...visible].sort(), `before the truncate`).toEqual(
       matching((row) => row.before),
     )
+    effect = createEffect({
+      query: (q) =>
+        q
+          .from({ row: collection })
+          .join({ p: probeSide }, ({ row, p }) => eq(row.ref, p.ref), `inner`)
+          .select(({ row }) => ({ id: row.id })),
+      onBatch: (batch) => {
+        for (const event of batch) {
+          const id = (event.value as { id: string }).id
+          effectEvents.push(`${event.type}:${id}`)
+          if (event.type === `exit`) held.delete(id)
+          else held.add(id)
+        }
+      },
+    })
+    await flushPromises()
+    expect([...held].sort(), `Effect before the truncate`).toEqual(
+      matching((row) => row.before),
+    )
+    replaying = true
     begin()
     truncate()
     commit()
@@ -2381,16 +2416,24 @@ async function runReplayHistory(
       commit()
     }
     events.length = 0
+    effectEvents.length = 0
     replay.resolve()
     await flushPromises()
 
     const expectedEvents: Array<string> = []
+    const expectedEffectEvents: Array<string> = []
     for (const [index, row] of history.rows.entries()) {
       const id = ids[index]!
       const was = row.before === `probe`
       const is = row.after === `probe`
-      if (was && !is) expectedEvents.push(`delete:${id}`)
-      if (!was && is) expectedEvents.push(`insert:${id}`)
+      if (was && !is) {
+        expectedEvents.push(`delete:${id}`)
+        expectedEffectEvents.push(`exit:${id}`)
+      }
+      if (!was && is) {
+        expectedEvents.push(`insert:${id}`)
+        expectedEffectEvents.push(`enter:${id}`)
+      }
       expect(collection.get(id)?.ref === probe, `${id} holds the probe`).toBe(
         is,
       )
@@ -2406,11 +2449,19 @@ async function runReplayHistory(
     expect([...events].sort(), `replay publication`).toEqual(
       expectedEvents.sort(),
     )
+    expect([...held].sort(), `Effect after the replay`).toEqual(
+      matching((row) => row.after),
+    )
+    expect([...effectEvents].sort(), `Effect replay publication`).toEqual(
+      expectedEffectEvents.sort(),
+    )
   } finally {
     replay.resolve()
     await flushPromises()
+    await effect?.dispose()
     subscription.unsubscribe()
     await collection.cleanup()
+    await probeSide.cleanup()
   }
 }
 
@@ -2420,9 +2471,9 @@ describe(`a truncate replay follows reference replacements`, () => {
   oracleProperty({
     id: replayProperty,
     law: {
-      statement: `When a direct subscriber's truncate replay completes, a filter on a reference shows exactly the rows that hold that instance, and the replay publishes a delete for each row that stopped matching, including by a deep-equal replacement, an insert for each that started, and nothing for a row that still matches.`,
+      statement: `When a direct subscriber's truncate replay completes, a filter on a reference, and an Effect that joins on it, show exactly the rows that hold that instance, and the replay publishes a delete (an Effect exit) for each row that stopped matching, including by a deep-equal replacement, an insert (an Effect enter) for each that started, and nothing for a row that still matches.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
-      limits: `One on-demand Collection with a Map-valued reference filter and one replay; up to three rows, each absent, holding the probe or holding a deep-equal copy before the truncate and after the replay.`,
+      limits: `One on-demand Collection with a Map-valued reference filter, one Effect with an inner join on that reference, and one replay; up to three rows, each absent, holding the probe or holding a deep-equal copy before the truncate and after the replay.`,
     },
     owns: [
       'src/collection/subscription.ts#CollectionSubscription.createStateDiff',
