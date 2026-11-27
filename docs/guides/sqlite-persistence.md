@@ -264,6 +264,23 @@ persistedCollectionOptions({
 
 A Collection with restored rows then becomes `ready` from them immediately. Network sync continues, and its changes apply over the restored rows when they arrive. An empty restore still waits for the network, so the Collection never shows an empty list that the network did not confirm. An on-demand Collection applies this to each query demand, as [On-demand Collections offline](#on-demand-collections-offline) describes.
 
+The eager timeout starts when the persistence wrapper starts. The source
+starts after the wrapper loads its startup metadata, so time spent waiting
+for SQLite can use part or all of the network-first window.
+
+Collections that share a SQLite driver in one runtime queue their SQLite work.
+A large snapshot write can delay another Collection's startup metadata read
+or restore. Applying a source snapshot can also require a durable write before
+the source can mark the Collection ready. A screen that waits for several
+Collections can therefore stay loading after the first cache restore completes.
+
+When tuning reload performance, measure the time to the first usable render
+with both a fast source and a held network response. For each Collection on
+the screen, time the SQLite restore and the transition to `ready` separately.
+A restore can finish with zero rows while the Collection still waits for
+the source. The sync adapter controls which rows it requests from the server,
+including whether it can resume from a saved position.
+
 The status is the only signal. Every hook, Suspense, and `preload()` follow it, so you do not need a separate persisted flag:
 
 ```tsx
