@@ -212,3 +212,97 @@ Reviewed source SHA-256 for this extension:
 37bdb9e7b2d5046c21719c9fa0272f5a2084cb73560be158fd2a3ba4204b302e  scripts/package-names-oracle.property.test.js
 a08417c4a026826a26505329636e42cce98c8c9e6fb790cb96acdfe8d7e2e7eb  scripts/package-names-probe-bridge.mjs
 ```
+
+
+## CodeRabbit follow-up on d73e7072b
+
+Review `PRR_kwDOOHB7yM8AAAABaxwygA` reported four actionable items against
+`d73e7072b92692a508fa52ce1fe04ffff83bed04`. The complete review and its inline
+comments were retained in task-local scratch before changes. This section
+records their final dispositions and supersedes the earlier grammar/counts.
+
+| Item | Claim and evidence | Verdict/action | Durable result |
+| --- | --- | --- | --- |
+| CR1, comment 4722545657 | The on-demand suite cites a nonexistent renamed docs file. Direct path checks confirm the existing guide retains its old slug. | Confirmed, fixed-now. | Restore the actual authority path. |
+| CR2, comment 4722545670 | Both shared-client references have the same broken path. Direct source checks confirm both occurrences. | Confirmed, fixed-now. | Keep model prose and executable law citations consistent. |
+| CR3, comment 4722545708 | The cursor suite has the same error and other matching references need inspection. A repository search found six affected files in total. | Confirmed, fixed-now. | Repair all six citations, including the persisted-demand and mutation suites. |
+| CR4, comment 4722545723 | An internal stem ending in collection creates a collection-shaped name, but the family-based reference omits its suffix obligation. | Confirmed, fixed-now. | Extend the independent token-role model and generated lexical domain rather than excluding legal inputs. |
+
+**Law and authority.** The agreed rule follows the public name's shape:
+any name ending in `-collection` requires `-db-collection`. An authored family
+is input grammar, not an exemption. CONTRIBUTING.md now states that existing
+rule explicitly. Private and missing-name boundaries still determine whether a
+public string exists. No production validation behavior changed.
+
+**RED.** Before changing `owedRules`, two fixed histories through the existing
+model, CLI driver and comparison failed at `process exit`: internal
+`task-collection` omitted the expected suffix diagnostic, and a binding with
+that stem and missing-db omitted the suffix diagnostic alongside db-segment.
+The expanded random campaign then found the adjacent namespace case: a bare
+collection stem in a multi-target workspace receives a `p1-` prefix and thus
+also acquires the suffix obligation. That comparison failed before the
+reference gained the workspace-prefix premise. Both failures judged correct
+production against an incomplete model; they are not production defects.
+
+**Repair and reach.** Random words retain eight shares of sampling weight.
+The words collection and collections each receive one share. Five appended
+constructed builders force internal tails, internal and binding db removal,
+a spelling boundary, and an accepted plural tail. Random prefix words and
+other workspace entries remain variable. Seven fixed histories use the same
+model and comparison, including the original PowerSync regression and bare
+versus prefixed collection cases. No names were removed from the grammar.
+The accepted-name construction uses a binding, which keeps its db ending.
+
+The model uses stem position, a leading-word premise, and authored edits. It
+never parses a rendered name or imports the production classifier. The leading
+word can come from the stem, an internal db prefix, or the workspace namespace.
+A spelling edit changes the final stem word. A bare collection word has no
+leading hyphen. Native predicates and all 22 forced controls remain unchanged.
+
+Each campaign retains 40 random histories and now executes 80 constructed
+histories from 16 builders. All five new builders reach their named state five
+times in each campaign. The new full run has these aggregate native counts:
+
+| State | Fixed campaign | Fresh campaign |
+| --- | ---: | ---: |
+| collection-suffix | 41 | 44 |
+| combined-faults | 47 | 55 |
+| folder | 29 | 39 |
+| kebab | 34 | 49 |
+| missing-db | 39 | 45 |
+| missing-name | 52 | 44 |
+| multiple-invalid-packages | 53 | 54 |
+| offline | 57 | 58 |
+| private | 63 | 57 |
+| scope | 36 | 43 |
+| valid | 103 | 96 |
+
+**GREEN and mutants.** The two-worker oracle command passes all 95 checks.
+All original source controls remain. Two new bound source calibrations reject
+skipping the suffix check for db-prefixed names and skipping it after missing
+DB. Both require a `package naming` violation at the shared public comparison;
+setup failures do not count. The five source calibrations therefore preserve
+both the existing diagnostic/branch controls and the new cross-family checks.
+The linter's production source is unchanged from d73e7072b.
+
+**Review assessment and loss audit.** All four findings are technically correct.
+The reviewer supplied a useful executable counterexample and identified the
+three broken-citation groups. Fix quality and signal are high; the model repair
+preserves more coverage than the proposed grammar exclusion. Hire recommendation:
+yes for this review. The raw review has four actionable items, with four
+fixed-now, zero refuted, zero deferred, zero unresolved and zero duplicates.
+The walkthrough, passing pre-merge checks, related links and optional UI actions
+contain no additional defect claim. The ledger preserves every unique request,
+including the request to inspect adjacent authority citations.
+
+**Limits.** The one-to-four-target, valid-JSON and four-family bounds remain.
+The lexical keyword regime now has forced reach and actual probe evidence.
+This remains sampled coverage, not a universal proof or a complete mutation
+report. The earlier captured replay coordinates refer to earlier grammar
+revisions and remain historical.
+
+Reviewed repaired oracle SHA-256:
+
+```text
+ef427fd8f8c03215f10ea16489e66cd3f5aba0cd358a32fd5a29a8a23b33de5f  scripts/package-names-oracle.property.test.js
+```

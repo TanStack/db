@@ -6,7 +6,7 @@
  * already-synced cache immediately. Ending either sync run releases only its
  * resources; a surviving stream owner keeps receiving later checkpoints.
  * Authority: PowerSync Direct's public table/streams option documentation,
- * docs/collections/powersync-direct-db-collection.md, and glossary cleanup.
+ * docs/collections/powersync-direct-collection.md, and glossary cleanup.
  *
  * This composition extends the eager owner's fresh-source premise. It reuses
  * the startup owner's independent keyed-row judgment; it does not model SDK

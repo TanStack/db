@@ -88,7 +88,8 @@ manifest. Use lowercase words separated by single hyphens. Include `db` as a
 whole word: framework bindings use `<framework>-db`, collection adapters use
 `<provider>-db-collection`, and SQLite persistence adapters use
 `<host>-db-sqlite-persistence`. A provider or host may contain several words.
-Core and support packages may start with `db-`.
+Core and support packages may start with `db-`. Any name that ends in
+`-collection` must end in `-db-collection`.
 
 `@tanstack/offline-transactions` keeps its existing name as the sole exception
 to the `db` word. Private packages, nested test apps, and examples are outside

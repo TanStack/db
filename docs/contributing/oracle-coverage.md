@@ -125,7 +125,10 @@ It checks `scripts/check-package-names.mjs` through its real CLI, over generated
 workspaces with one to four targets, combined faults, and private/nested
 discovery boundaries. Native probes inside validation branches supply reach;
 independent predictions and forced controls check their entries in both
-directions. Its edit-based model does not parse names with the linter's rules.
+directions. Weighted `collection`/`collections` stem words and constructed tails
+exercise suffix-shaped names across authored families, including namespace
+prefixes and spelling changes. Its edit-based model does not parse rendered
+names with the linter's rules.
 The existing PowerSync name is a
 fixed regression of the same comparison. See the
 [naming evidence](oracle-reviews/2026-11-27-package-naming.md) for RED/GREEN,

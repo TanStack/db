@@ -11,10 +11,15 @@
  * Stems have one to three words of at most twelve characters. They exclude
  * the reserved db word and standalone offline-transactions, which has its own
  * optional entry. Numeric prefixes distinguish targets in larger workspaces.
- * Healthy peers are optional; nested/example manifests are always ignored.
+ * These prefixes also supply a leading word for the suffix rule. Healthy
+ * peers are optional; nested/example manifests are always ignored.
  *
  * The model predicts the union of broken rules from authored edits, without
- * parsing names. It shares input rendering only for diagnostic paths. The
+ * parsing rendered names. A stem can itself end in collection: the contract
+ * follows the public name's shape, not its authored family. Stem position and
+ * the presence of a leading word decide that extra obligation. Spelling edits
+ * replace the final stem word; bare collection has no leading hyphen. The
+ * model shares input rendering only for diagnostic paths. The
  * driver writes real manifests and runs the actual Node CLI. At process exit
  * it checks the full diagnostic multiset, public count and exit status.
  * Diagnostic order and message prose are not contractual.
@@ -50,7 +55,7 @@ const script = fileURLToPath(
 const bridge = fileURLToPath(
   new URL(`./package-names-probe-bridge.mjs`, import.meta.url),
 )
-const word = fc
+const randomWord = fc
   .tuple(
     fc.constantFrom(...`abcdefghijklmnopqrstuvwxyz`),
     fc.array(fc.constantFrom(...`abcdefghijklmnopqrstuvwxyz0123456789`), {
@@ -61,6 +66,13 @@ const word = fc
     ([first, rest]) => first + rest.join(``),
     (value) => [value[0], value.slice(1).split(``)],
   )
+// Give suffix-shaped words real sampling weight rather than relying on a
+// character generator to spell a ten-letter contract keyword by chance.
+const word = fc.oneof(
+  { weight: 8, arbitrary: randomWord },
+  { weight: 1, arbitrary: fc.constant(`collection`) },
+  { weight: 1, arbitrary: fc.constant(`collections`) },
+)
 const stem = fc
   .array(word, { minLength: 1, maxLength: 3 })
   .map(
@@ -125,7 +137,7 @@ function manifestOf(spec, index, total) {
 
 // The reference unions independent authored edits. A private or missing-name
 // boundary determines whether there is a public string to judge at all.
-function owedRules(spec) {
+function owedRules(spec, prefixed) {
   if (spec.kind === `private`) return []
   if (spec.kind === `missing-name`) return [`name`]
   const rules = spec.faults
@@ -139,11 +151,23 @@ function owedRules(spec) {
           'missing-db': `db-segment`,
         })[fault],
     )
+  const missingDb = spec.faults.includes(`missing-db`)
+  const words = spec.stem.split(`-`)
+  const stemAtEnd =
+    spec.family === `internal` || (spec.family === `binding` && missingDb)
+  const leadingWord =
+    prefixed || words.length > 1 || (spec.family === `internal` && !missingDb)
+  const incidentalCollection =
+    stemAtEnd &&
+    leadingWord &&
+    words.at(-1) === `collection` &&
+    !spec.faults.includes(`kebab`)
   if (
-    spec.family === `collection` &&
-    spec.faults.some((fault) =>
-      [`missing-db`, `collection-order`].includes(fault),
-    )
+    incidentalCollection ||
+    (spec.family === `collection` &&
+      spec.faults.some((fault) =>
+        [`missing-db`, `collection-order`].includes(fault),
+      ))
   )
     rules.push(`collection-suffix`)
   return rules
@@ -151,7 +175,7 @@ function owedRules(spec) {
 function expectedNaming(history) {
   const errors = history.packages
     .flatMap((spec, index) =>
-      owedRules(spec).map(
+      owedRules(spec, history.packages.length > 1).map(
         (rule) =>
           `${manifestOf(spec, index, history.packages.length).directory}:${rule}`,
       ),
@@ -167,7 +191,9 @@ function expectedNaming(history) {
   }
 }
 function predictedBranches(history) {
-  const rules = history.packages.map(owedRules)
+  const rules = history.packages.map((spec) =>
+    owedRules(spec, history.packages.length > 1),
+  )
   const has = (rule) => rules.some((list) => list.includes(rule))
   return {
     valid:
@@ -272,7 +298,8 @@ const constructions = [
   {
     name: `valid`,
     state: `valid`,
-    build: (history) => changeFirst(history, { kind: `public`, faults: [] }),
+    build: (history) =>
+      changeFirst(history, { kind: `public`, family: `binding`, faults: [] }),
   },
   ...[`missing-db`, `scope`, `folder`, `kebab`].map((fault) => ({
     name: fault,
@@ -327,7 +354,40 @@ const constructions = [
     build: (history) =>
       changeFirst(history, { kind: `public`, faults: [`scope`, `kebab`] }),
   },
+  ...[
+    [`internal-collection-tail`, `internal`, [], `collection-suffix`],
+    [
+      `internal-collection-tail-missing-db`,
+      `internal`,
+      [`missing-db`],
+      `collection-suffix`,
+    ],
+    [
+      `binding-collection-tail-missing-db`,
+      `binding`,
+      [`missing-db`],
+      `collection-suffix`,
+    ],
+    [`internal-collection-tail-spelling`, `internal`, [`kebab`], `kebab`],
+    [`internal-plural-collection-tail`, `internal`, [], `valid`],
+  ].map(([name, family, faults, state]) => ({
+    name,
+    state,
+    build: (history) =>
+      changeFirst(history, {
+        kind: `public`,
+        family,
+        faults,
+        stem: [
+          ...history.packages[0].stem.split(`-`).slice(0, 2),
+          name === `internal-plural-collection-tail`
+            ? `collections`
+            : `collection`,
+        ].join(`-`),
+      }),
+  })),
 ]
+const states = [...new Set(constructions.map(({ state }) => state))]
 const validWorkspace = {
   packages: [
     { stem: `healthy`, family: `binding`, kind: `public`, faults: [] },
@@ -376,6 +436,20 @@ const mutants = [
     find: `globalThis.__oracleProbe?.('package-names#scope', true)`,
     replace: `globalThis.__oracleProbe?.('package-names#scope', false)`,
   },
+  {
+    id: `ignore-internal-collection-suffix`,
+    history: { constructed: `internal-collection-tail` },
+    law: `package naming`,
+    find: `      if (wrongSuffix) {`,
+    replace: `      if (wrongSuffix && !unscoped.startsWith('db-')) {`,
+  },
+  {
+    id: `ignore-suffix-after-missing-db`,
+    history: { constructed: `binding-collection-tail-missing-db` },
+    law: `package naming`,
+    find: `      if (wrongSuffix) {`,
+    replace: `      if (wrongSuffix && !missingDb) {`,
+  },
 ]
 
 oracleProperty({
@@ -390,7 +464,7 @@ oracleProperty({
     arbitrary,
     runs: 40,
     fixedSeeds: [27112026],
-    states: constructions.map(({ state }) => ({
+    states: states.map((state) => ({
       name: state,
       probe: `package-names#${state}`,
     })),
@@ -403,6 +477,63 @@ oracleProperty({
       { name: `existing PowerSync package omits db`, history: legacy },
       { name: `valid workspace`, history: validWorkspace },
       { name: `one scope failure`, history: singleFailure },
+      {
+        name: `internal collection tail`,
+        history: {
+          ...validWorkspace,
+          packages: [
+            {
+              stem: `task-collection`,
+              family: `internal`,
+              kind: `public`,
+              faults: [],
+            },
+          ],
+        },
+      },
+      {
+        name: `binding collection tail without db`,
+        history: {
+          ...validWorkspace,
+          packages: [
+            {
+              stem: `task-collection`,
+              family: `binding`,
+              kind: `public`,
+              faults: [`missing-db`],
+            },
+          ],
+        },
+      },
+      {
+        name: `bare collection without a leading word`,
+        history: {
+          ...validWorkspace,
+          packages: [
+            {
+              stem: `collection`,
+              family: `binding`,
+              kind: `public`,
+              faults: [`missing-db`],
+            },
+          ],
+        },
+      },
+      {
+        name: `workspace prefix before bare collection`,
+        history: {
+          ...validWorkspace,
+          packages: [
+            validWorkspace.packages[0],
+            {
+              stem: `collection`,
+              family: `binding`,
+              kind: `public`,
+              faults: [`missing-db`],
+            },
+          ],
+        },
+      },
     ],
   },
   model: expectedNaming,
@@ -416,10 +547,13 @@ oracleProperty({
       expected,
     ) ?? pass,
   probeHistories: Object.fromEntries(
-    constructions.map(({ name, state }) => [
+    states.map((state) => [
       state,
       {
-        entered: { constructed: name },
+        entered: {
+          constructed: constructions.find((entry) => entry.state === state)
+            .name,
+        },
         notEntered: {
           fixed:
             state === `valid` ||

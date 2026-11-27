@@ -327,7 +327,7 @@ export function registerSharedClientConformance(
     owns,
     law: {
       statement: `Same-table source Collections expose the complete synced table, including healthy-peer changes during a scoped rejection. Scoped health retains distinct errors until recovery or release; cleanup preserves the surviving sync run's delivery and resources, and releases pending SDK waits owned by the retired run. Passive cached startup needs no remote checkpoint.`,
-      authority: `PowerSync Direct public table/streams options and docs/collections/powersync-direct-db-collection.md; glossary cleanup; maintainer decision 2026-11-24 N07: a successful full checkpoint clears the connection cause while retaining rejected-stream causes.`,
+      authority: `PowerSync Direct public table/streams options and docs/collections/powersync-direct-collection.md; glossary cleanup; maintainer decision 2026-11-24 N07: a successful full checkpoint clears the connection cause while retaining rejected-stream causes.`,
       limits: `Two eager Collections, passive or distinct explicit streams, three keys, request-scoped rejection/recovery or one synchronous application status-listener stream change, one cleanup and a later complete checkpoint over controlled HTTP. No deployed service, persistence, mutations or subsets.`,
     },
     histories: {
