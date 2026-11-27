@@ -8571,3 +8571,174 @@ describe(`include() argument`, () => {
     ).toThrow(`include() must wrap a subquery builder`)
   })
 })
+
+describe(`distinct in child queries`, () => {
+  type User = { id: number; name: string }
+  type TodoList = { id: number; ownerId: number; name: string }
+  type Todo = { id: number; listId: number; assigneeId: number; title: string }
+
+  // Home has "Buy milk" twice and "Call mom"; Work has "Buy milk" once;
+  // Errands has no todos. Ana is assigned both of Home's "Buy milk" todos and
+  // Work's; Ben is assigned "Call mom".
+  function createSources() {
+    const users = createCollection(
+      localOnlyCollectionOptions<User>({
+        getKey: (user) => user.id,
+        initialData: [
+          { id: 10, name: `Ana` },
+          { id: 20, name: `Ben` },
+        ],
+      }),
+    )
+    const todoLists = createCollection(
+      localOnlyCollectionOptions<TodoList>({
+        getKey: (list) => list.id,
+        initialData: [
+          { id: 1, ownerId: 10, name: `Home` },
+          { id: 2, ownerId: 10, name: `Work` },
+          { id: 3, ownerId: 20, name: `Errands` },
+        ],
+      }),
+    )
+    const todos = createCollection(
+      localOnlyCollectionOptions<Todo>({
+        getKey: (todo) => todo.id,
+        initialData: [
+          { id: 1, listId: 1, assigneeId: 10, title: `Buy milk` },
+          { id: 2, listId: 1, assigneeId: 10, title: `Buy milk` },
+          { id: 3, listId: 1, assigneeId: 20, title: `Call mom` },
+          { id: 4, listId: 2, assigneeId: 10, title: `Buy milk` },
+        ],
+      }),
+    )
+    return { users, todoLists, todos }
+  }
+
+  type Sources = ReturnType<typeof createSources>
+
+  function distinctTitles(q: any, { todos }: Sources, list: any) {
+    return q
+      .from({ todo: todos })
+      .where(({ todo }: any) => eq(todo.listId, list.id))
+      .select(({ todo }: any) => ({ title: todo.title }))
+      .distinct()
+  }
+
+  const expectedTitles = {
+    1: [{ title: `Buy milk` }, { title: `Call mom` }],
+    2: [{ title: `Buy milk` }],
+    3: [],
+  }
+
+  function titlesByList(rows: Array<any>) {
+    return Object.fromEntries(
+      rows.map((row) => [
+        row.id,
+        plainRows(row.titles).sort((a: any, b: any) =>
+          a.title.localeCompare(b.title),
+        ),
+      ]),
+    )
+  }
+
+  for (const form of [`toArray`, `materialize`, `include`] as const) {
+    it(`keeps each parent's distinct child rows [${form}]`, async () => {
+      const sources = createSources()
+      const wrap = { toArray, materialize, include }[form] as any
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ list: sources.todoLists }).select(({ list }) => ({
+          id: list.id,
+          titles: wrap(distinctTitles(q, sources, list)),
+        })),
+      )
+      await collection.preload()
+
+      expect(titlesByList(collection.toArray)).toEqual(expectedTitles)
+
+      // One of Home's two "Buy milk" todos leaves; the other still holds it.
+      sources.todos.delete(1)
+      await flushPromises()
+      expect(titlesByList(collection.toArray)).toEqual(expectedTitles)
+
+      // Work's only "Buy milk" leaves; Home keeps "Buy milk".
+      sources.todos.delete(4)
+      await flushPromises()
+      expect(titlesByList(collection.toArray)).toEqual({
+        ...expectedTitles,
+        2: [],
+      })
+
+      // Errands gains "Buy milk" while Home already shows it.
+      sources.todos.insert({
+        id: 5,
+        listId: 3,
+        assigneeId: 10,
+        title: `Buy milk`,
+      })
+      await flushPromises()
+      expect(titlesByList(collection.toArray)).toEqual({
+        ...expectedTitles,
+        2: [],
+        3: [{ title: `Buy milk` }],
+      })
+    })
+  }
+
+  it(`limits each parent's distinct child rows separately`, async () => {
+    const sources = createSources()
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ list: sources.todoLists }).select(({ list }) => ({
+        id: list.id,
+        assignees: toArray(
+          q
+            .from({ todo: sources.todos })
+            .where(({ todo }) => eq(todo.listId, list.id))
+            .innerJoin({ user: sources.users }, ({ todo, user }) =>
+              eq(todo.assigneeId, user.id),
+            )
+            .select(({ user }) => ({ id: user.id, name: user.name }))
+            .distinct()
+            .orderBy(({ user }) => user.id)
+            .limit(1),
+        ),
+      })),
+    )
+    await collection.preload()
+
+    expect(
+      Object.fromEntries(
+        collection.toArray.map((row) => [
+          row.id,
+          sortedPlainRows(row.assignees),
+        ]),
+      ),
+    ).toEqual({
+      1: [{ id: 10, name: `Ana` }],
+      2: [{ id: 10, name: `Ana` }],
+      3: [],
+    })
+  })
+
+  it(`keeps each nested parent's distinct child rows`, async () => {
+    const sources = createSources()
+    const collection = createLiveQueryCollection((q) =>
+      q.from({ owner: sources.users }).select(({ owner }) => ({
+        id: owner.id,
+        lists: toArray(
+          q
+            .from({ list: sources.todoLists })
+            .where(({ list }) => eq(list.ownerId, owner.id))
+            .select(({ list }) => ({
+              id: list.id,
+              titles: toArray(distinctTitles(q, sources, list)),
+            })),
+        ),
+      })),
+    )
+    await collection.preload()
+
+    expect(
+      titlesByList(collection.toArray.flatMap((owner) => owner.lists)),
+    ).toEqual(expectedTitles)
+  })
+})

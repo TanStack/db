@@ -58,6 +58,7 @@ import type {
   AggregationCell,
   CorrelationDomainCell,
   DerivedResultCell,
+  DistinctRelationCell,
   GrammarCell,
   JoinCell,
   LexicalScopeCell,
@@ -115,7 +116,7 @@ import type {
  * Each grammar family has a small JavaScript model for its own result. The
  * production side compiles the matching live query and crosses the full
  * boundary. The suite expands the grammar across three materialization forms
- * and three checkpoints for 819 explicit observations. The public-field family
+ * and three checkpoints for 855 explicit observations. The public-field family
  * adds 1200 observations across five admission stages and four receiving paths.
  * This finite matrix does
  * not establish arbitrary query structures, values, or update histories.
@@ -2192,6 +2193,116 @@ async function runPublicFieldOverlapPaths(cell: PublicFieldOverlapCell) {
     )
 }
 
+type DistinctCandidateRow = CandidateRow
+
+// Law: an include is one relation per parent row, so DISTINCT removes equal
+// values within one parent's relation only. Each parent keeps the distinct
+// values of its group's candidates, at most its parameter under
+// `parent-filter`; `ordered-limit` keeps the largest of them.
+function expectedDistinctValues(
+  parents: ControlledCollection<{
+    id: number
+    group: number
+    parameter: number
+  }>,
+  candidates: ControlledCollection<DistinctCandidateRow>,
+  { context, window }: DistinctRelationCell,
+  parentId: number,
+): Array<number> {
+  const parent = parents.collection.get(parentId)!
+  const values = [
+    ...new Set(
+      candidates.collection.toArray
+        .filter(
+          (candidate) =>
+            candidate.parentGroup === parent.group &&
+            (context === `correlation-only` ||
+              candidate.value <= parent.parameter),
+        )
+        .map(({ value }) => value),
+    ),
+  ].sort((left, right) => left - right)
+  return window === `ordered-limit` ? values.slice(-1) : values
+}
+
+// Parents 1 and 2 share group 1, so they share a correlation key; under
+// `parent-filter` their parameters give them different parent contexts.
+// Candidates repeat value 1 within group 1 and across groups, so a DISTINCT
+// keyed on the value alone, or on the correlation key without the parent
+// context, hands a shared value to only one parent.
+async function runDistinctRelationCell(
+  cell: DistinctRelationCell,
+): Promise<void> {
+  const name = `distinct-${cell.context}-${cell.window}`
+  const parents = createGrammarCollection(`${name}-parents`, [
+    { id: 1, group: 1, parameter: 1 },
+    { id: 2, group: 1, parameter: 2 },
+    { id: 3, group: 2, parameter: 2 },
+  ])
+  const candidates = createGrammarCollection<DistinctCandidateRow>(
+    `${name}-candidates`,
+    [
+      { id: 10, parentGroup: 1, value: 1 },
+      { id: 20, parentGroup: 1, value: 1 },
+      { id: 30, parentGroup: 1, value: 2 },
+      { id: 40, parentGroup: 2, value: 1 },
+    ],
+  )
+
+  const live = createLiveQueryCollection((q) =>
+    q
+      .from({ parent: parents.collection })
+      .orderBy(({ parent }) => parent.id)
+      .select(({ parent }) => {
+        let correlated = q
+          .from({ candidate: candidates.collection })
+          .where(({ candidate }) => eq(candidate.parentGroup, parent.group))
+        if (cell.context === `parent-filter`) {
+          correlated = correlated.where(({ candidate }) =>
+            lte(candidate.value, parent.parameter),
+          )
+        }
+        const distinctValues = correlated
+          .select(({ candidate }) => ({ value: candidate.value }))
+          .distinct()
+        return {
+          id: parent.id,
+          ...includeInEveryForm(
+            cell.window === `ordered-limit`
+              ? distinctValues
+                  .orderBy(({ candidate }) => candidate.value, `desc`)
+                  .limit(1)
+              : distinctValues,
+          ),
+        }
+      }),
+  )
+
+  const values = (rows: Iterable<{ value: number }>) =>
+    [...rows].map(({ value }) => value).sort((left, right) => left - right)
+  const assertResult = () => {
+    for (const parentId of [1, 2, 3]) {
+      expectEveryForm(
+        live.get(parentId)!,
+        values,
+        expectedDistinctValues(parents, candidates, cell, parentId),
+      )
+    }
+  }
+
+  await runWithCleanup(live, [parents, candidates], async () => {
+    await live.preload()
+    assertResult()
+
+    parents.write(`update`, { id: 2, group: 1, parameter: 1 })
+    assertResult()
+
+    candidates.write(`delete`, { id: 10, parentGroup: 1, value: 1 })
+    candidates.write(`insert`, { id: 50, parentGroup: 2, value: 2 })
+    assertResult()
+  })
+}
+
 async function runGrammarCell(cell: GrammarCell): Promise<void> {
   switch (cell.family) {
     case `parent-projection`:
@@ -2210,6 +2321,8 @@ async function runGrammarCell(cell: GrammarCell): Promise<void> {
       return runUnionIdentityCell(cell)
     case `derived-result`:
       return runDerivedResultCell(cell)
+    case `distinct-relation`:
+      return runDistinctRelationCell(cell)
     case `namespace-collision`:
       return runNamespaceCollisionCell(cell)
     case `public-field`:

@@ -557,6 +557,8 @@ describe(`route-context transport grammar and checks`, () => {
       routeContextGrammar.derivedResult.boundaries.length *
         routeContextGrammar.derivedResult.selections.length *
         routeContextGrammar.derivedResult.domains.length +
+      routeContextGrammar.distinctRelation.contexts.length *
+        routeContextGrammar.distinctRelation.windows.length +
       routeContextGrammar.namespaceCollision.locations.length *
         routeContextGrammar.namespaceCollision.boundaries.length *
         routeContextGrammar.namespaceCollision.names.length +
@@ -576,7 +578,7 @@ describe(`route-context transport grammar and checks`, () => {
       ).length *
         materializationForms.length *
         checkpoints.length,
-    ).toBe(819)
+    ).toBe(855)
     expect(
       grammarCells.filter((cell) => cell.family === `public-field`).length *
         fieldStages.length *
