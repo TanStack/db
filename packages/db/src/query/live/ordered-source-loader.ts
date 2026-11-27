@@ -290,6 +290,10 @@ export class OrderedSourceLoader {
     const { index, limit, offset, requiresFullSource } = this.info
     if (index) this.subscription.setOrderByIndex(index)
     if (limit === 0) return
+    // As in loadMore, a joined filter's first request waits for joined work;
+    // the graph pass after that work settles issues it.
+    if (this.info.joinedFilterSourceIds?.length && this.hasPendingJoinedWork())
+      return
     if (requiresFullSource) {
       this.loadFullSource()
       return
@@ -987,7 +991,11 @@ export class OrderedSourceLoader {
         !this.pending &&
         this.graphHasProcessedInput(graphInputRevision)
       ) {
+        const continuation = this.stagedContinuation
         this.consumeStagedContinuation()
+        // Staged again to wait for joined work: that work's settlement
+        // resumes it, and nothing here can change until then.
+        if (this.stagedContinuation === continuation) break
       }
     } finally {
       this.drainingNoInputContinuations = false

@@ -429,10 +429,21 @@ export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
  */
 export type CleanupFn = (() => void) | (() => Promise<void>)
 
+/** See `SyncConfigRes.isSubsetLoaded`. */
+export type IsSubsetLoadedFn = (options: LoadSubsetOptions) => boolean
+
 export type SyncConfigRes = {
   cleanup?: CleanupFn
   loadSubset?: LoadSubsetFn
   unloadSubset?: UnloadSubsetFn
+  /**
+   * Whether the Collection already holds every row of the subset `options`
+   * names, so `loadSubset` would answer `true` at once. It must be a local
+   * check: no provider work, no state change. A live query that has not
+   * started acquisition (no subscriber or preload yet) publishes such a
+   * subset from those rows; acquisition still starts when it resumes.
+   */
+  isSubsetLoaded?: IsSubsetLoadedFn
   /**
    * Optional provider-controlled restart for a lost managed cache claim.
    * Retire old provider callbacks synchronously and start the replacement only

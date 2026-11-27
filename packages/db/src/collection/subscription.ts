@@ -307,20 +307,76 @@ export class CollectionSubscription
         if (status !== `loading` && status !== `ready`) return
         const syncRunGeneration = this.collection._sync.getSyncRunGeneration()
         const replayState = this.truncateReplayState
-        if (
-          this.subsetDemands.some(
-            (demand) => demand.acquisitionState === `detached`,
-          )
-        ) {
-          this.setStatus(`loadingSubset`)
-        }
+        this.reconcileDeferredDemands(replayState)
         queueMicrotask(() => {
           if (this.truncateReplayState === replayState) {
+            // A source that becomes ready inside its own sync() emits before
+            // it returns the hook, so ask again once it has.
+            if (
+              this.defersAcquisition &&
+              this.isSyncRunGenerationCurrent(syncRunGeneration)
+            )
+              this.reconcileDeferredDemands(replayState)
             this.restartDetachedDemands(syncRunGeneration)
           }
         })
       }),
+      // A peer's load can make a deferred demand held while the source stays ready.
+      this.collection.on(`loadingSubset:change`, ({ isLoadingSubset }) => {
+        if (!isLoadingSubset) this.reconcileHeldDeferredDemands()
+      }),
     ]
+  }
+
+  /** Recheck deferred demands after rows arrived outside a status change. */
+  private reconcileHeldDeferredDemands(): void {
+    if (
+      this.defersAcquisition &&
+      !this.unsubscribed &&
+      !this.truncateReplayState &&
+      this.subsetDemands.some(
+        (demand) => demand.acquisitionState === `detached`,
+      )
+    ) {
+      this.reconcileDeferredDemands(undefined)
+    }
+  }
+
+  /**
+   * Settle the deferred demands whose rows are held, and report
+   * `loadingSubset` exactly while a detached demand still owes a load.
+   */
+  private reconcileDeferredDemands(
+    replayState: TruncateReplayState | undefined,
+  ): void {
+    if (this.defersAcquisition && !replayState) {
+      // Rows that became held answer a deferred demand's waiting caller.
+      for (const demand of this.subsetDemands) {
+        if (
+          demand.acquisitionState === `detached` &&
+          this.isSubsetLoadedLocally(demand.requestOptions)
+        ) {
+          demand.initialResult?.resolve()
+        }
+      }
+    }
+    if (
+      this.subsetDemands.some(
+        (demand) =>
+          demand.acquisitionState === `detached` &&
+          // A deferred demand whose rows are held owes no load yet.
+          !(
+            this.defersAcquisition &&
+            this.isSubsetLoadedLocally(demand.requestOptions)
+          ),
+      )
+    ) {
+      this.setStatus(`loadingSubset`)
+    } else if (this.defersAcquisition && this.status === `loadingSubset`) {
+      // The queued restart returns while acquisition is deferred, so a
+      // demand that became held leaves the loading state here.
+      this.setReadyIfIdle()
+    }
   }
 
   /** Whether this subscription still defers provider work. */
@@ -1187,6 +1243,16 @@ export class CollectionSubscription
     }
   }
 
+  private isSubsetLoadedLocally(options: LoadSubsetOptions): boolean {
+    const isSubsetLoaded = this.collection._sync.syncIsSubsetLoadedFn
+    if (!isSubsetLoaded) return false
+    try {
+      return isSubsetLoaded(options) === true
+    } catch {
+      return false
+    }
+  }
+
   /** Start and retain the first acquisition for one logical subset demand. */
   private startSubsetDemand(requestOptions: LoadSubsetOptions): {
     demand: SubsetDemand
@@ -1208,11 +1274,13 @@ export class CollectionSubscription
     const replayState = this.truncateReplayState
     const replayAttempt = replayState?.currentAttempt
     try {
+      const deferred =
+        this.defersAcquisition &&
+        this.collection.config.syncMode === `on-demand`
       const detached =
         this.collection.status === `cleaned-up` ||
         // A deferring subscription starts no acquisition attempt until it resumes.
-        (this.defersAcquisition &&
-          this.collection.config.syncMode === `on-demand`) ||
+        deferred ||
         // Ready/error callbacks can run before sync returns its loader. Idle
         // deferred starts still acquire through the sync manager's queue.
         (this.collection.config.syncMode === `on-demand` &&
@@ -1252,6 +1320,15 @@ export class CollectionSubscription
             initialResult.promise,
             requestOptions.signal,
           )
+        // Rows the Collection already holds whole answer a deferred demand
+        // now. Its acquisition still starts when the subscription resumes.
+        if (
+          deferred &&
+          !replayState &&
+          this.isSubsetLoadedLocally(requestOptions)
+        ) {
+          return { demand, result: true, started: false }
+        }
         return { demand, result: initialResult.promise, started: false }
       }
       const syncRunGeneration = acquisition.syncRunGeneration
@@ -1312,6 +1389,14 @@ export class CollectionSubscription
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     if (this.unsubscribed) return false
+    try {
+      return this.emitChanges(changes)
+    } finally {
+      this.reconcileHeldDeferredDemands()
+    }
+  }
+
+  private emitChanges(changes: Array<ChangeMessage<any, any>>): boolean {
     const newChanges = this.filterAndFlipChanges(changes)
 
     // Reconciliation can reduce a source delta to no visible change. Do not
