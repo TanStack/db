@@ -1330,9 +1330,11 @@ carries it pages like a lexical term. `orderBy`, `limit` and cursors reach
 provider and the local evaluator read the same bound. Distinct strings can tie
 under the collation, so the rows equal to a page boundary are read by a
 separate request whose `where` is a collated `gte` and `lte` on the boundary
-value, with no `orderBy`, `limit` or cursor; a cursor's `whereCurrent` takes
-the same form. A provider must return every row the comparator treats as equal
-to that value, not only exact matches. An index declines a
+value, joined with `and` to the subscription's source filter when it has one,
+with no `orderBy`, `limit` or cursor; a cursor's `whereCurrent` takes the same
+form. A provider must return every row that matches the source filter and that
+the comparator treats as equal to that value, not only exact matches. An index
+declines a
 collated comparison, because its range order is not the collation's. Core does
 not verify the statement.
 
