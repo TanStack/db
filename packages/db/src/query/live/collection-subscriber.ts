@@ -80,6 +80,12 @@ export class CollectionSubscriber<
     )
   }
 
+  private isJoinedFilterSource(): boolean {
+    return Object.values(
+      this.collectionConfigBuilder.optimizableOrderByCollections,
+    ).some((info) => info.joinedFilterSourceIds?.includes(this.sourceId))
+  }
+
   // A live-query Collection starts no provider work on its own: it defers
   // acquisition until it has a subscriber or a preload.
   private defersAcquisition(): boolean {
@@ -130,6 +136,8 @@ export class CollectionSubscriber<
     // BEFORE any snapshot is requested, preventing race conditions.
     // Used as a fallback for status transitions not covered by direct tracking
     // (e.g., truncate-triggered reloads that call trackLoadSubsetPromise directly).
+    const syncRunGeneration =
+      this.collectionConfigBuilder.getSyncRunGeneration()
     const onStatusChange = (event: SubscriptionStatusChangeEvent) => {
       if (this.collectionConfigBuilder.isLazySource(this.sourceId)) {
         // A joined source's finished load can clear the gate that holds an
@@ -149,6 +157,13 @@ export class CollectionSubscriber<
         if (deferred) {
           this.subscriptionLoadingPromises.delete(subscription)
           deferred.resolve()
+        }
+        // An eager joined source's settled load may also deliver no row: run
+        // the graph so a staged refill resumes and held changes publish.
+        if (this.isJoinedFilterSource()) {
+          this.collectionConfigBuilder.scheduleGraphRunIfSyncRunCurrent(
+            syncRunGeneration,
+          )
         }
       }
     }

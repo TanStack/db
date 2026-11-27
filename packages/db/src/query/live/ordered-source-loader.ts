@@ -987,7 +987,11 @@ export class OrderedSourceLoader {
         !this.pending &&
         this.graphHasProcessedInput(graphInputRevision)
       ) {
+        const continuation = this.stagedContinuation
         this.consumeStagedContinuation()
+        // Staged again to wait for joined work: that work's settlement
+        // resumes it, and nothing here can change until then.
+        if (this.stagedContinuation === continuation) break
       }
     } finally {
       this.drainingNoInputContinuations = false
