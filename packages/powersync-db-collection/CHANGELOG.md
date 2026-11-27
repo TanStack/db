@@ -1,5 +1,16 @@
 # @tanstack/powersync-db-collection
 
+## 1.0.0-rc.1.6
+
+### Patch Changes
+
+- Abort stale persisted source writes and preserve scoped recovery after cache-claim expiry. Bind native PowerSync confirmations to the writing Collection's sync run. Reject impossible TrailBase confirmations promptly while retaining fresh evidence across delayed responses and preventing older events from confirming new writes. ([#2446](https://github.com/TanStack/db/pull/2446))
+
+- Preserve restored and accepted rows when Convex applies partial results. Stop native PowerSync tracking after row decoding fails and preserve unrestricted demand when filtered demands join. Require fresh TrailBase events to confirm each mutation. ([#2446](https://github.com/TanStack/db/pull/2446))
+
+- Updated dependencies [[`55e8692`](https://github.com/TanStack/db/commit/55e8692a78c6ef4b6b58dff05c1e8cd2d5d7d260), [`83c8ebd`](https://github.com/TanStack/db/commit/83c8ebdf60d8a3bd5d2e2aa8c12870023691c634), [`01f7b32`](https://github.com/TanStack/db/commit/01f7b324cd6ff6445e986f5b765d28fd73e7f5ac)]:
+  - @tanstack/db@1.0.0-rc.1.6
+
 ## 1.0.0-rc.1.5
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/powersync-direct-collection",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0-rc.1",
   "description": "Sync from PowerSync directly to TanStack DB collections",
   "author": "POWERSYNC",
   "license": "MIT",
