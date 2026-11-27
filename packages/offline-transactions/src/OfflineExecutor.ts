@@ -243,14 +243,16 @@ export class OfflineExecutor {
           this.isLeaderState = isLeader
           if (!isLeader) this.executor?.pause()
 
-          if (this.config.onLeadershipChange) {
-            this.config.onLeadershipChange(isLeader)
-          }
-
+          // Replay starts first, so a failing application callback cannot
+          // stop a takeover from sending the outbox.
           if (isLeader) {
             this.loadAndReplayTransactions().catch((error) => {
               console.warn(`Failed to load and replay transactions:`, error)
             })
+          }
+
+          if (this.config.onLeadershipChange) {
+            this.config.onLeadershipChange(isLeader)
           }
         },
       )
