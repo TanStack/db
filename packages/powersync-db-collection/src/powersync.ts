@@ -861,6 +861,18 @@ function createPowerSyncCollectionConfig<
             // A missing predicate supports every row when demands are unioned.
             .map((demand) => demand.options.where ?? new IR.Value(true))
 
+        // A subset without a `where` wants every row, so the union has none.
+        // `or()` would wrap an undefined argument as a value that compiles to
+        // NULL and match nothing.
+        const combineWhere = (
+          active: ReturnType<typeof activeWhereExpressions>,
+        ) =>
+          active.includes(undefined)
+            ? undefined
+            : active.length === 1
+              ? active[0]
+              : or(active[0]!, active[1]!, ...active.slice(2))
+
         // One reconciliation owns every queued revision so callers cannot
         // settle against a stale trigger configuration.
         // Set while a failed rebuild may have left the source untracked.
@@ -889,10 +901,7 @@ function createPowerSyncCollectionConfig<
                 ? new Set(collection.keys())
                 : undefined
               if (active.length > 0) {
-                const combinedWhere =
-                  active.length === 1
-                    ? active[0]
-                    : or(active[0], active[1], ...active.slice(2))
+                const combinedWhere = combineWhere(active)
                 const compiledNewData = compileSQLite(
                   { where: combinedWhere },
                   { jsonColumn: 'NEW.data' },
@@ -1132,10 +1141,7 @@ function createPowerSyncCollectionConfig<
             if (active.length === 0) {
               evictionSQL = `SELECT id FROM ${viewName} WHERE ${departingWhereSQL}`
             } else {
-              const combinedRemaining =
-                active.length === 1
-                  ? active[0]!
-                  : or(active[0], active[1], ...active.slice(2))
+              const combinedRemaining = combineWhere(active)
               const compiledRemaining = compileSQLite({
                 where: combinedRemaining,
               })
