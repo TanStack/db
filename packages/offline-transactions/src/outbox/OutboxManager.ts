@@ -13,9 +13,9 @@ import type { Collection } from '@tanstack/db'
 export class OutboxTransactionNotFoundError extends Error {}
 
 /**
- * A write's outcome, kept for a writer in another tab: a rejection, or a
- * marker that the write's call is still running after its row was removed.
- * Each recording has its own key, so a recorder withdraws only its own.
+ * A write's rejection, kept for a writer in another tab, or `pending` when a
+ * record cannot be read and the outcome is unknown. Each recording has its
+ * own key.
  */
 export type OutboxOutcome = {
   error?: { name: string; message: string }
@@ -50,11 +50,10 @@ function readOutcome(data: string): OutboxOutcome | undefined {
     return undefined
   }
   if (typeof value !== `object` || value === null) return undefined
-  const { error, pending, at } = value as Record<string, unknown>
+  const { error, at } = value as Record<string, unknown>
   if (typeof at !== `number`) return undefined
   const recorded = readError(error)
-  if (recorded) return { error: recorded, at }
-  return pending === true ? { pending: true, at } : undefined
+  return recorded ? { error: recorded, at } : undefined
 }
 
 export class OutboxManager {
@@ -156,58 +155,34 @@ export class OutboxManager {
     }
   }
 
-  /** Records a rejection before its row is removed; returns its token. */
-  async recordRejection(id: string, error: Error): Promise<string> {
-    return this.recordOutcome(id, {
+  /** Records a rejection before its row is removed. */
+  async recordRejection(id: string, error: Error): Promise<void> {
+    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+    const outcome: OutboxOutcome = {
       error: { name: error.name, message: error.message },
       at: Date.now(),
-    })
-  }
-
-  /** Records that a removed write's call is still running. */
-  async recordPending(id: string): Promise<string> {
-    return this.recordOutcome(id, { pending: true, at: Date.now() })
-  }
-
-  private async recordOutcome(
-    id: string,
-    outcome: OutboxOutcome,
-  ): Promise<string> {
-    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+    }
     await this.storage.set(
       `${this.outcomeKeyPrefix(id)}${token}`,
       JSON.stringify(outcome),
     )
-    return token
-  }
-
-  /** Removes one recording, leaving any another recorder made. */
-  async withdrawOutcome(id: string, token: string): Promise<void> {
-    await this.storage.delete(`${this.outcomeKeyPrefix(id)}${token}`)
   }
 
   /**
-   * A rejection if any recording holds one, else a running marker. A record
-   * that cannot be read leaves the outcome unknown, so it reads as running.
+   * A rejection if any recording holds one. A record that cannot be read
+   * leaves the outcome unknown, so it reads as pending.
    */
   async getOutcome(id: string): Promise<OutboxOutcome | null> {
-    for (;;) {
-      let found: OutboxOutcome | null = null
-      let withdrawn = false
-      for (const key of await this.outcomeKeys(id)) {
-        const data = await this.storage.get(key)
-        // A marker is withdrawn only after any rejection that replaces it
-        // is recorded, so a listing that lost a record is taken again.
-        if (data === null) {
-          withdrawn = true
-          continue
-        }
-        const outcome = readOutcome(data) ?? { pending: true, at: 0 }
-        if (outcome.error) return outcome
-        found = outcome
-      }
-      if (!withdrawn) return found
+    let found: OutboxOutcome | null = null
+    for (const key of await this.outcomeKeys(id)) {
+      const data = await this.storage.get(key)
+      // Its writer or a prune removed it meanwhile.
+      if (data === null) continue
+      const outcome = readOutcome(data) ?? { pending: true, at: 0 }
+      if (outcome.error) return outcome
+      found = outcome
     }
+    return found
   }
 
   async removeOutcome(id: string): Promise<void> {

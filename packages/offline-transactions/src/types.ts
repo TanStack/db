@@ -179,10 +179,8 @@ export interface TransactionSignaler {
   ownsWrite?: (transactionId: string) => boolean
   /** A call for this transaction starts or ends in this executor. */
   trackIssued?: (transactionId: string, active: boolean) => void
-  /** A removed write's call finished: its running marker goes. */
-  finishRunningRemoval?: (transactionId: string) => Promise<void>
-  /** A removal took this write's row while its call ran. */
-  removedWhileRunning?: (transactionId: string) => boolean
+  /** A removal in this runtime is deciding this write. */
+  isRemoving?: (transactionId: string) => boolean
   resolveTransaction: (transactionId: string, result: any) => void
   rejectTransaction: (
     transactionId: string,

@@ -45,14 +45,6 @@ export class TransactionExecutor {
   private cleanupTimer: ReturnType<typeof setTimeout> | null = null
   private cleanupAttempts = 0
   private cleaning = false
-  // Unstarted writes a removal is deciding, by how many removals hold each.
-  private readonly removing = new Map<string, number>()
-  // Writes a removal took while their call ran, with the outcome whose
-  // record failed. Retried in any tab state until disposal.
-  private readonly unpublished = new Map<string, Error | undefined>()
-  private publishTimer: ReturnType<typeof setTimeout> | null = null
-  private publishAttempts = 0
-  private paused = false
 
   constructor(
     scheduler: KeyScheduler,
@@ -153,7 +145,6 @@ export class TransactionExecutor {
           !(await this.removeSettledTransaction(
             deletionPending,
             !transaction.outboxPhase,
-            terminalError,
           ))
         )
           return
@@ -287,13 +278,7 @@ export class TransactionExecutor {
         )
       try {
         // A rejection waits until it is recorded and its row removed.
-        if (
-          !(await this.removeSettledTransaction(
-            rejectionPending,
-            true,
-            terminalError,
-          ))
-        )
+        if (!(await this.removeSettledTransaction(rejectionPending, true)))
           return
       } catch (storageError) {
         this.offlineExecutor.rejectTransaction(transaction.id, terminalError)
@@ -337,20 +322,13 @@ export class TransactionExecutor {
       // that landed meanwhile must not settle it at a later replay.
       if (this.offlineExecutor.recordsOutcomes)
         await this.outbox.removeDecisions(transaction.id).catch(() => {})
-      // A removal took the row meanwhile; the update may have restored it.
-      if (this.offlineExecutor.removedWhileRunning?.(transaction.id)) {
-        await this.outbox.remove(transaction.id)
-        this.scheduler.markCompleted(transaction)
-        await this.publishRemovedOutcome(transaction.id, error)
-        return
-      }
     } catch (persistError) {
       // Public removal can finish while the named mutation function runs.
       // The removed row cannot be retried, but its caller still owns the
       // provider failure and later queued work must be able to run.
       if (persistError instanceof OutboxTransactionNotFoundError) {
         this.scheduler.markCompleted(transaction)
-        await this.publishRemovedOutcome(transaction.id, error)
+        this.offlineExecutor.rejectTransaction(transaction.id, error)
         return
       }
       throw persistError
@@ -359,15 +337,10 @@ export class TransactionExecutor {
     }
   }
 
-  /**
-   * False when this call leaves the write unsettled: its rejection could not
-   * be recorded, or a removal took the row and its outcome is published
-   * separately.
-   */
+  /** False when its rejection could not be recorded and the row stays. */
   private async removeSettledTransaction(
     transaction: OfflineTransaction,
     persistMarker: boolean,
-    outcome: Error | undefined,
   ): Promise<boolean> {
     // Read by this function's development-only oracle probes, as above.
     const probing =
@@ -379,21 +352,17 @@ export class TransactionExecutor {
         try {
           await this.outbox.update(transaction.id, transaction)
         } catch (error) {
-          // A public removal can finish while the provider is still running;
-          // only its outcome is left to publish.
-          if (error instanceof OutboxTransactionNotFoundError) {
-            this.scheduler.markCompleted(transaction)
-            await this.publishRemovedOutcome(transaction.id, outcome)
-            return false
+          // A removal in another runtime can finish while the provider runs.
+          if (!(error instanceof OutboxTransactionNotFoundError)) {
+            // Development-only oracle probe; a production build removes it.
+            probing &&
+              (
+                globalThis as {
+                  __oracleProbe?: (name: string, condition: unknown) => void
+                }
+              ).__oracleProbe?.(`offline-transactions#phase-write-fault`, true)
+            throw error
           }
-          // Development-only oracle probe; a production build removes it.
-          probing &&
-            (
-              globalThis as {
-                __oracleProbe?: (name: string, condition: unknown) => void
-              }
-            ).__oracleProbe?.(`offline-transactions#phase-write-fault`, true)
-          throw error
         }
       }
       // A writer in another tab that misses the settlement message reads a
@@ -425,10 +394,7 @@ export class TransactionExecutor {
         }
       }
       await this.outbox.remove(transaction.id)
-      // The call stops counting as running before its marker is looked up,
-      // so a removal that registers a marker afterwards sees it finished.
       this.scheduler.markCompleted(transaction)
-      await this.offlineExecutor.finishRunningRemoval?.(transaction.id)
       return true
     } catch (error) {
       const storageError = toError(error)
@@ -542,7 +508,7 @@ export class TransactionExecutor {
         // A removal deciding a row admits it again if it does not commit.
         const newlyLoaded = filteredTransactions.filter(
           (transaction) =>
-            (this.removing.size === 0 || !this.removing.has(transaction.id)) &&
+            !this.offlineExecutor.isRemoving?.(transaction.id) &&
             this.scheduler.schedule(transaction),
         )
 
@@ -694,71 +660,6 @@ export class TransactionExecutor {
     else this.scheduleCleanupRetry()
   }
 
-  /** Keeps an unstarted write out of admission while a removal decides it. */
-  fence(id: string): void {
-    this.removing.set(id, (this.removing.get(id) ?? 0) + 1)
-  }
-
-  /** Ends one removal's hold on a write. */
-  release(id: string): void {
-    const holds = this.removing.get(id)! - 1
-    if (holds > 0) this.removing.set(id, holds)
-    else this.removing.delete(id)
-  }
-
-  /**
-   * Publishes the outcome of a write a removal took while its call ran: the
-   * rejection a writer in another tab reads, the running markers'
-   * withdrawal, then the settlement. It needs no leadership, and a failed
-   * record is retried without calling the provider again.
-   */
-  private async publishRemovedOutcome(
-    id: string,
-    error: Error | undefined,
-  ): Promise<void> {
-    try {
-      if (error && this.recordsFor(id))
-        await this.outbox.recordRejection(id, error)
-    } catch (recordError) {
-      console.warn(
-        `Failed to record rejection of transaction ${id}:`,
-        recordError,
-      )
-      this.unpublished.set(id, error)
-      this.schedulePublishRetry()
-      return
-    }
-    await this.offlineExecutor.finishRunningRemoval?.(id)
-    // A subscriber's error is not a storage fault of this executor.
-    try {
-      if (error) this.offlineExecutor.rejectTransaction(id, error)
-      else this.offlineExecutor.resolveTransaction(id, undefined)
-    } catch (settleError) {
-      console.warn(`Failed to settle transaction ${id}:`, settleError)
-    }
-  }
-
-  private schedulePublishRetry(): void {
-    if (this.publishTimer || this.paused || this.unpublished.size === 0) return
-    this.publishTimer = setTimeout(() => {
-      this.publishTimer = null
-      this.publishAttempts++
-      this.retryPublications()
-    }, this.retryPolicy.calculateDelay(this.publishAttempts))
-  }
-
-  /** Retries recording removed writes' outcomes, also on connectivity. */
-  retryPublications(): void {
-    if (this.paused) return
-    if (this.publishTimer) clearTimeout(this.publishTimer)
-    this.publishTimer = null
-    if (this.unpublished.size === 0) this.publishAttempts = 0
-    for (const [id, error] of [...this.unpublished]) {
-      this.unpublished.delete(id)
-      void this.publishRemovedOutcome(id, error)
-    }
-  }
-
   /** Finishes a committed removal whose deletion failed, outside the queue. */
   retryDecided(id: string, error: Error): void {
     if (!this.offlineExecutor.isOfflineEnabled) return
@@ -798,7 +699,7 @@ export class TransactionExecutor {
       !this.offlineExecutor.isOfflineEnabled ||
       term !== this.offlineExecutor.leadershipTerm ||
       this.excluding.has(id) ||
-      this.removing.has(id)
+      this.offlineExecutor.isRemoving?.(id)
     )
       return
     // A duplicate message is harmless: both steps ignore a known transaction.
@@ -875,9 +776,6 @@ export class TransactionExecutor {
     // Retain queued work and let the issued call finish its acknowledgment.
     this.clearRetryTimer()
     this.dropFailedCleanups()
-    this.paused = true
-    if (this.publishTimer) clearTimeout(this.publishTimer)
-    this.publishTimer = null
   }
 
   /**

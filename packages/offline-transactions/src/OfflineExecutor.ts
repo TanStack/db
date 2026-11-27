@@ -86,6 +86,16 @@ const callIssuers = new WeakMap<
   Set<OfflineExecutor>
 >()
 
+// Executors with a removal deciding a write, by Collection, so a replacement
+// neither admits nor replays that write meanwhile.
+const removers = new WeakMap<
+  OfflineConfig[`collections`][string],
+  Set<OfflineExecutor>
+>()
+
+// Removals waiting for a running call to end, by transaction id.
+const callEndWaiters = new Map<string, Array<() => void>>()
+
 /** A replacement may add Collections while retaining every prior registry entry. */
 function retainsCollections(
   configured: OfflineConfig[`collections`],
@@ -135,11 +145,8 @@ export class OfflineExecutor {
   private readonly saving = new Map<string, boolean>()
   // Ids whose call this executor is running.
   private readonly issued = new Set<string>()
-  // Running markers this leader recorded for removed writes, by id; each
-  // overlapping removal leaves its own.
-  private readonly runningRemovals = new Map<string, Set<string>>()
-  // Writes whose row a removal took while their call ran.
-  private readonly removedRunning = new Set<string>()
+  // Writes a removal is deciding, by how many removals hold each.
+  private readonly removing = new Map<string, number>()
   // Removals this follower asked the leader for, by request.
   private readonly removals = new Map<
     string,
@@ -330,8 +337,6 @@ export class OfflineExecutor {
       // A check still running may yet fail; a new one reads after this change.
       if (this.reconcileFailed || this.sweepsRunning > 0)
         this.reconcileFollowerWrites()
-      // Outcomes of removed calls are recorded whichever tab leads.
-      this.executor?.retryPublications()
       if (this.isOfflineEnabled && this.executor) {
         this.executor.resetRetryDelays()
         // A failed replay of this term runs again; admissions wait for it.
@@ -664,7 +669,7 @@ export class OfflineExecutor {
           // A row that cannot be decoded is still there.
           if (await outbox.has(id)) continue
           const outcome = await outbox.getOutcome(id)
-          // Its call is still running after a removal.
+          // A record that cannot be read leaves the outcome unknown.
           if (outcome?.pending) continue
           const error = outcome?.error
           // A record older than the retention window may have been pruned, so
@@ -1007,37 +1012,87 @@ export class OfflineExecutor {
 
   trackIssued(id: string, active: boolean): void {
     if (active) this.issued.add(id)
-    else this.issued.delete(id)
+    else {
+      this.issued.delete(id)
+      const waiters = callEndWaiters.get(id)
+      callEndWaiters.delete(id)
+      for (const wake of waiters ?? []) wake()
+    }
+    this.register(callIssuers, this.issued.size > 0)
+  }
+
+  /** Keeps a write out of admission and replay while a removal decides it. */
+  private fence(id: string): void {
+    this.removing.set(id, (this.removing.get(id) ?? 0) + 1)
+    this.register(removers, true)
+  }
+
+  /** Ends one removal's hold on a write. */
+  private release(id: string): void {
+    const holds = this.removing.get(id)! - 1
+    if (holds > 0) this.removing.set(id, holds)
+    else this.removing.delete(id)
+    this.register(removers, this.removing.size > 0)
+  }
+
+  /** Whether a removal in this runtime over a shared Collection decides it. */
+  isRemoving(id: string): boolean {
+    return Object.values(this.config.collections).some((collection) =>
+      [...(removers.get(collection) ?? [this])].some((other) =>
+        other.removing.has(id),
+      ),
+    )
+  }
+
+  private register(
+    registry: WeakMap<
+      OfflineConfig[`collections`][string],
+      Set<OfflineExecutor>
+    >,
+    active: boolean,
+  ): void {
     for (const collection of Object.values(this.config.collections)) {
-      let issuers = callIssuers.get(collection)
-      if (!issuers) callIssuers.set(collection, (issuers = new Set()))
-      if (this.issued.size > 0) issuers.add(this)
-      else issuers.delete(this)
+      let members = registry.get(collection)
+      if (!members) registry.set(collection, (members = new Set()))
+      if (active) members.add(this)
+      else members.delete(this)
     }
   }
 
   /**
-   * Whether an executor in this runtime over the waiter owner's Collections
-   * runs the write's call; replacements may each add other Collections.
+   * Whether an executor in this runtime over the owner's Collections matches;
+   * replacements may each add other Collections.
    */
-  private callRunning(id: string, owner: OfflineExecutor): boolean {
-    if (this.issued.has(id)) return true
+  private inRuntime(
+    registry: WeakMap<
+      OfflineConfig[`collections`][string],
+      Set<OfflineExecutor>
+    >,
+    owner: OfflineExecutor,
+    matches: (executor: OfflineExecutor) => boolean,
+  ): boolean {
+    if (matches(this)) return true
     for (const collection of Object.values(owner.config.collections)) {
-      for (const issuer of callIssuers.get(collection) ?? [])
+      for (const other of registry.get(collection) ?? [])
         if (
-          issuer.issued.has(id) &&
+          matches(other) &&
           (retainsCollections(
-            issuer.config.collections,
+            other.config.collections,
             owner.config.collections,
           ) ||
             retainsCollections(
               owner.config.collections,
-              issuer.config.collections,
+              other.config.collections,
             ))
         )
           return true
     }
     return false
+  }
+
+  /** Whether an executor in this runtime runs the write's call. */
+  private callRunning(id: string, owner: OfflineExecutor): boolean {
+    return this.inRuntime(callIssuers, owner, (other) => other.issued.has(id))
   }
 
   /** This executor and those in this runtime whose outcomes it delivers. */
@@ -1111,21 +1166,17 @@ export class OfflineExecutor {
   }
 
   /**
-   * Removes saved transactions. A write that has not started fails with a
-   * removal error, which a writer in another tab also reads from its record;
-   * a started call keeps the provider's outcome. Returns those it left to the
-   * next leader because it stopped leading before deciding them.
+   * Removes saved transactions. A call already running in this runtime keeps
+   * the provider's outcome: the removal waits for it, so no row goes while
+   * its call runs, then takes a retry it left like any unsent write. An
+   * unsent write fails with a removal error, decided beside its row and
+   * recorded for a writer in another tab before the row goes. Returns those
+   * it left to the next leader because it stopped leading before deciding.
    */
   private async removeSaved(ids: Array<string>): Promise<Array<string>> {
     const outbox = this.outbox!
     const executor = this.executor!
     const error = removedError()
-    // Off the queue before any await, so this tab cannot start them
-    // meanwhile; the one already running keeps the provider's outcome.
-    const unstarted = new Set(this.scheduler.removePendingTransactions(ids))
-    // Until its removal is decided, no admission or replay schedules an
-    // unstarted write again.
-    for (const id of unstarted) executor.fence(id)
     // A leader's removal yields if it stops leading before its decision is
     // recorded; the term only counts gains.
     const term = this.term
@@ -1139,133 +1190,81 @@ export class OfflineExecutor {
     const failures: Array<unknown> = []
     const yielded: Array<string> = []
     // Each id settles by its own deletion.
-    await Promise.all(
-      ids.map(async (id) => {
-        let committed = false
-        // A write whose removal did not commit is eligible again; the row is
-        // read again, so one another leader settled meanwhile is not queued.
-        let readmit = false
-        try {
-          if (!(await outbox.has(id))) {
-            if (this.saving.has(id)) this.saving.set(id, true)
-            return
-          }
-          if (!unstarted.has(id)) {
-            // A writer in another tab reads that the call it cannot see is
-            // still running. The marker is registered before the row goes,
-            // and withdrawn at once if the call already finished.
-            const token = records(id)
-              ? await outbox.recordPending(id)
+    const removeOne = async (id: string) => {
+      // Off the queue and out of admission and replay before any await, so
+      // nothing starts the write again until its removal is decided.
+      this.scheduler.removePendingTransactions([id])
+      this.fence(id)
+      let committed = false
+      // A write whose removal did not commit is eligible again; the row is
+      // read again, so one another leader settled meanwhile is not queued.
+      let readmit = false
+      try {
+        while (this.callRunning(id, this))
+          await new Promise<void>((wake) => {
+            callEndWaiters.set(id, [...(callEndWaiters.get(id) ?? []), wake])
+          })
+        // A retry the call left, taken with no await since the check.
+        this.scheduler.removePendingTransactions([id])
+        // A row whose call already settled keeps that outcome. A phase
+        // that cannot be read leaves the row and reports the failure.
+        const row = await outbox.getPhase(id)
+        if (!row) {
+          if (this.saving.has(id)) this.saving.set(id, true)
+          return
+        }
+        if (row.outboxPhase) {
+          const outcome =
+            row.outboxPhase === `rejection-pending` && row.lastError
+              ? outboxMessageError(row.lastError)
               : undefined
-            if (token !== undefined) {
-              if (this.scheduler.isRunning(id)) {
-                let tokens = this.runningRemovals.get(id)
-                if (!tokens) this.runningRemovals.set(id, (tokens = new Set()))
-                tokens.add(token)
-              } else await outbox.withdrawOutcome(id, token).catch(() => {})
-            }
-            await outbox.remove(id)
-            if (this.saving.has(id)) this.saving.set(id, true)
-            if (this.scheduler.isRunning(id)) {
-              this.removedRunning.add(id)
-              return
-            }
-            // A call that ended retryably meanwhile left a queued retry, which
-            // the removal takes like an unsent write.
-            if (
-              !this.scheduler
-                .getAllPendingTransactions()
-                .some((transaction) => transaction.id === id)
-            )
-              return
-            this.scheduler.removePendingTransactions([id])
-            try {
-              if (records(id)) await outbox.recordRejection(id, error)
-              await this.finishRunningRemoval(id)
-            } catch {
-              executor.retryDecided(id, error)
-            }
-            this.rejectTransaction(id, error)
-            return
-          }
-          // A row whose call already settled keeps that outcome. A phase
-          // that cannot be read leaves the row and reports the failure.
-          const row = await outbox.getPhase(id)
-          if (!row) {
-            if (this.saving.has(id)) this.saving.set(id, true)
-            return
-          }
-          if (row.outboxPhase) {
-            const outcome =
-              row.outboxPhase === `rejection-pending` && row.lastError
-                ? outboxMessageError(row.lastError)
-                : undefined
-            if (outcome && records(id))
-              await outbox.recordRejection(id, outcome)
-            await outbox.remove(id)
-            if (outcome) this.rejectTransaction(id, outcome)
-            else this.resolveTransaction(id, undefined)
-            return
-          }
-          // The decision is recorded beside the row first, so a later
-          // leader's replay settles the row rather than send it. One that
-          // does not commit while this tab leads is withdrawn. Without
-          // recorded outcomes there are no decisions, and a write the next
-          // leader now decides is left to it.
-          const decision = this.recordsOutcomes
-            ? await outbox.recordDecision(id, error)
-            : undefined
-          if (!stillLeads()) {
-            if (decision !== undefined)
-              await outbox.removeDecision(id, decision).catch(() => {})
-            yielded.push(id)
-            readmit = true
-            return
-          }
-          // Only a persisted decision commits a removal; without one, a failed
-          // deletion is reported and the write stays eligible.
-          committed = decision !== undefined
-          if (records(id)) await outbox.recordRejection(id, error)
+          if (outcome && records(id)) await outbox.recordRejection(id, outcome)
           await outbox.remove(id)
+          if (outcome) this.rejectTransaction(id, outcome)
+          else this.resolveTransaction(id, undefined)
+          return
+        }
+        // The decision is recorded beside the row first, so a later
+        // leader's replay settles the row rather than send it. One that
+        // does not commit while this tab leads is withdrawn. Without
+        // recorded outcomes there are no decisions, and a write the next
+        // leader now decides is left to it.
+        const decision = this.recordsOutcomes
+          ? await outbox.recordDecision(id, error)
+          : undefined
+        if (!stillLeads()) {
           if (decision !== undefined)
             await outbox.removeDecision(id, decision).catch(() => {})
-        } catch (removalError) {
-          if (!committed) {
-            failures.push(removalError)
-            readmit = true
-            return
-          }
-          // A committed removal stands; its deletion is retried, excluded
-          // from admission until it lands.
-          executor.retryDecided(id, error)
-        } finally {
-          if (unstarted.has(id)) executor.release(id)
-          if (readmit) executor.admitTransaction(id).catch(() => {})
+          yielded.push(id)
+          readmit = true
+          return
         }
-        if (this.saving.has(id)) this.saving.set(id, true)
-        this.rejectTransaction(id, error)
-      }),
-    )
+        // Only a persisted decision commits a removal; without one, a failed
+        // deletion is reported and the write stays eligible.
+        committed = decision !== undefined
+        if (records(id)) await outbox.recordRejection(id, error)
+        await outbox.remove(id)
+        if (decision !== undefined)
+          await outbox.removeDecision(id, decision).catch(() => {})
+      } catch (removalError) {
+        if (!committed) {
+          failures.push(removalError)
+          readmit = true
+          return
+        }
+        // A committed removal stands; the row and its decision stay until
+        // its record and deletion land, retried here or by a later leader.
+        executor.retryDecided(id, error)
+      } finally {
+        this.release(id)
+        if (readmit) executor.admitTransaction(id).catch(() => {})
+      }
+      if (this.saving.has(id)) this.saving.set(id, true)
+      this.rejectTransaction(id, error)
+    }
+    await Promise.all(ids.map(removeOne))
     if (failures.length > 0) throw failures[0]
     return yielded
-  }
-
-  /** Whether a removal took this write's row while its call ran. */
-  removedWhileRunning(id: string): boolean {
-    return this.removedRunning.has(id)
-  }
-
-  /** Withdraws the running markers of a removed write whose call finished. */
-  async finishRunningRemoval(id: string): Promise<void> {
-    this.removedRunning.delete(id)
-    const tokens = this.runningRemovals.get(id)
-    if (!tokens) return
-    this.runningRemovals.delete(id)
-    await Promise.all(
-      [...tokens].map((token) =>
-        this.outbox!.withdrawOutcome(id, token).catch(() => {}),
-      ),
-    )
   }
 
   async peekOutbox(): Promise<Array<OfflineTransaction>> {

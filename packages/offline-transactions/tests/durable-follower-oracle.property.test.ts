@@ -40,16 +40,16 @@
  * default mode, let another
  * leader reject a former leader's saved write. Others fail a new leader's
  * replay and then reconnect, let a replay outlive its term, remove a running
- * write twice, record a rejection after its writer listed the outcome
- * records, store an unreadable outcome record or a decision with no error,
- * and fail a removed running write's call with a retryable error. The rest
- * deliver an added message while an unsent write's removal is decided, fail
- * the error record of a removed running write before its leader stops
- * leading, change connectivity during an outbox check that then fails, fail
- * a removal's read of a sent row's phase, store a readable decision
- * beside an unreadable one, and fail a removed running write's call with a
- * retryable error before the removal's deletion lands or between the
- * failure's read and rewrite of the row.
+ * write twice, store an unreadable outcome record or a decision with no
+ * error, and fail a removed running write's call with a retryable error. The
+ * rest deliver an added message while an unsent write's removal is decided,
+ * fail the rejection record of a removed running write's retry before its
+ * leader stops leading, change connectivity during an outbox check that then
+ * fails, fail a removal's read of a sent row's phase, store a readable
+ * decision beside an unreadable one, hold each outcome record of a removed
+ * running write's retry while its writer checks, and fail a removed running
+ * write's call with a retryable error between the failure's read and rewrite
+ * of the row, then fail the removal's deletion.
  *
  * Production driver: real executors over one shared storage adapter, with a
  * controlled leader election, online detector and BroadcastChannel.
@@ -66,6 +66,13 @@
  * its writer waits, and the next leader finishes the removal. A row the leader
  * cannot decode is reported, not dropped, and a follower's failed outbox check
  * runs again when connectivity changes.
+ *
+ * A removal never takes a row while the leader's runtime runs its call: it
+ * waits for the call, which keeps the server's outcome, and removes a retry
+ * the call left like an unsent write, whose decision and rejection record
+ * land before its row goes. A writer's outbox check therefore finds the row
+ * or the rejection until the write settles, and a removed write is never
+ * sent again.
  *
  * Known omissions: a reloaded follower does not show another tab's pending
  * writes optimistically; rejection records of writers that never return are
@@ -234,9 +241,9 @@ const reachStates = [
   // A write whose call an intermediate replacement issued stayed pending at
   // a later replacement, then took the server's outcome.
   `issued-call-across-replacements`,
-  // A call that finished before its removal's deletion acknowledged left no
-  // running marker behind.
-  `running-marker-retired`,
+  // A removed running write whose call failed retryably kept its row until
+  // the removal's rejection record landed, so no check read it as sent.
+  `retry-removal-recorded-before-row-went`,
   // A committed decision whose row one leader could not decode survived
   // that leader's replay.
   `decision-kept-for-unreadable-row`,
@@ -274,25 +281,22 @@ const reachStates = [
   // A replay that finished after a newer replay of the same tab left
   // admission open for the newer term.
   `stale-replay-kept-newer-term`,
-  // Two removals of one running write each left a marker, and the call's
-  // completion withdrew both.
-  `overlapping-markers-retired`,
-  // A rejection recorded after a writer listed the outcome records still
-  // failed that writer.
-  `rejection-recorded-after-listing`,
+  // Two removals of one running write both waited for the call, which kept
+  // the server's outcome.
+  `overlapping-removals-waited`,
   // An unreadable outcome record before an intact rejection still failed
   // the writer.
   `rejection-read-past-unreadable-record`,
   // A decision with no readable error still settled its row.
   `decision-without-error-settled`,
   // A removed running write whose call failed with a retryable error failed
-  // its writer through the recorded error.
+  // its writer with the removal error, through its record.
   `removed-retryable-failure-recorded`,
   // An added message while an unsent write's removal was being decided sent
   // nothing.
   `unsent-removal-not-admitted`,
-  // A removed running write's error, whose record failed, reached its writer
-  // after its leader stopped leading.
+  // A removed running write's removal error, whose record failed, reached
+  // its writer after its leader stopped leading.
   `removed-outcome-survived-handover`,
   // A connectivity change during an outbox check that then failed settled
   // the lost write.
@@ -300,8 +304,9 @@ const reachStates = [
   // A removal whose read of a sent row's phase failed reported it and kept
   // the row.
   `phase-read-failure-kept-row`,
-  // A removed running write whose call failed retryably during the removal
-  // was neither queued again nor saved again, and failed its writer.
+  // A removed running write whose call failed retryably while its row was
+  // read, and whose deletion then failed, was neither sent again nor saved
+  // again, and failed its writer.
   `removed-retry-not-requeued`,
   // A readable decision beside an unreadable one kept its error.
   `readable-decision-kept`,
@@ -365,7 +370,7 @@ type SharedActionType =
   | `added-during-committed-removal`
   | `adopted-decision-second-handover`
   | `replaced-twice-during-call`
-  | `running-removal-completes-first`
+  | `remove-running-retry-records-held`
   | `decision-row-undecodable`
   | `added-during-replay`
   | `removal-pending-replay-lost`
@@ -380,7 +385,6 @@ type SharedActionType =
   | `replay-fails-then-reconnects`
   | `stale-replay-across-terms`
   | `overlapping-running-removals`
-  | `rejection-after-outcome-listing`
   | `unreadable-outcome-before-rejection`
   | `decision-without-error`
   | `remove-running-retryable`
@@ -461,7 +465,7 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: sharedAction(`added-during-committed-removal`) },
   { weight: 1, arbitrary: sharedAction(`adopted-decision-second-handover`) },
   { weight: 1, arbitrary: sharedAction(`replaced-twice-during-call`) },
-  { weight: 1, arbitrary: sharedAction(`running-removal-completes-first`) },
+  { weight: 1, arbitrary: sharedAction(`remove-running-retry-records-held`) },
   { weight: 1, arbitrary: sharedAction(`decision-row-undecodable`) },
   { weight: 1, arbitrary: sharedAction(`added-during-replay`) },
   { weight: 1, arbitrary: sharedAction(`removal-pending-replay-lost`) },
@@ -476,7 +480,6 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
   { weight: 1, arbitrary: sharedAction(`replay-fails-then-reconnects`) },
   { weight: 1, arbitrary: sharedAction(`stale-replay-across-terms`) },
   { weight: 1, arbitrary: sharedAction(`overlapping-running-removals`) },
-  { weight: 1, arbitrary: sharedAction(`rejection-after-outcome-listing`) },
   { weight: 1, arbitrary: sharedAction(`unreadable-outcome-before-rejection`) },
   { weight: 1, arbitrary: sharedAction(`decision-without-error`) },
   { weight: 1, arbitrary: sharedAction(`remove-running-retryable`) },
@@ -564,7 +567,7 @@ const spliced = (
           action.type !== `added-during-committed-removal` &&
           action.type !== `adopted-decision-second-handover` &&
           action.type !== `replaced-twice-during-call` &&
-          action.type !== `running-removal-completes-first` &&
+          action.type !== `remove-running-retry-records-held` &&
           action.type !== `decision-row-undecodable` &&
           action.type !== `added-during-replay` &&
           action.type !== `removal-pending-replay-lost` &&
@@ -581,7 +584,6 @@ const spliced = (
           action.type !== `replay-fails-then-reconnects` &&
           action.type !== `stale-replay-across-terms` &&
           action.type !== `overlapping-running-removals` &&
-          action.type !== `rejection-after-outcome-listing` &&
           action.type !== `unreadable-outcome-before-rejection` &&
           action.type !== `decision-without-error` &&
           action.type !== `remove-running-retryable` &&
@@ -1934,7 +1936,7 @@ async function runHistory(
         case `remove-rejected-running`: {
           // A tab removes a follower's write while the leader's server call
           // runs, a check runs during the call, and the settlement message
-          // is lost.
+          // is lost. The removal waits for the call.
           const rejectedRun = action.type === `remove-rejected-running`
           const leader = leaderIndex()
           const follower = tabs.findIndex(
@@ -1964,17 +1966,24 @@ async function runHistory(
           }
           const remover = tabs[action.tab] ? action.tab : leader
           if (remover !== leader) reach(`removal-forwarded`)
-          await tabs[remover]!.env.executor.removeFromOutbox(
+          let removed = false
+          const removal = tabs[remover]!.env.executor.removeFromOutbox(
             write.transactionId!,
+          ).then(() => {
+            removed = true
+          })
+          await settle()
+          expect(removed, `the removal waits for ${write.id}'s call`).toBe(
+            false,
           )
           expect(
             await storage.get(`tx:${write.transactionId}`),
-            `${write.id}'s row is gone`,
-          ).toBe(null)
+            `${write.id}'s row stays while its call runs`,
+          ).not.toBe(null)
           expect(write.outcome, `${write.id} waits for its call`).toBe(
             undefined,
           )
-          // A check during the call finds no row, and still waits.
+          // A check during the call finds the row, and still waits.
           channels.inject({ type: `leader` })
           await settle()
           expect(write.outcome, `${write.id} waits during its call`).toBe(
@@ -1982,6 +1991,7 @@ async function runHistory(
           )
           channels.state.loseSettlement = true
           release()
+          await removal
           await settle()
           channels.state.loseSettlement = false
           channels.inject({ type: `leader` })
@@ -2559,13 +2569,15 @@ async function runHistory(
             reach(`stale-decision-left-no-row`)
             break
           }
+          // The yielded removal goes to the next leader, which waits for its
+          // running send.
           storage.releaseDecision()
-          await removal
           await settle()
           expect(write.outcome, `${write.id} waits for that send`).toBe(
             undefined,
           )
           release()
+          await removal
           await settle()
           await original.requestLeadership()
           await settle()
@@ -2721,8 +2733,10 @@ async function runHistory(
           // Each replacement may also add a Collection of its own.
           const extended = action.type === `replaced-twice-extended`
           // A follower's executor is replaced; the replacement leads and
-          // issues the write's rejected call; the row is removed and that
-          // replacement is replaced in turn while the call runs.
+          // issues the write's rejected call; a removal waits for that call
+          // while the replacement is replaced in turn. The other tabs close
+          // first, so leadership stays with the replacements, as a handover
+          // during a call lets the next leader send it again.
           const leader = leaderIndex()
           const writer = tabs.findIndex((tab, index) => tab && index !== leader)
           if (
@@ -2749,6 +2763,8 @@ async function runHistory(
             extended ? { zfirst: extraCollection(`first-extra`) } : undefined,
           )
           await rotateTo(tabs[writer]!.election)
+          for (let index = 0; index < TABS; index++)
+            if (index !== writer) await closeTab(index)
           let release!: () => void
           callGate = new Promise<void>((resolve) => {
             release = resolve
@@ -2761,7 +2777,7 @@ async function runHistory(
             await settle()
             break
           }
-          await tabs[writer]!.env.executor.removeFromOutbox(
+          const removal = tabs[writer]!.env.executor.removeFromOutbox(
             write.transactionId!,
           )
           await closeTab(writer)
@@ -2779,6 +2795,7 @@ async function runHistory(
             undefined,
           )
           release()
+          await removal
           await settle()
           expect(write.outcome, `${write.id} takes the server's outcome`).toBe(
             `failed`,
@@ -2796,10 +2813,11 @@ async function runHistory(
           }
           break
         }
-        case `running-removal-completes-first`: {
-          // The leader removes a follower's running write; the call finishes
-          // before the removal's deletion acknowledges, and its message is
-          // lost.
+        case `remove-running-retry-records-held`: {
+          // The leader removes a follower's running write, whose call then
+          // fails with a retryable error. Each outcome record the leader
+          // writes next is held while the writer checks the outbox, and the
+          // settlement message is lost.
           const leader = leaderIndex()
           const follower = tabs.findIndex(
             (tab, index) => tab && index !== leader,
@@ -2823,43 +2841,47 @@ async function runHistory(
             await settle()
             break
           }
-          storage.holdNextDelete()
-          let removed = false
+          retryable.add(write.id)
+          write.rejected = true
+          write.removed = true
+          write.failure = `Transaction removed from the outbox`
+          storage.holdOutcomeWrite()
           const removal = tabs[leader]!.env.executor.removeFromOutbox(
             write.transactionId!,
-          ).then(() => {
-            removed = true
-          })
-          await settle()
-          expect(storage.deleteHeld(), `${write.id}'s deletion stalls`).toBe(
-            true,
           )
-          expect(removed, `the removal waits for its deletion`).toBe(false)
-          expect(
-            (await outcomesOf(write.transactionId!)).some(
-              ({ pending }) => pending,
-            ),
-            `${write.id} has a running marker`,
-          ).toBe(true)
+          await settle()
           channels.state.loseSettlement = true
           release()
+          await settle()
+          // Whichever record is held, a check reads the write as pending.
+          for (let round = 0; round < 2; round++) {
+            channels.inject({ type: `leader` })
+            await settle()
+            expect(
+              write.outcome,
+              `${write.id} is not read as sent (${round})`,
+            ).not.toBe(`completed`)
+            storage.releaseOutcomeWrite()
+            if (round === 0) storage.holdOutcomeWrite()
+            await settle()
+          }
+          await removal
           await settle()
           channels.state.loseSettlement = false
           expect(
             channels.state.lostIds,
             `${write.id}'s settlement was lost`,
           ).toContain(write.transactionId)
-          storage.releaseDelete()
-          await removal
-          await settle()
-          expect(
-            await outcomesOf(write.transactionId!),
-            `${write.id}'s marker is gone`,
-          ).toEqual([])
           channels.inject({ type: `leader` })
           await settle()
-          expect(write.outcome, `${write.id} completes`).toBe(`completed`)
-          reach(`running-marker-retired`)
+          expect(write.outcome, `${write.id} fails on its removal`).toBe(
+            `failed`,
+          )
+          expect(
+            calls.filter((id) => id === write.id),
+            `${write.id} sent once`,
+          ).toHaveLength(1)
+          reach(`retry-removal-recorded-before-row-went`)
           break
         }
         case `decision-row-undecodable`: {
@@ -3257,9 +3279,8 @@ async function runHistory(
           break
         }
         case `overlapping-running-removals`: {
-          // The leader removes a follower's running write twice. The first
-          // removal's deletion stalls, the call succeeds, and its message is
-          // lost.
+          // The leader removes a follower's running write twice; the call
+          // succeeds, and its message is lost.
           const leader = leaderIndex()
           const follower = tabs.findIndex(
             (tab, index) => tab && index !== leader,
@@ -3284,79 +3305,27 @@ async function runHistory(
             break
           }
           const executor = tabs[leader]!.env.executor
-          storage.holdNextDelete()
-          const first = executor.removeFromOutbox(write.transactionId!)
+          let removed = 0
+          const removals = [0, 1].map(() =>
+            executor.removeFromOutbox(write.transactionId!).then(() => {
+              removed += 1
+            }),
+          )
           await settle()
-          expect(storage.deleteHeld(), `the first deletion stalls`).toBe(true)
-          await executor.removeFromOutbox(write.transactionId!)
-          expect(
-            (await outcomesOf(write.transactionId!)).filter(
-              ({ pending }) => pending,
-            ),
-            `${write.id} has a marker per removal`,
-          ).toHaveLength(2)
+          expect(removed, `both removals wait for ${write.id}'s call`).toBe(0)
           channels.state.loseSettlement = true
           release()
+          await Promise.all(removals)
           await settle()
           channels.state.loseSettlement = false
-          storage.releaseDelete()
-          await first
-          await settle()
           expect(
             await outcomesOf(write.transactionId!),
-            `${write.id}'s markers are gone`,
+            `${write.id} leaves no record`,
           ).toEqual([])
           channels.inject({ type: `leader` })
           await settle()
           expect(write.outcome, `${write.id} completes`).toBe(`completed`)
-          reach(`overlapping-markers-retired`)
-          break
-        }
-        case `rejection-after-outcome-listing`: {
-          // The leader removes a follower's running write that the server
-          // rejects. The writer lists the outcome records; the rejection then
-          // lands, the running marker goes, and the writer reads its listing.
-          const leader = leaderIndex()
-          const follower = tabs.findIndex(
-            (tab, index) => tab && index !== leader,
-          )
-          if (
-            !durable ||
-            !online.online ||
-            leader < 0 ||
-            follower < 0 ||
-            !(await quiet())
-          )
-            break
-          let release!: () => void
-          callGate = new Promise<void>((resolve) => {
-            release = resolve
-          })
-          const write = await doWrite(follower, `write-rejected`)
-          if (!write || !calls.includes(write.id)) {
-            callGate = null
-            release()
-            await settle()
-            break
-          }
-          await tabs[leader]!.env.executor.removeFromOutbox(
-            write.transactionId!,
-          )
-          const view = tabs[follower]!.view
-          view.holdNextKeys()
-          channels.inject({ type: `leader` })
-          await settle()
-          expect(view.keysHeld(), `the writer listed the records`).toBe(true)
-          channels.state.loseSettlement = true
-          release()
-          await settle()
-          channels.state.loseSettlement = false
-          view.releaseKeys()
-          await settle()
-          expect(write.outcome, `${write.id} takes the rejection`).toBe(
-            `failed`,
-          )
-          reach(`rejection-recorded-after-listing`)
+          reach(`overlapping-removals-waited`)
           break
         }
         case `unreadable-outcome-before-rejection`: {
@@ -3415,7 +3384,8 @@ async function runHistory(
         }
         case `remove-running-retryable`: {
           // The leader removes a follower's running write; the call then
-          // fails with a retryable error, and its message is lost.
+          // fails with a retryable error, and its message is lost. The
+          // removal takes the retry the call left.
           const leader = leaderIndex()
           const follower = tabs.findIndex(
             (tab, index) => tab && index !== leader,
@@ -3441,17 +3411,19 @@ async function runHistory(
           }
           retryable.add(write.id)
           write.rejected = true
-          write.failure = `retry ${write.id}`
-          await tabs[leader]!.env.executor.removeFromOutbox(
+          write.removed = true
+          write.failure = `Transaction removed from the outbox`
+          const removal = tabs[leader]!.env.executor.removeFromOutbox(
             write.transactionId!,
           )
           channels.state.loseSettlement = true
           release()
+          await removal
           await settle()
           channels.state.loseSettlement = false
           channels.inject({ type: `leader` })
           await settle()
-          expect(write.outcome, `${write.id} takes the call's error`).toBe(
+          expect(write.outcome, `${write.id} fails on its removal`).toBe(
             `failed`,
           )
           reach(`removed-retryable-failure-recorded`)
@@ -3459,9 +3431,8 @@ async function runHistory(
         }
         case `remove-running-retry-race`: {
           // The leader removes a follower's running write, whose call fails
-          // with a retryable error first while the removal's deletion is
-          // held, then for another write while the failure's read of the row
-          // is held.
+          // with a retryable error while the failure's read of the row is
+          // held; the row deletion that follows fails once.
           const leader = leaderIndex()
           const follower = tabs.findIndex(
             (tab, index) => tab && index !== leader,
@@ -3480,59 +3451,40 @@ async function runHistory(
           callGate = new Promise<void>((resolve) => {
             release = resolve
           })
-          const queued = await doWrite(follower, `write`)
-          if (!queued || !calls.includes(queued.id)) {
+          const write = await doWrite(follower, `write`)
+          if (!write || !calls.includes(write.id)) {
             callGate = null
             release()
             await settle()
             break
           }
-          retryable.add(queued.id)
-          storage.holdNextDelete()
-          const removal = executor.removeFromOutbox(queued.transactionId!)
-          await settle()
-          expect(storage.deleteHeld(), `${queued.id}'s deletion stalls`).toBe(
-            true,
-          )
-          release()
-          await settle()
-          storage.releaseDelete()
-          await removal
-          await settle()
-          queued.rejected = true
-          queued.removed = true
-          queued.failure = `Transaction removed from the outbox`
-          expect(queued.outcome, `${queued.id} fails on its removal`).toBe(
-            `failed`,
-          )
-          expect(await executor.peekOutbox(), `${queued.id} gone`).toEqual([])
-          callGate = new Promise<void>((resolve) => {
-            release = resolve
-          })
-          const restored = await doWrite(follower, `write`)
-          if (!restored || !calls.includes(restored.id)) {
-            callGate = null
-            release()
-            await settle()
-            break
-          }
-          retryable.add(restored.id)
+          retryable.add(write.id)
+          write.rejected = true
+          write.removed = true
+          write.failure = `Transaction removed from the outbox`
           view.holdNextRead()
           release()
           await settle()
           expect(view.readHeld(), `the failure's read stalls`).toBe(true)
-          await executor.removeFromOutbox(restored.transactionId!)
-          view.releaseRead()
+          const removal = executor.removeFromOutbox(write.transactionId!)
           await settle()
-          restored.rejected = true
-          restored.failure = `retry ${restored.id}`
+          storage.failDeletes = 1
+          view.releaseRead()
+          await removal
+          await settle()
+          expect(write.outcome, `${write.id} fails on its removal`).toBe(
+            `failed`,
+          )
+          // Connectivity retries the deletion, and nothing sends the write.
+          online.set(true)
+          for (let round = 0; round < 4; round++) await settle()
           expect(
-            restored.outcome,
-            `${restored.id} takes the call's error`,
-          ).toBe(`failed`)
+            calls.filter((id) => id === write.id),
+            `${write.id} is not sent again`,
+          ).toHaveLength(1)
           expect(
             await executor.peekOutbox(),
-            `${restored.id} is not saved again`,
+            `${write.id} is not saved again`,
           ).toEqual([])
           reach(`removed-retry-not-requeued`)
           break
@@ -3575,8 +3527,9 @@ async function runHistory(
         }
         case `remove-running-record-fails-handover`: {
           // The leader removes a follower's running write, whose call then
-          // fails with a retryable error. Recording that error fails once,
-          // and the leader stops leading before it records it again.
+          // fails with a retryable error before the removal's deletion
+          // lands. Recording the removal's rejection fails once, its
+          // settlement is lost, and the leader stops leading.
           const leader = leaderIndex()
           const follower = tabs.findIndex(
             (tab, index) => tab && index !== leader,
@@ -3603,32 +3556,44 @@ async function runHistory(
           }
           retryable.add(write.id)
           write.rejected = true
-          write.failure = `retry ${write.id}`
-          await tabs[leader]!.env.executor.removeFromOutbox(
+          write.removed = true
+          write.failure = `Transaction removed from the outbox`
+          storage.holdNextDelete()
+          const removal = tabs[leader]!.env.executor.removeFromOutbox(
             write.transactionId!,
           )
+          await settle()
           storage.failOutcomeWrites = 1
+          channels.state.loseSettlement = true
           release()
           await settle()
+          // Lands a deletion that waited, or cancels the hold.
+          storage.releaseDelete()
+          await removal
+          await settle()
+          channels.state.loseSettlement = false
           expect(
             storage.outcomeFailed(write.transactionId!),
             `${write.id}'s record failed`,
           ).toBe(true)
-          expect(write.outcome, `${write.id} waits for its record`).toBe(
-            undefined,
-          )
+          expect(
+            channels.state.lostIds,
+            `${write.id}'s settlement was lost`,
+          ).toContain(write.transactionId)
           const original = tabs[leader]!.election
           original.releaseLeadership()
           await settle()
           online.set(true)
           await settle()
-          expect(
-            storage.recordedRejections.has(write.transactionId!),
-            `${write.id}'s error recorded`,
-          ).toBe(true)
-          expect(write.outcome, `${write.id} takes the call's error`).toBe(
+          channels.inject({ type: `leader` })
+          await settle()
+          expect(write.outcome, `${write.id} fails on its removal`).toBe(
             `failed`,
           )
+          expect(
+            calls.filter((id) => id === write.id),
+            `${write.id} sent once`,
+          ).toHaveLength(1)
           reach(`removed-outcome-survived-handover`)
           await original.requestLeadership()
           await settle()
@@ -3678,8 +3643,8 @@ async function runHistory(
         }
         case `remove-phase-read-fails`: {
           // The leader sends a follower's write and fails to delete its row.
-          // Offline, the next leader loads that row; its removal finds the
-          // row, then fails to read its phase.
+          // Offline, the next leader loads that row; its removal fails to
+          // read the row's phase.
           const leader = leaderIndex()
           const follower = tabs.findIndex(
             (tab, index) => tab && index !== leader,
@@ -3704,7 +3669,6 @@ async function runHistory(
           )
           await rotateTo(tabs[successor]!.election)
           storage.failReadKey = `tx:${write.transactionId}`
-          storage.failReadKeyAfter = 1
           await expect(
             tabs[successor]!.env.executor.removeFromOutbox(
               write.transactionId!,
@@ -3805,8 +3769,8 @@ async function runHistory(
         }
         case `remove-own-running`:
         case `remove-own-rejected-running`: {
-          // The leader removes its own write while its call runs, then loses
-          // leadership; the next leader's check runs during the call.
+          // The leader removes its own write while its call runs; the
+          // removal waits for the call, and a check runs during it.
           const rejectedRun = action.type === `remove-own-rejected-running`
           const leader = leaderIndex()
           if (
@@ -3831,18 +3795,23 @@ async function runHistory(
             await settle()
             break
           }
-          await tabs[leader]!.env.executor.removeFromOutbox(
+          let removed = false
+          const removal = tabs[leader]!.env.executor.removeFromOutbox(
             write.transactionId!,
+          ).then(() => {
+            removed = true
+          })
+          await settle()
+          channels.inject({ type: `leader` })
+          await settle()
+          expect(removed, `the removal waits for ${write.id}'s call`).toBe(
+            false,
           )
-          const original = tabs[leader]!.election
-          original.releaseLeadership()
-          await settle()
-          await original.requestLeadership()
-          await settle()
           expect(write.outcome, `${write.id} waits during its call`).toBe(
             undefined,
           )
           release()
+          await removal
           await settle()
           expect(write.outcome, `${write.id} keeps the server's outcome`).toBe(
             rejectedRun ? `failed` : `completed`,
@@ -4115,8 +4084,7 @@ async function runHistory(
     expect(outcomes, `outcome records`).toEqual(
       orphans.map((write) => write.transactionId).sort(),
     )
-    // Each kept record holds the rejection its writer will read; a running
-    // marker alone would leave that writer waiting.
+    // Each kept record holds the rejection its writer will read.
     for (const write of orphans) {
       const errors = (await outcomesOf(write.transactionId!)).map(
         ({ error }) => error,
@@ -4192,7 +4160,7 @@ const loseSettlement: Action = { type: `lose-settlement` }
 oracleProperty({
   id: property,
   law: {
-    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost; if its rejection record fails, the leader retries the cleanup and nothing sends it meanwhile. Removing or clearing an unsent write fails its writer at once, a write removed while it is saved never runs, an outbox load from an earlier leadership term schedules nothing, and a tab that only observes a write leaves its writer's record. A follower's removal goes to the leader, which alone knows whether the call started; an exclusion cleanup stops when its leadership ends; and a replacement executor over the same collections settles its predecessor's saved writes against the outbox they were saved to. A removal or exclusion is recorded as a decision beside its row before anything else, so a later leader settles the row as decided rather than send it, a decision that lands late never recreates a row, and a writer reads a rejection only once its decision committed. A row whose call already settled keeps that outcome when removed, and a removal that yields at a handover is made by the next leader. A successor's adopted decision outlives the first recorder withdrawing its own, a committed removal keeps the write out of direct admission, a running marker is withdrawn even when the call finishes before the removal's deletion, and a call issued by an intermediate replacement keeps its write pending. A removed write whose call is running stays pending until the call settles, also when it is the leader's own; a durable replacement does not read a default-mode predecessor's missing record as success; an unreadable saved row keeps its writer waiting, each removal settles by its own deletion, and a cleanup that failed after its term ended is not retried. A failed replay runs again on connectivity before a refused admission, a replay that outlives its term leaves admission to the newer one, every running marker of overlapping removals is withdrawn, a writer reads a rejection recorded after it listed the records, an unreadable record or decision never hides or blocks a rejection, and a removed running write whose call fails retryably fails its writer with that error, also when its first record fails and its leader then stops leading. No admission sends an unsent write while its removal is being decided, a removal that cannot read a row's phase reports that and keeps the row, a failed outbox check that a connectivity change overlapped runs again, and an unreadable decision never replaces a readable decision's error. A removed running write whose call fails retryably while the removal runs is neither retried nor saved again, and fails its writer. In the default mode, a write another leader settled stays pending in its former leader, which cannot tell the outcome. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
+    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost; if its rejection record fails, the leader retries the cleanup and nothing sends it meanwhile. Removing or clearing an unsent write fails its writer at once, a write removed while it is saved never runs, an outbox load from an earlier leadership term schedules nothing, and a tab that only observes a write leaves its writer's record. A follower's removal goes to the leader, which alone knows whether the call started; an exclusion cleanup stops when its leadership ends; and a replacement executor over the same collections settles its predecessor's saved writes against the outbox they were saved to. A removal or exclusion is recorded as a decision beside its row before anything else, so a later leader settles the row as decided rather than send it, a decision that lands late never recreates a row, and a writer reads a rejection only once its decision committed. A row whose call already settled keeps that outcome when removed, and a removal that yields at a handover is made by the next leader. A successor's adopted decision outlives the first recorder withdrawing its own, a committed removal keeps the write out of direct admission, and a call issued by an intermediate replacement keeps its write pending. A removal of a write whose call is running waits for that call, which keeps the server's outcome, also when it is the leader's own or two removals overlap, and the row stays until then; a durable replacement does not read a default-mode predecessor's missing record as success; an unreadable saved row keeps its writer waiting, each removal settles by its own deletion, and a cleanup that failed after its term ended is not retried. A failed replay runs again on connectivity before a refused admission, a replay that outlives its term leaves admission to the newer one, an unreadable record or decision never hides or blocks a rejection, and a removed running write whose call fails retryably fails its writer with the removal error, recorded before its row goes, also when that record fails and its leader then stops leading. No admission sends an unsent write while its removal is being decided, a removal that cannot read a row's phase reports that and keeps the row, a failed outbox check that a connectivity change overlapped runs again, and an unreadable decision never replaces a readable decision's error. A removed running write whose call fails retryably is never sent again, also when the removal's deletion fails, and no check reads it as sent while the removal's records land. In the default mode, a write another leader settled stays pending in its former leader, which cannot tell the outcome. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
     authority: `Issue #2464 and the followerWrites option in docs/guides/offline-transactions.md.`,
     limits: `Three tabs over one storage adapter with controlled election, connectivity and BroadcastChannel; up to twelve actions; no real browser contexts; rejection records of writers that never return are kept, and none is ever expired.`,
   },
@@ -4219,26 +4187,21 @@ oracleProperty({
     `src/executor/TransactionExecutor.ts#TransactionExecutor.cleanUpExcluded`,
     `src/executor/TransactionExecutor.ts#TransactionExecutor.retryFailedCleanups`,
     `src/executor/TransactionExecutor.ts#TransactionExecutor.recordsFor`,
-    `src/outbox/OutboxManager.ts#OutboxManager.withdrawOutcome`,
     `src/OfflineExecutor.ts#OfflineExecutor.removeForFollower`,
     `src/OfflineExecutor.ts#OfflineExecutor.forwardRemoval`,
     `src/OfflineExecutor.ts#OfflineExecutor.relatedExecutors`,
-    `src/OfflineExecutor.ts#OfflineExecutor.finishRunningRemoval`,
     `src/OfflineExecutor.ts#OfflineExecutor.callRunning`,
     `src/OfflineExecutor.ts#OfflineExecutor.trackIssued`,
     `src/OfflineExecutor.ts#OfflineExecutor.removeOrForward`,
     `src/outbox/OutboxManager.ts#OutboxManager.recordDecision`,
     `src/outbox/OutboxManager.ts#OutboxManager.removeDecision`,
     `src/outbox/OutboxManager.ts#OutboxManager.removeDecisions`,
-    `src/executor/TransactionExecutor.ts#TransactionExecutor.fence`,
-    `src/executor/TransactionExecutor.ts#TransactionExecutor.release`,
-    `src/executor/TransactionExecutor.ts#TransactionExecutor.publishRemovedOutcome`,
-    `src/executor/TransactionExecutor.ts#TransactionExecutor.schedulePublishRetry`,
-    `src/executor/TransactionExecutor.ts#TransactionExecutor.retryPublications`,
+    `src/OfflineExecutor.ts#OfflineExecutor.fence`,
+    `src/OfflineExecutor.ts#OfflineExecutor.release`,
+    `src/OfflineExecutor.ts#OfflineExecutor.isRemoving`,
+    `src/OfflineExecutor.ts#OfflineExecutor.inRuntime`,
     `src/outbox/OutboxManager.ts#OutboxManager.getPhase`,
     `src/executor/TransactionExecutor.ts#TransactionExecutor.retryDecided`,
-    `src/outbox/OutboxManager.ts#OutboxManager.recordPending`,
-    `src/outbox/OutboxManager.ts#OutboxManager.recordOutcome`,
     `src/outbox/OutboxManager.ts#OutboxManager.outcomeKeys`,
     `src/outbox/OutboxManager.ts#OutboxManager.pruneOutcomes`,
     `src/executor/TransactionExecutor.ts#TransactionExecutor.loadPendingTransactions`,
@@ -4693,10 +4656,10 @@ oracleProperty({
           spliced(generated, [{ type: `replaced-twice-during-call` }]),
       },
       {
-        name: `a call finishing before its removal leaves no marker`,
-        enters: [`running-marker-retired`],
+        name: `a removed write's retry keeps its row until its rejection is recorded`,
+        enters: [`retry-removal-recorded-before-row-went`],
         build: (generated: History): History =>
-          spliced(generated, [{ type: `running-removal-completes-first` }]),
+          spliced(generated, [{ type: `remove-running-retry-records-held` }]),
       },
       {
         name: `a decision outlives a leader that cannot decode its row`,
@@ -4828,16 +4791,10 @@ oracleProperty({
           spliced(generated, [{ type: `stale-replay-across-terms` }]),
       },
       {
-        name: `overlapping removals of a running write retire both markers`,
-        enters: [`overlapping-markers-retired`],
+        name: `overlapping removals of a running write both wait for it`,
+        enters: [`overlapping-removals-waited`],
         build: (generated: History): History =>
           spliced(generated, [{ type: `overlapping-running-removals` }]),
-      },
-      {
-        name: `a rejection recorded after the listing still fails its writer`,
-        enters: [`rejection-recorded-after-listing`],
-        build: (generated: History): History =>
-          spliced(generated, [{ type: `rejection-after-outcome-listing` }]),
       },
       {
         name: `an unreadable outcome record does not hide a rejection`,

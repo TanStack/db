@@ -229,10 +229,11 @@ mutation function after restart; an unmarked row may replay.
 - `peekOutbox()` - View all pending transactions
 - `dispose()` - Stop new processing and release executor resources. Pending durable transactions and optimistic state on surviving Collections remain live.
 
-An acknowledged `removeFromOutbox(id)` or `clearOutbox()` while a named
-mutation function is running does not cancel that call. If the call later
-fails, its waiting promises reject with the named mutation function error; the
-removed row is not retried.
+A `removeFromOutbox(id)` or `clearOutbox()` made while a named mutation
+function is running does not cancel that call: it waits for the call to return.
+A call that succeeds or fails permanently keeps that outcome. If the call fails
+with a retryable error, the removal then removes the row, its waiting promises
+reject with the removal error, and the row is not retried.
 
 ### Error Handling
 

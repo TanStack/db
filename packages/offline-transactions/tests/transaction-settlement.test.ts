@@ -1047,7 +1047,7 @@ it(`keeps commit pending until successful outbox deletion`, async () => {
 })
 
 it.each([`removeFromOutbox`, `clearOutbox`] as const)(
-  `settles active provider work after %s acknowledges outbox deletion`,
+  `settles active provider work that %s waits for`,
   async (removal) => {
     const providerEntered = gate()
     const releaseProvider = gate()
@@ -1100,10 +1100,20 @@ it.each([`removeFromOutbox`, `clearOutbox`] as const)(
       expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
         transactionId,
       ])
-      if (removal === `removeFromOutbox`)
-        await env.executor.removeFromOutbox(transactionId)
-      else await env.executor.clearOutbox()
-      expect(await env.executor.peekOutbox()).toEqual([])
+      // The removal waits for the running call, whose row stays meanwhile.
+      let removed = false
+      const removing = (
+        removal === `removeFromOutbox`
+          ? env.executor.removeFromOutbox(transactionId)
+          : env.executor.clearOutbox()
+      ).then(() => {
+        removed = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(removed).toBe(false)
+      expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+        transactionId,
+      ])
       expect([commitStatus, persistedStatus, localTransaction.state]).toEqual([
         `pending`,
         `pending`,
@@ -1111,9 +1121,10 @@ it.each([`removeFromOutbox`, `clearOutbox`] as const)(
       ])
 
       releaseProvider.resolve()
+      await atOracleCheckpoint(removing, `${removal} after the call`)
       await atOracleCheckpoint(
         Promise.all([observed, observedPersistence]),
-        `provider fulfillment after ${removal} deletion settled caller`,
+        `provider fulfillment settled caller before ${removal}`,
       )
       expect([commitStatus, persistedStatus, localTransaction.state]).toEqual([
         `fulfilled`,
@@ -1157,7 +1168,7 @@ it.each([
   [`clearOutbox`, `default`],
   [`clearOutbox`, `hook`],
 ] as const)(
-  `rejects a failed provider after %s removed its outbox row (%s retry)`,
+  `rejects a retryable provider failure with the removal error of %s (%s retry)`,
   async (removal, retryDecision) => {
     const providerEntered = gate()
     const releaseProvider = gate()
@@ -1225,29 +1236,32 @@ it.each([
       expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
         headId,
       ])
-      if (removal === `removeFromOutbox`)
-        await env.executor.removeFromOutbox(headId)
-      else await env.executor.clearOutbox()
-      expect(await env.executor.peekOutbox()).toEqual([])
+      // The removal waits for the running call, then takes its retry.
+      const removing =
+        removal === `removeFromOutbox`
+          ? env.executor.removeFromOutbox(headId)
+          : env.executor.clearOutbox()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect((await env.executor.peekOutbox()).map(({ id }) => id)).toEqual([
+        headId,
+      ])
       expect([headCommitResult, headPersistenceResult]).toEqual([
         `pending`,
         `pending`,
       ])
 
       releaseProvider.resolve()
-      if (removal === `removeFromOutbox`) {
-        await vi.waitFor(() => expect(env.executor.getRunningCount()).toBe(0))
-        await Promise.resolve()
-        await Promise.resolve()
-      }
+      await atOracleCheckpoint(removing, `${removal} after the call`)
       await atOracleCheckpoint(
         Promise.all([headCommit, headPersistence]),
-        `provider rejection after acknowledged removal`,
+        `removal rejection after the retryable failure`,
       )
-      expect([headCommitResult, headPersistenceResult]).toEqual([
-        providerError,
-        providerError,
-      ])
+      for (const result of [headCommitResult, headPersistenceResult]) {
+        expect(result).toBeInstanceOf(NonRetriableError)
+        expect((result as Error).message).toBe(
+          `Transaction removed from the outbox`,
+        )
+      }
       expect(localHead.state).toBe(`failed`)
       expect(await env.executor.peekOutbox()).toEqual([])
       expect(env.mutationCalls.map(({ transaction: { id } }) => id)).toEqual([

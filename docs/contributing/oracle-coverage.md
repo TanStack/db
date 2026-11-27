@@ -4262,16 +4262,16 @@ The post-merge review added three missing domains to existing owners:
   start, a save that ends after its tab closed, and tabs that name their
   collections differently under one key. It also covers a failed replay
   that runs again on connectivity, a replay that outlives its term,
-  overlapping removals of a running write, a rejection recorded after its
-  writer listed the outcome records, unreadable outcome records and
-  decisions, and a removed running write whose call fails with a retryable
-  error. It also covers an added message while an unsent write's removal is
-  being decided, a removed running write whose error record fails before its
-  leader stops leading, a connectivity change during an outbox check that
+  removals of a running write that wait for its call, also when they
+  overlap, unreadable outcome records and decisions, and a removed running
+  write whose call fails with a retryable error. It also covers an added message while an unsent write's removal is
+  being decided, a removed running write whose rejection record fails before
+  its leader stops leading, a connectivity change during an outbox check that
   then fails, a failed read of a sent row's phase during its removal, a
-  readable decision beside an unreadable one, and a removed running write
-  whose call fails retryably before the removal's deletion lands or between
-  the failure's read and rewrite of the row. It does not cover real browser
+  readable decision beside an unreadable one, a writer's checks while each
+  record of a removed running write's retry is held, and a removed running
+  write whose call fails retryably between the failure's read and rewrite of
+  the row, then whose deletion fails. It does not cover real browser
   contexts.
 - Settlement-time drop of optimistic state is owned by the
   [optimistic history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)

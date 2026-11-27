@@ -621,9 +621,16 @@ async function driveControls(
     } else {
       let problem: string | undefined
       try {
-        if (plan.operation === `remove`)
-          await executor.removeFromOutbox(ids[0]!)
-        else await executor.clearOutbox()
+        const removal =
+          plan.operation === `remove`
+            ? executor.removeFromOutbox(ids[0]!)
+            : executor.clearOutbox()
+        // A removal waits for the held call; offline, no queued work starts.
+        if (plan.running) {
+          detector.online = false
+          held.resolve()
+        }
+        await removal
       } catch (error) {
         problem = String(error)
       }
