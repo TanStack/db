@@ -316,6 +316,25 @@ function driveSupportCollisions(
     }),
   )
   graph.finalize()
+  // Every delivery is a legal relation with hashable keys, so distinct accepts
+  // it, whatever the payloads hold.
+  const deliver = (
+    changes: Array<[[unknown, unknown], number]>,
+    at: string,
+  ) => {
+    try {
+      input.sendData(new MultiSet(changes))
+      graph.run()
+    } catch (error) {
+      throw new OracleComparisonMismatch(
+        `distinct threw on a legal delivery at ${at}: ${String(error)}`,
+        `distinct accepts legal relations`,
+        at,
+        String(error),
+        `no error`,
+      )
+    }
+  }
   // Observations name a payload by its member, since a payload can be cyclic.
   const member = (payload: unknown) =>
     members.findIndex(([, row]) => row === payload)
@@ -388,16 +407,14 @@ function driveSupportCollisions(
     if (split) {
       const partial = [...live]
       for (const [change, weight] of changes) {
-        input.sendData(new MultiSet([[change, weight]]))
-        graph.run()
         const index = members.indexOf(change)
+        deliver([[change, weight]], `${checkpoint}/${index}/${weight}`)
         if (weight < 0) partial.splice(partial.indexOf(index), 1)
         else if (weight > 0) partial.push(index)
         check(`${checkpoint}/${index}/${weight}`, partial)
       }
     } else {
-      input.sendData(new MultiSet(changes))
-      graph.run()
+      deliver(changes, String(checkpoint))
       check(String(checkpoint), world)
     }
     live = world
@@ -417,7 +434,7 @@ oracleProperty<CollisionPlan, ReadonlyArray<string>>({
   id: `ivm.distinct-support-collisions`,
   law: {
     ...cell0.law,
-    statement: `${cell0.law.statement} An input of weight zero supports nothing, and a payload outside the selection may be cyclic.`,
+    statement: `${cell0.law.statement} Distinct accepts every legal relation with hashable keys: an input of weight zero supports nothing, and a payload outside the selection may be cyclic.`,
     authority: `${cell0.law.authority} PR #2460 review: zero-weight inputs and payloads outside the selected key.`,
     limits: `The four inputs of one verified digest family under one selection; up to ten worlds of up to four inputs, each optionally preceded by up to two zero-weight inputs, with plain or self-referencing payloads, delivered at once or one change at a time.`,
   },
