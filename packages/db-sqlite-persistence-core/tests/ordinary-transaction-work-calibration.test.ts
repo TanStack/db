@@ -14,6 +14,7 @@ import {
   generatedHistoryArbitrary,
   independentWorkArbitrary,
   modelAfter,
+  replayThresholdArbitrary,
   sameObservation,
   semanticCases,
 } from './ordinary-transaction-work-oracle'
@@ -111,6 +112,28 @@ describe('ordinary SQLite committed transaction oracle', () => {
       expect(
         samples.every((sample) => sample.size >= 0 && sample.size <= 60),
       ).toBe(true),
+    )
+  })
+  it('reconstructs replay counts on both sides of the reload threshold', () => {
+    const samples = fc.sample(
+      replayThresholdArbitrary,
+      oracleFixedSeed(20261125, { numRuns: 120 }),
+    )
+    // Each row adds one action and one later metadata action.
+    const changes = samples.map(
+      (sample) =>
+        2 * sample.size + sample.strayMetadata + (sample.cursor ? 1 : 0),
+    )
+    expect(changes.some((count) => count < 128)).toBe(true)
+    expect(changes.some((count) => count > 129)).toBe(true)
+    expect(new Set(samples.map((sample) => sample.existing))).toEqual(
+      new Set([true, false]),
+    )
+    expect(new Set(samples.map((sample) => sample.strayMetadata))).toEqual(
+      new Set([0, 1, 2]),
+    )
+    expect(new Set(samples.map((sample) => sample.cap))).toEqual(
+      new Set([100, 999]),
     )
   })
   it('calibrates the complete-observation comparison', () => {

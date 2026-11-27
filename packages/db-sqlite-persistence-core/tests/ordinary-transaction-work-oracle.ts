@@ -106,7 +106,58 @@ import type {
  * Electric, WAL across processes, Tauri, or native mobile. The existing owner
  * retains full replacement and schema-migration laws; this fixture adds ordinary
  * write work and does not replace driver admission or host receiving witnesses.
+ *
+ * ## Replay storage and row rewrites
+ *
+ * Authority: `pullSince` answers a full reload for any range whose replay
+ * holds more than the adapter's reload threshold of changes (128 by default;
+ * the public replay test in ordinary-transaction-work.test.ts fixes 128
+ * against 130). A replay above the threshold can therefore never be returned,
+ * so the proposed storage law is that an applied position keeps a replay only
+ * when pullSince could return it: `applied[].replay` is `stored` when the
+ * transaction's replay changes (row actions, row metadata actions and
+ * collection metadata actions, each counted as written) are at most the
+ * threshold, and `full-reload` otherwise. The model counts the public actions;
+ * the observation reads the applied position's replay columns.
+ * The second proposed work law bounds row-table rewrites: statements that
+ * insert or update rows of the Collection table number at most one per chunk
+ * of distinct keys that the transaction leaves written, plus one per chunk of
+ * the remaining row metadata keys (kept, deleted or absent rows). A metadata
+ * action on a row that the same transaction writes is part of that row's one
+ * write, not a second pass over it. Both are proposed work contracts, like the
+ * call bound above; the replay grammar below crosses the threshold at 128/129
+ * changes, over fresh and existing rows, with and without unwritten metadata
+ * keys.
  */
+// The adapter's default pullSinceReloadThreshold, which every fixture uses.
+const PULL_SINCE_RELOAD_THRESHOLD = 128
+// The replay changes pullSince counts for a transaction's delta.
+export function replayChanges(tx: Tx): number {
+  return (
+    tx.mutations.length +
+    (tx.rowMetadataMutations?.length ?? 0) +
+    (tx.collectionMetadataMutations?.length ?? 0)
+  )
+}
+// Row-table rewrites allowed for one transaction: one per chunk of keys that
+// end written, one per chunk of the other row metadata keys.
+export function rowWriteBound(tx: Tx, cap: number): number {
+  const chunk = Math.min(125, Math.floor(cap / 4))
+  const finalActions = new Map(
+    tx.mutations.map((mutation) => [mutation.key, mutation.type]),
+  )
+  const written = [...finalActions].filter(([, type]) => type !== 'delete')
+  const writtenKeys = new Set(written.map(([key]) => key))
+  const otherMetadataKeys = new Set(
+    (tx.rowMetadataMutations ?? [])
+      .map((change) => change.key)
+      .filter((key) => !writtenKeys.has(key)),
+  )
+  return (
+    Math.ceil(writtenKeys.size / chunk) +
+    Math.ceil(otherMetadataKeys.size / chunk)
+  )
+}
 // The model replays semantic actions from their contract, never from SQL.
 export function modelAfter(history: ReadonlyArray<Tx>): Observation {
   const rows = new Map<
@@ -161,7 +212,14 @@ export function modelAfter(history: ReadonlyArray<Tx>): Observation {
       if (change.type === 'delete') collectionMetadata.delete(change.key)
       else collectionMetadata.set(change.key, clone(change.value))
     }
-    applied.push({ txId: tx.txId, rowVersion })
+    applied.push({
+      txId: tx.txId,
+      rowVersion,
+      replay:
+        replayChanges(tx) <= PULL_SINCE_RELOAD_THRESHOLD
+          ? 'stored'
+          : 'full-reload',
+    })
   }
   return {
     rows: sortRows([...rows].map(([key, row]) => ({ key, ...row }))),
@@ -344,6 +402,21 @@ additionalWorkCases.push({
   ),
   workSize: 1,
 })
+// 64 rows with later metadata are 128 replay changes; the cursor makes 129.
+workCases.push(
+  {
+    name: 'replay-at-threshold-128',
+    cap: 999,
+    candidate: { ...insertRows(64), collectionMetadataMutations: [] },
+    workSize: 64,
+  },
+  {
+    name: 'replay-over-threshold-129',
+    cap: 999,
+    candidate: insertRows(64),
+    workSize: 64,
+  },
+)
 workCases.push({
   name: 'unique-10000',
   cap: 999,
@@ -661,6 +734,68 @@ function independentTransactions(input: IndependentWorkCase): {
       }
   }
 }
+// The replay grammar writes 56–72 rows, each followed by a later row metadata
+// action (two sets, then a clear), so its replay changes run from 112 to 147
+// and cross the reload threshold. Optional collection metadata and later
+// metadata on absent keys move the count by one, and seeded rows with other
+// metadata make the later actions replace stored metadata, not fill an empty
+// slot. The constructed histories land exactly on 128 and 129 changes.
+export type ReplayThresholdCase = {
+  size: number
+  cursor: boolean
+  strayMetadata: 0 | 1 | 2
+  existing: boolean
+  cap: 100 | 999
+}
+export const replayThresholdArbitrary: fc.Arbitrary<ReplayThresholdCase> =
+  fc.record({
+    size: fc.integer({ min: 56, max: 72 }),
+    cursor: fc.boolean(),
+    strayMetadata: fc.constantFrom<0 | 1 | 2>(0, 1, 2),
+    existing: fc.boolean(),
+    cap: fc.constantFrom<100 | 999>(100, 999),
+  })
+// Keeps the base's cap, existing rows and stray metadata; picks the cursor
+// and row count whose replay changes equal `changes`.
+function withReplayChanges(
+  base: ReplayThresholdCase,
+  changes: number,
+): ReplayThresholdCase {
+  const cursor = (changes - base.strayMetadata) % 2 === 1
+  const size = (changes - base.strayMetadata - (cursor ? 1 : 0)) / 2
+  return { ...base, cursor, size }
+}
+function replayThresholdTransactions(input: ReplayThresholdCase): {
+  seed?: Tx
+  candidate: Tx
+} {
+  const keys = Array.from({ length: input.size }, (_, index) => `row-${index}`)
+  const candidate = transaction(
+    'replay-candidate',
+    input.existing ? 2 : 1,
+    keys.map((key) => ({
+      type: 'insert',
+      key,
+      value: { id: key, version: 2 },
+    })),
+    [
+      ...keys.map((key, index) =>
+        index % 3 === 2
+          ? { type: 'delete' as const, key }
+          : { type: 'set' as const, key, value: { source: 'later' } },
+      ),
+      ...Array.from({ length: input.strayMetadata }, (_, index) => ({
+        type: 'set' as const,
+        key: `absent-${index}`,
+        value: { source: 'stray' },
+      })),
+    ],
+    input.cursor ? [{ type: 'set', key: 'cursor', value: { offset: 1 } }] : [],
+  )
+  return input.existing
+    ? { seed: insertRows(input.size), candidate }
+    : { candidate }
+}
 async function assertIndependentWork(
   input: IndependentWorkCase,
   extraMeasuredCalls = 0,
@@ -710,6 +845,12 @@ async function assertIndependentWork(
         counts.query + counts.run,
         'independent-key work checkpoint',
       ).toBeLessThanOrEqual(bound),
+    )
+    oracleAssertion('independent-key row-table rewrites', () =>
+      expect(
+        counts.rowWrites,
+        'independent-key row-write checkpoint',
+      ).toBeLessThanOrEqual(rowWriteBound(candidate, input.cap)),
     )
   } catch (error) {
     primary = error
@@ -844,6 +985,12 @@ function expectGeneratedWork(candidate: Tx, counts: WriteCounts): void {
       'generated repeated-key work checkpoint',
     ).toBeLessThanOrEqual(12 + 6 * workChunks),
   )
+  oracleAssertion('generated row-table rewrites', () =>
+    expect(
+      counts.rowWrites,
+      'generated row-write checkpoint',
+    ).toBeLessThanOrEqual(rowWriteBound(candidate, 100)),
+  )
 }
 async function assertGeneratedHistory(
   input: GeneratedHistory,
@@ -942,6 +1089,115 @@ async function assertGeneratedHistory(
             ).toEqual(modelAfter(history)),
           ))(await observe(host.adapter, host.driver, collectionId))
       }
+    }
+  } catch (error) {
+    primary = error
+  }
+  try {
+    host.close()
+  } catch (cleanup) {
+    if (primary !== undefined)
+      throw new AggregateError(
+        [primary, cleanup],
+        'primary and cleanup failed',
+        { cause: primary },
+      )
+    throw cleanup
+  }
+  if (primary !== undefined) throw primary
+}
+// The replay driver applies the candidate after an optional seed, then compares
+// the durable observation (with each applied position's replay) with the
+// model, bounds row-table rewrites, and reads pullSince from the seed's
+// position: a full reload exactly when the candidate's replay changes exceed
+// the threshold, else the candidate's complete delta, metadata included.
+async function assertReplayThreshold(
+  input: ReplayThresholdCase,
+  reach: (state: string) => void,
+  extraRowWrites = 0,
+): Promise<void> {
+  const host = fixture(input.cap)
+  const collectionId = 'oracle-replay-threshold'
+  const target = { kind: `eager`, collectionId } as const
+  let primary: unknown
+  try {
+    await host.adapter.loadResumeSnapshot(target)
+    const { seed, candidate } = replayThresholdTransactions(input)
+    const changes = replayChanges(candidate)
+    if (changes === PULL_SINCE_RELOAD_THRESHOLD)
+      reach('replay at the threshold')
+    else if (changes === PULL_SINCE_RELOAD_THRESHOLD + 1)
+      reach('replay one over the threshold')
+    else if (changes > PULL_SINCE_RELOAD_THRESHOLD)
+      reach('replay further over the threshold')
+    else reach('replay under the threshold')
+    if (input.existing) reach('later metadata over stored rows')
+    if (input.strayMetadata > 0) reach('later metadata on unwritten keys')
+    const history: Array<Tx> = []
+    if (seed) {
+      history.push(clone(seed))
+      await host.adapter.applyCommittedTx(target, seed)
+    }
+    const fromRowVersion = seed ? 1 : 0
+    history.push(clone(candidate))
+    beginMeasuredWrite(host)
+    await host.adapter.applyCommittedTx(target, candidate)
+    host.counts.rowWrites += extraRowWrites
+    const counts = finishMeasuredWrite(host, 'replay candidate checkpoint')
+    ;((observed) =>
+      oracleAssertion('replay durable checkpoint', () =>
+        expect(observed, 'replay durable checkpoint').toEqual(
+          modelAfter(history),
+        ),
+      ))(await observe(host.adapter, host.driver, collectionId))
+    oracleAssertion('replay row-table rewrites', () =>
+      expect(
+        counts.rowWrites,
+        'replay row-write checkpoint',
+      ).toBeLessThanOrEqual(rowWriteBound(candidate, input.cap)),
+    )
+    const pulled = await host.adapter.pullSince(target, fromRowVersion)
+    const latestRowVersion = modelAfter(history).position.rowVersion
+    if (changes > PULL_SINCE_RELOAD_THRESHOLD) {
+      oracleAssertion('replay pullSince checkpoint', () =>
+        expect(pulled, 'replay pullSince checkpoint').toEqual({
+          latestRowVersion,
+          requiresFullReload: true,
+        }),
+      )
+    } else {
+      // The returned delta is the candidate's public actions as written:
+      // rows, row metadata sets and clears, and collection metadata.
+      oracleAssertion('replay pullSince checkpoint', () =>
+        expect(
+          pulled.requiresFullReload
+            ? pulled
+            : { ...pulled, changedKeys: [...pulled.changedKeys].sort() },
+          'replay pullSince checkpoint',
+        ).toEqual({
+          latestRowVersion,
+          requiresFullReload: false,
+          changedKeys: sortedKeys(
+            candidate.mutations.map((mutation) => mutation.key),
+          ),
+          deletedKeys: [],
+          deltas: [
+            {
+              txId: candidate.txId,
+              latestRowVersion,
+              changedRows: candidate.mutations.map((mutation) => ({
+                key: mutation.key,
+                value: clone(mutation.value),
+              })),
+              deletedKeys: [],
+              rowMetadataMutations: clone(candidate.rowMetadataMutations ?? []),
+              collectionMetadataMutations: clone(
+                candidate.collectionMetadataMutations ?? [],
+              ),
+            },
+          ],
+        }),
+      )
     }
   } catch (error) {
     primary = error
@@ -1085,6 +1341,30 @@ export function runOrdinaryTransactionWorkOracle(): void {
             host.adapter.applyCommittedTx(
               { kind: `eager`, collectionId: `native-actions` },
               invalid,
+            ),
+          ).rejects.toThrow(/Temporal/),
+        )
+        // Inline metadata that a later row metadata action replaces is
+        // superseded too, so it must still serialize.
+        const invalidMetadata = transaction(
+          `invalid-metadata`,
+          3,
+          [
+            {
+              type: `insert`,
+              key: `a`,
+              value: { stamp: `kept` },
+              metadataChanged: true,
+              metadata: first,
+            },
+          ],
+          [{ type: `set`, key: `a`, value: { source: `later` } }],
+        )
+        await oracleAssertion('superseded inline metadata rejects', () =>
+          expect(
+            host.adapter.applyCommittedTx(
+              { kind: `eager`, collectionId: `native-actions` },
+              invalidMetadata,
             ),
           ).rejects.toThrow(/Temporal/),
         )
@@ -1292,12 +1572,14 @@ export function runOrdinaryTransactionWorkOracle(): void {
         host.counts.run = 0
         host.counts.transactions = 0
         host.counts.maxParams = 0
+        host.counts.rowWrites = 0
         history.push(clone(item.candidate))
         await host.adapter.applyCommittedTx(
           { kind: `eager`, collectionId: collectionId },
           item.candidate,
         )
         const calls = host.counts.query + host.counts.run
+        const rowWrites = host.counts.rowWrites
         const candidateTransactions = host.counts.transactions
         const maxParams = host.counts.maxParams
         const actual = await observe(host.adapter, host.driver, collectionId)
@@ -1312,6 +1594,12 @@ export function runOrdinaryTransactionWorkOracle(): void {
             candidateTransactions,
             `${item.name}: one SQLite transaction`,
           ).toBe(1),
+        )
+        oracleAssertion('fixed-case row-table rewrites', () =>
+          expect(
+            rowWrites,
+            `${item.name}: row-table rewrites`,
+          ).toBeLessThanOrEqual(rowWriteBound(item.candidate, item.cap)),
         )
         if (item.workSize !== undefined) {
           const chunk = Math.min(125, Math.floor(item.cap / 4))
@@ -1785,6 +2073,79 @@ export function runOrdinaryTransactionWorkOracle(): void {
           () => assertIndependentWork(plan.history),
         ),
       check: forwardAssertionJudgment,
+    })
+    oracleProperty({
+      id: `sqlite-ordinary.replay-threshold`,
+      law: {
+        statement: `An applied position keeps a replay exactly when pullSince could return it, pullSince answers a full reload above the threshold, and a row written in the transaction is not rewritten for its later metadata.`,
+        authority: `The pullSince reload threshold (the public replay test in ordinary-transaction-work.test.ts) and the replay storage and row-rewrite work contracts stated above.`,
+        limits: `56–72 rows with later metadata over fresh or seeded rows, optional collection metadata and stray metadata keys, 100/999 parameter caps and the default threshold on node:sqlite; no truncate, custom threshold, concurrent owner or host latency claim.`,
+      },
+      owns: [`src/sqlite-core-adapter.ts`],
+      histories: {
+        arbitrary: replayThresholdArbitrary,
+        runs: 24,
+        fixedSeeds: [20261125],
+        states: [`replay at the threshold`, `replay one over the threshold`],
+        measured: [
+          `replay under the threshold`,
+          `replay further over the threshold`,
+          `later metadata over stored rows`,
+          `later metadata on unwritten keys`,
+        ],
+        constructed: [
+          {
+            name: `exactly the threshold of replay changes`,
+            enters: [`replay at the threshold`],
+            build: (base: ReplayThresholdCase) =>
+              withReplayChanges(base, PULL_SINCE_RELOAD_THRESHOLD),
+          },
+          {
+            name: `one replay change over the threshold`,
+            enters: [`replay one over the threshold`],
+            build: (base: ReplayThresholdCase) =>
+              withReplayChanges(base, PULL_SINCE_RELOAD_THRESHOLD + 1),
+          },
+        ],
+      },
+      resolve: (history) => ({ history }),
+      model: recordedAssertionJudgment,
+      driver: (plan, observe) =>
+        recordAssertionJudgment(
+          `ordinary replay storage and row rewrites`,
+          plan,
+          observe,
+          () =>
+            assertReplayThreshold(plan.history, (state) =>
+              observe(`reach`, state),
+            ),
+        ),
+      check: forwardAssertionJudgment,
+      calibrations: [
+        {
+          name: `rejects an extra row-table rewrite at the replay checkpoint`,
+          law: `ordinary replay storage and row rewrites`,
+          history: { constructed: `exactly the threshold of replay changes` },
+          driver: (plan, observe) =>
+            recordAssertionJudgment(
+              `ordinary replay storage and row rewrites`,
+              plan,
+              observe,
+              async () => {
+                const error = await expectMutantRejects(
+                  () =>
+                    assertReplayThreshold(
+                      plan.history,
+                      (state) => observe(`reach`, state),
+                      1,
+                    ),
+                  'replay row-write checkpoint',
+                )
+                rejectAt(`calibration extra row-table rewrite`, error)
+              },
+            ),
+        },
+      ],
     })
     oracleProperty({
       id: `sqlite-ordinary.write-history`,

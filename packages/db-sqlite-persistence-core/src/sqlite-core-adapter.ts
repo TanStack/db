@@ -2658,7 +2658,16 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
       }
       const tracksPersistedKeySet =
         version.key_set_evidence_available === 1 || replacesPersistedBaseline
-      const replayDelta: ReplayableTxDelta | null = replacesPersistedBaseline
+      // pullSince full-reloads any range whose replay holds more changes than
+      // the threshold, so a larger delta could never be returned. Storing it
+      // would write every row a second time.
+      const replayRequiresFullReload =
+        replacesPersistedBaseline ||
+        tx.mutations.length +
+          (tx.rowMetadataMutations?.length ?? 0) +
+          (tx.collectionMetadataMutations?.length ?? 0) >
+          this.pullSinceReloadThreshold
+      const replayDelta: ReplayableTxDelta | null = replayRequiresFullReload
         ? null
         : {
             txId: tx.txId,
@@ -2730,6 +2739,20 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
             : { type: `update`, ...next },
         )
       }
+
+      // Row metadata actions apply after the row actions. A row that this
+      // transaction writes takes its last metadata action in the same INSERT;
+      // a separate UPDATE would rewrite every such row a second time.
+      const laterRowMetadata = new Map(
+        lastMetadataByKey(
+          tx.rowMetadataMutations ?? [],
+          (mutation) => encodePersistedStorageKey(mutation.key),
+          true,
+        ).map((mutation) => [
+          encodePersistedStorageKey(mutation.key),
+          mutation,
+        ]),
+      )
 
       for (const batch of batches(
         [...rowMutations.values()],
@@ -2807,8 +2830,21 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
                 mutation.type === `update`
                   ? mergeObjectRows(previousValue, mutation.value)
                   : mutation.value
-              const metadata =
-                mutation.metadataChanged === true
+              const later = laterRowMetadata.get(writeKeys[index]!)
+              laterRowMetadata.delete(writeKeys[index]!)
+              if (
+                later &&
+                mutation.metadataChanged === true &&
+                mutation.metadata !== undefined
+              ) {
+                // Superseded inline metadata still had to serialize.
+                serializePersistedRowValue(mutation.metadata)
+              }
+              const metadata = later
+                ? later.type === `delete`
+                  ? undefined
+                  : later.value
+                : mutation.metadataChanged === true
                   ? mutation.metadata
                   : previousMetadata
               return [
@@ -2845,12 +2881,10 @@ export class SQLiteCorePersistenceAdapter implements PersistenceAdapter {
         }
       }
 
+      // Only keys without a row written above remain: rows kept from before
+      // this transaction, deleted keys and absent keys.
       for (const batch of batches(
-        lastMetadataByKey(
-          tx.rowMetadataMutations ?? [],
-          (mutation) => encodePersistedStorageKey(mutation.key),
-          true,
-        ),
+        [...laterRowMetadata.values()],
         this.replacementBatchSize,
       )) {
         const keys = batch.map((mutation) =>
