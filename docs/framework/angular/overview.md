@@ -52,7 +52,7 @@ export class TodoListComponent {
 
 **Note:** All return values (`data`, `isLoading`, `status`, etc.) are Angular signals, so call them with `()` in your template: `query.data()`, `query.isLoading()`.
 
-> **Template Syntax:** Examples use Angular 17+ control flow (`@if`, `@for`). For Angular 16, use `*ngIf` and `*ngFor` instead.
+> **Template Syntax:** Examples use Angular's built-in control flow (`@if`, `@for`).
 
 ### Reactive Parameters
 
@@ -92,13 +92,15 @@ Use the reactive `params` option when your query depends on:
 
 When any reactive value accessed in the `params` function changes, the query is recreated and re-executed.
 
+Plain query callbacks and configuration query callbacks also track signals they read. The `params` form is useful for keeping the reactive inputs explicit.
+
 #### What Happens When Parameters Change
 
 When a parameter value changes:
-1. The previous live-query collection is disposed
-2. A new query is created with the updated parameter values
-3. `status()`/`isLoading()` reflect the new query's lifecycle
-4. `data()` updates automatically when the new results arrive
+1. The next read resolves the query with the updated parameter values.
+2. All result signals describe that query's snapshot, even before Angular runs effects. While it loads, they never expose the previous query's rows.
+3. The effect disconnects the previous observer and subscribes to the new one.
+4. Notifications invalidate the snapshot, so subsequent reads see new results.
 
 #### Best Practices
 
@@ -115,7 +117,7 @@ import { eq, and } from '@tanstack/db'
   template: `<div>{{ query.data().length }} todos</div>`
 })
 export class TodoListComponent {
-  // Angular 16+ compatible input
+  // Required component input
   @Input({ required: true }) userId!: number
   status = signal('active')
 

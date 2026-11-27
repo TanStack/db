@@ -82,9 +82,9 @@ The simplest way to use injectLiveQuery is to pass a collection directly:
       allTodos = injectLiveQuery(todosCollection)
     }
 
-Static Query Functions
+Query Functions
 
-You can create filtered queries using a query function. Note: The query function is evaluated once and is not reactive to signal changes:
+You can create filtered queries using a query function. Signals read inside the function are tracked; changing one rebuilds the query:
 
     import { Component } from "@angular/core"
     import { injectLiveQuery } from "@tanstack/angular-db"
@@ -109,8 +109,7 @@ You can create filtered queries using a query function. Note: The query function
       `,
     })
     export class TodosComponent {
-      // Static query - filters for incomplete todos
-      // This will not react to signal changes within the function
+      // With no signal reads, this query keeps the same definition.
       todoQuery = injectLiveQuery((q) =>
         q
           .from({ todo: todosCollection })
@@ -211,9 +210,11 @@ Important Notes
 Reactivity Behavior
 
 - Direct collection: Automatically reactive to collection changes
-- Static query function: Query is built once and is not reactive to signals read within the function
+- Query function: Query rebuilds when signals read within the function change
 - Reactive parameters: Query rebuilds when any signal read in params() changes
-- Collection configuration: Static, not reactive to external signals
+- Collection configuration: Signals read while building its query trigger a rebuild
+
+All result signals read the current query's snapshot, including immediately after a parameter changes and before Angular runs effects. A replacement query may be loading, but its results never contain the previous query's rows. The effect owns subscriptions and disconnects the previous observer when it attaches the replacement.
 
 Lifecycle Management
 
@@ -253,7 +254,7 @@ Overloads
       collection: Collection<TResult, TKey, TUtils>
     ): LiveQueryResult<TResult>
 
-    // Static query function - NOT reactive to signals within function
+    // Query function - tracks signals read within the function
     function injectLiveQuery<TContext>(
       queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
     ): LiveQueryResult<TContext>
@@ -292,13 +293,13 @@ An object with Angular signals:
 Parameters
 
 - collection - Existing collection to observe directly
-- queryFn - Function that builds a static query using the query builder
+- queryFn - Function that builds a query and tracks any signals it reads
 - options.params - Reactive function that returns parameters; triggers query rebuild when accessed signals change
 - options.query - Function that builds a query using parameters and query builder
 - config - Configuration object for creating a live query collection
 
 Requirements
 
-- Angular 16+ (requires signals support)
+- Angular 20+
 - Must be called within an Angular injection context
 - Automatically handles cleanup when the injector is destroyed
