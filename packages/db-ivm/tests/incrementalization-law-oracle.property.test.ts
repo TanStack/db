@@ -34,6 +34,7 @@ import {
   fullJoined,
   groupedAggregates,
   groupedMean,
+  groupedMeanOfValues,
   groupedMeanPolicy,
   groupedPolicy,
   groupedTextExtrema,
@@ -45,6 +46,7 @@ import {
   keyedIdentity,
   keyedPolicy,
   leftJoined,
+  nullishWhenSmall,
   orderedHistory,
   outerJoinPolicy,
   rightJoined,
@@ -253,6 +255,8 @@ function registerIncrementalization<T>(
         `src/operators/consolidate.ts#consolidate`,
         `src/operators/reduce.ts#reduce`,
         `src/operators/groupBy.ts#groupBy`,
+        `src/operators/groupBy.ts#sum`,
+        `src/operators/groupBy.ts#avg`,
         `src/operators/join.ts#join`,
         `src/operators/orderBy.ts#orderByWithFractionalIndex`,
         `src/operators/groupedOrderBy.ts#groupedOrderByWithFractionalIndex`,
@@ -543,6 +547,22 @@ describe(`DBSP incrementalization laws`, () => {
             }),
           ),
         evaluate: groupedMean,
+      })
+      reach.unary({
+        name: `groupBy mean over nullish values`,
+        initial: worlds[0]!,
+        batches,
+        inputPolicy: keyedPolicy,
+        outputPolicy: groupedMeanPolicy,
+        build: (input) =>
+          input.pipe(
+            groupBy(([key]) => ({ bucket: key % 2 }), {
+              mean: groupByOperators.avg(([, value]) =>
+                nullishWhenSmall(value),
+              ),
+            }),
+          ),
+        evaluate: groupedMeanOfValues,
       })
       reach.unary({
         name: `groupBy string extrema`,
