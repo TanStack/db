@@ -13,7 +13,7 @@ import {
 import {
   directEagerGateAdapter,
   directEagerReloadAdapter,
-} from '../../powersync-direct-collection/tests/eager-reload-driver'
+} from '../../powersync-direct-db-collection/tests/eager-reload-driver'
 import {
   captureBrowserHistory,
   startAdapterChromium,
@@ -41,7 +41,7 @@ registerEagerReloadConformance(
   directEagerReloadAdapter,
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
     ],
     replacement: `truncate`,
     receive: async (history, id, omitTruncate) => {
@@ -71,7 +71,7 @@ registerEagerGateFailureConformance(
   directEagerGateAdapter,
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
     ],
     receive: async (history, id) => {
       const active = browser

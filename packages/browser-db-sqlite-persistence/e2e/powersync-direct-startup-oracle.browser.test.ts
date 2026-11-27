@@ -40,7 +40,7 @@ let sequence = 0
 oracleProperty({
   id: `adapter.powersync-direct.persisted-startup.chromium-opfs`,
   owns: [
-    `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
+    `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
   ],
   law: {
     statement: `A complete eager source result replaces its persisted baseline and is durable before refresh; network-first fallback preserves the saved snapshot.`,

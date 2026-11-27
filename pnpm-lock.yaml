@@ -1597,7 +1597,7 @@ importers:
         specifier: ^12.11.1
         version: 12.11.1
 
-  packages/powersync-direct-collection:
+  packages/powersync-direct-db-collection:
     dependencies:
       '@powersync/standalone-client':
         specifier: ^0.1.1

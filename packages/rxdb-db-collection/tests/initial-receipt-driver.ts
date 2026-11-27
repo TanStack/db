@@ -15,7 +15,7 @@ import type { StartupRow } from '../../db-adapter-conformance/tests/persisted-st
 import type {
   InitialReceiptHistory,
   InitialReceiptObservation,
-} from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+} from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 function gate() {
   let resolve!: () => void

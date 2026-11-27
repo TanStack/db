@@ -1,4 +1,4 @@
-# @tanstack/powersync-direct-collection
+# @tanstack/powersync-direct-db-collection
 
 ## 1.0.0-rc.1
 

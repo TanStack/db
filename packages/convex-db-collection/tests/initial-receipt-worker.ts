@@ -11,12 +11,12 @@ import { createCollection } from '@tanstack/db'
 import { ConvexClient } from 'convex/browser'
 import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'
 import { convexCollectionOptions } from '../src'
-import { initialReceiptModel } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import { initialReceiptModel } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 import { ConvexProvider, rowsQuery } from './conformance-driver'
 import type {
   InitialReceiptHistory,
   InitialReceiptObservation,
-} from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+} from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 const history = JSON.parse(readFileSync(0, `utf8`)) as InitialReceiptHistory & {
   client: `javascript` | `react` | `wrapped`

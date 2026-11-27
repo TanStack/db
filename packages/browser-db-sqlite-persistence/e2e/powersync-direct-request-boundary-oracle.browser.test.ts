@@ -43,8 +43,8 @@ registerOnDemandBoundaryConformance(
   },
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
-      `../powersync-direct-collection/src/subsets.ts#createSubsetHandlers`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/subsets.ts#createSubsetHandlers`,
     ],
   },
 )

@@ -9,34 +9,34 @@ import {
   observePersistedStartup,
 } from '../../db-adapter-conformance/tests/persisted-startup-driver'
 import { startupReachedStates } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
-import { directPowerSyncStartupAdapter } from '../../powersync-direct-collection/tests/persisted-startup-driver'
+import { directPowerSyncStartupAdapter } from '../../powersync-direct-db-collection/tests/persisted-startup-driver'
 import {
   directEagerGateAdapter,
   directEagerReloadAdapter,
-} from '../../powersync-direct-collection/tests/eager-reload-driver'
+} from '../../powersync-direct-db-collection/tests/eager-reload-driver'
 import {
   observeEagerGateFailure,
   observeEagerReload,
 } from '../../db-adapter-conformance/tests/eager-reload-driver'
 import { observeOnDemandStreams } from '../../db-adapter-conformance/tests/on-demand-streams-driver'
 import { failingStreams } from '../../db-adapter-conformance/tests/on-demand-streams-oracle'
-import { directOnDemandStreamsAdapter } from '../../powersync-direct-collection/tests/on-demand-streams-driver'
-import { persistedDirectOnDemandStreamsAdapter } from '../../powersync-direct-collection/tests/on-demand-streams-persisted-driver'
+import { directOnDemandStreamsAdapter } from '../../powersync-direct-db-collection/tests/on-demand-streams-driver'
+import { persistedDirectOnDemandStreamsAdapter } from '../../powersync-direct-db-collection/tests/on-demand-streams-persisted-driver'
 import {
   observePersistedInitialReceipt,
   retainInitialReceiptCleanup,
-} from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'
-import { observeDirectSharedClient } from '../../powersync-direct-collection/tests/shared-client-driver'
-import { observeDirectConstruction } from '../../powersync-direct-collection/tests/sync-run-boundary-driver'
-import { observeDirectRequestBoundary } from '../../powersync-direct-collection/tests/request-boundary-driver'
-import { directConformanceDriver } from '../../powersync-direct-collection/tests/conformance-driver'
+} from '../../powersync-direct-db-collection/tests/persisted-initial-receipt-driver'
+import { observeDirectSharedClient } from '../../powersync-direct-db-collection/tests/shared-client-driver'
+import { observeDirectConstruction } from '../../powersync-direct-db-collection/tests/sync-run-boundary-driver'
+import { observeDirectRequestBoundary } from '../../powersync-direct-db-collection/tests/request-boundary-driver'
+import { directConformanceDriver } from '../../powersync-direct-db-collection/tests/conformance-driver'
 import { observeEagerLiveSourceHistory } from '../../db-adapter-conformance/tests/eager-live-source-framework-oracle'
 import {
   runDirectMutationConfirmation as receiveMutationConfirmation,
   transportMutationTrace,
-} from '../../powersync-direct-collection/tests/mutation-confirmation-driver'
+} from '../../powersync-direct-db-collection/tests/mutation-confirmation-driver'
 import { observeDecodeRefusal } from '../../db-adapter-conformance/tests/decode-refusal-driver'
-import { directDecodeAdapter } from '../../powersync-direct-collection/tests/decode-refusal-driver'
+import { directDecodeAdapter } from '../../powersync-direct-db-collection/tests/decode-refusal-driver'
 import { inProcessSeams } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import {
   createBrowserWASQLitePersistence,
@@ -66,9 +66,9 @@ import type {
   OnDemandBoundaryHistory,
   OnDemandStreamsHistory,
 } from '../../db-adapter-conformance/tests/on-demand-streams-oracle'
-import type { DirectMutationHistory } from '../../powersync-direct-collection/tests/mutation-confirmation-driver'
+import type { DirectMutationHistory } from '../../powersync-direct-db-collection/tests/mutation-confirmation-driver'
 import type { DecodeHistory } from '../../db-adapter-conformance/tests/decode-refusal-oracle'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 import type { SharedClientHistory } from '../../db-adapter-conformance/tests/shared-client-oracle'
 
 let sequence = 0

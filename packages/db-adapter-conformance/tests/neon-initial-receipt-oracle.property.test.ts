@@ -1,5 +1,5 @@
 /** Actual SDK and native Node errors receive the shared receipt cleanup law. */
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import { observeNeonInitialReceiptNode } from './neon/neon-initial-receipt-node-driver'
 
 registerInitialReceiptConformance(

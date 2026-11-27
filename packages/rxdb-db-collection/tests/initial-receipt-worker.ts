@@ -3,7 +3,7 @@ import process from 'node:process'
 import { readFileSync } from 'node:fs'
 import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'
 import { observeRxdbInitialReceipt } from './initial-receipt-driver'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 const { history, teardownFault } = JSON.parse(readFileSync(0, `utf8`)) as {
   history: InitialReceiptHistory

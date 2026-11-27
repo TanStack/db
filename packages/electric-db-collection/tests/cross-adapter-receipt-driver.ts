@@ -26,7 +26,7 @@ import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence
 import type {
   InitialReceiptHistory,
   InitialReceiptObservation,
-} from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+} from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 /** A completed receipt result survives teardown, with teardown kept separate. */
 export async function retainInitialReceiptCleanup(

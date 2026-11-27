@@ -44,7 +44,7 @@ registerSharedClientConformance(
   },
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
     ],
   },
 )

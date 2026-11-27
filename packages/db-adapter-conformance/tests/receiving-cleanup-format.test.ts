@@ -1,9 +1,9 @@
 /** Ordinary instrument controls: diagnostic formatting must retain recorded rows. */
 import { expect, test } from 'vitest'
 import { retainNativeObservation } from '../../powersync-db-collection/tests/receiving-cleanup'
-import { retainInitialReceiptCleanup as retainDirectReceipt } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'
+import { retainInitialReceiptCleanup as retainDirectReceipt } from '../../powersync-direct-db-collection/tests/persisted-initial-receipt-driver'
 import { retainInitialReceiptCleanup as retainElectricReceipt } from '../../electric-db-collection/tests/cross-adapter-receipt-driver'
-import type { InitialReceiptObservation } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptObservation } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 const reasons: Array<[string, () => unknown]> = [
   [`ordinary error`, () => new Error(`ordinary cleanup`)],

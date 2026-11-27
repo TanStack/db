@@ -13,7 +13,7 @@ import {
   captureBrowserHistory,
   startAdapterChromium,
 } from '../../browser-db-sqlite-persistence/tests/adapter-chromium-host'
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import { oracleProperty } from '../../db/tests/oracle-property'
 import {
   eagerLiveSourceHistories,

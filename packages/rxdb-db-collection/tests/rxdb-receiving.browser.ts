@@ -5,7 +5,7 @@ import { observeRxdbInitialReceipt } from './initial-receipt-driver'
 import { observeRxdbSharedClient } from './shared-client-driver'
 import { rxdbEagerGateAdapter } from './eager-gate-driver'
 import { observeRxdbMutation } from './mutation-driver'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 const target = window as unknown as {
   runRxdbInitialReceipt: typeof observeRxdbInitialReceipt

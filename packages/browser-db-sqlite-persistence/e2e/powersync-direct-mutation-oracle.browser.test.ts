@@ -5,9 +5,9 @@
  * recorded before JSON transfer. Detached page failures remain observable.
  */
 import { afterAll, beforeAll } from 'vitest'
-import { registerMutationConfirmation } from '../../powersync-direct-collection/tests/mutation-confirmation-registration-oracle'
-import { registerMutationCancellation } from '../../powersync-direct-collection/tests/mutation-confirmation-cancellation-registration-oracle'
-import { receiveMutationTrace } from '../../powersync-direct-collection/tests/mutation-confirmation-driver'
+import { registerMutationConfirmation } from '../../powersync-direct-db-collection/tests/mutation-confirmation-registration-oracle'
+import { registerMutationCancellation } from '../../powersync-direct-db-collection/tests/mutation-confirmation-cancellation-registration-oracle'
+import { receiveMutationTrace } from '../../powersync-direct-db-collection/tests/mutation-confirmation-driver'
 import {
   captureBrowserHistory,
   startAdapterChromium,
@@ -15,7 +15,7 @@ import {
 import type {
   DirectMutationHistory,
   TransportMutationTrace,
-} from '../../powersync-direct-collection/tests/mutation-confirmation-driver'
+} from '../../powersync-direct-db-collection/tests/mutation-confirmation-driver'
 
 let browser: Awaited<ReturnType<typeof startAdapterChromium>> | undefined
 beforeAll(async () => {
@@ -52,7 +52,7 @@ registerMutationConfirmation(
   runInChromium,
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
     ],
   },
 )
@@ -61,7 +61,7 @@ registerMutationCancellation(
   runInChromium,
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
     ],
   },
 )

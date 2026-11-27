@@ -53,8 +53,8 @@ registerOnDemandStreamsConformance(
   },
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
-      `../powersync-direct-collection/src/subsets.ts#createSubsetHandlers`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/subsets.ts#createSubsetHandlers`,
     ],
     receivingPath: `Real installed SDK in actual Chromium with controlled HTTP; no deployed-service, worker/OPFS, reload or persistence claim.`,
   },

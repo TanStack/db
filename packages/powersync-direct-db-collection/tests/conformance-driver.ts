@@ -208,7 +208,7 @@ function namesFailure(message: string, failure: number): boolean {
 
 export function directConformanceDriver(): EagerLiveSourceDriver {
   return {
-    adapter: `@tanstack/powersync-direct-collection (eager)`,
+    adapter: `@tanstack/powersync-direct-db-collection (eager)`,
     capabilities: new Set([`retry-policy`]),
     changeCommits: `per-batch`,
     valueKinds: jsonValueKinds,

@@ -40,7 +40,7 @@ export const nodeGroups = [
     `electric-db-collection`,
     `rxdb-db-collection`,
     `powersync-db-collection`,
-    `powersync-direct-collection`,
+    `powersync-direct-db-collection`,
     `trailbase-db-collection`,
   ].map((name) => packageGroup(name)),
   packageGroup(`db-adapter-conformance`, `test:oracles:neon`),

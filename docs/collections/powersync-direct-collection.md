@@ -5,12 +5,12 @@ title: PowerSync In-Memory Collection
 PowerSync in-memory collections integrate TanStack DB with [PowerSync](https://powersync.com) without a local SQLite database. Collections are backed directly by PowerSync [Sync Streams](https://docs.powersync.com/sync/streams/overview), giving you a lightweight, real-time sync integration for web apps.
 
 > [!TIP]
-> This documents `@tanstack/powersync-direct-collection`, which is based on a JavaScript implementation of the PowerSync protocol.
+> This documents `@tanstack/powersync-direct-db-collection`, which is based on a JavaScript implementation of the PowerSync protocol.
 > If you need offline-ready persistence, use the [PowerSync SQLite collection](./powersync-collection.md) instead.
 
 ## Overview
 
-The `@tanstack/powersync-direct-collection` package allows you to create collections that:
+The `@tanstack/powersync-direct-db-collection` package allows you to create collections that:
 
 - Reactively update when PowerSync records change
 - Integrate deeply with [Sync Streams](https://docs.powersync.com/sync/streams/overview), subscribing eagerly or only for the data that live queries need
@@ -30,7 +30,7 @@ As all data is kept in memory, it is a good fit when all of the following apply:
 Install the PowerSync collection package. As it uses a JavaScript implementation instead of SQLite, no other PowerSync SDK is required.
 
 ```bash
-npm install @tanstack/powersync-direct-collection @tanstack/react-db
+npm install @tanstack/powersync-direct-db-collection @tanstack/react-db
 ```
 
 The package uses recent JavaScript features and targets modern browsers, Node.js and other modern runtimes. Runtimes like React Native are not supported without transformations and polyfills.
@@ -40,7 +40,7 @@ The package uses recent JavaScript features and targets modern browsers, Node.js
 Create one `PowerSyncClient` for your app. All collections created with the same client share one connection to the PowerSync Service.
 
 ```ts
-import { PowerSyncClient } from '@tanstack/powersync-direct-collection'
+import { PowerSyncClient } from '@tanstack/powersync-direct-db-collection'
 
 export const powerSync = new PowerSyncClient({
   endpoint: 'https://<your-instance>.powersync.journeyapps.com',
@@ -61,7 +61,7 @@ Each collection holds the rows of one PowerSync table. Use `streams` to choose w
 
 ```ts
 import { createCollection } from '@tanstack/react-db'
-import { powerSyncCollectionOptions } from '@tanstack/powersync-direct-collection'
+import { powerSyncCollectionOptions } from '@tanstack/powersync-direct-db-collection'
 import { z } from 'zod'
 
 const Todo = z.object({
@@ -141,7 +141,7 @@ A client can subscribe with relevant parameters:
 
 ```ts
 import { createCollection, parseLoadSubsetOptions } from '@tanstack/react-db'
-import { powerSyncCollectionOptions } from '@tanstack/powersync-direct-collection'
+import { powerSyncCollectionOptions } from '@tanstack/powersync-direct-db-collection'
 
 export const todos = createCollection(
   powerSyncCollectionOptions<Todo>({
@@ -171,7 +171,7 @@ PowerSync syncs data from your backend database to clients. Writes are your resp
 
 ```ts
 import { createCollection } from '@tanstack/react-db'
-import { powerSyncCollectionOptions } from '@tanstack/powersync-direct-collection'
+import { powerSyncCollectionOptions } from '@tanstack/powersync-direct-db-collection'
 
 export const todos = createCollection(
   powerSyncCollectionOptions<Todo>({

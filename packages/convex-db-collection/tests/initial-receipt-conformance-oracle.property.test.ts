@@ -6,7 +6,7 @@
  * The controlled receipt is a wrapping acceptance boundary, not evidence of
  * durable storage or transport cancellation. Shared registration owns truth.
  */
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import { observeInitialReceipt } from './initial-receipt-driver'
 
 for (const client of [`javascript`, `react`, `wrapped`] as const) {

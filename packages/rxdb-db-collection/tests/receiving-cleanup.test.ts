@@ -1,14 +1,14 @@
 // @vitest-environment node
 /** Harness tests preserve the primary shared-law verdict across real teardown. */
 import { expect, it } from 'vitest'
-import { initialReceiptViolations } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import { initialReceiptViolations } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 import { observeRxdbInitialReceipt } from './initial-receipt-driver'
 import { observeRxdbInitialReceiptNode } from './initial-receipt-node-driver'
 import { observeRxdbMutation } from './mutation-driver'
 import { checkRxdbMutationSourceBatch } from './mutation-source-batch-oracle'
 import { observeRxdbSharedClient } from './shared-client-driver'
 import { rxdbSharedClientViolations } from './shared-client-oracle'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 import type { RxdbMutationHistory } from './mutation-driver'
 import type { RxdbSharedHistory } from './shared-client-oracle'
 

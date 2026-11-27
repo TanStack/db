@@ -1,4 +1,4 @@
-# @tanstack/powersync-direct-collection
+# @tanstack/powersync-direct-db-collection
 
 TanStack DB collections backed by [PowerSync](https://powersync.com) Sync Streams, using a JavaScript implementation of
 the PowerSync protocol instead of SQLite.

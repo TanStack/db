@@ -5,7 +5,7 @@ import { observePowerSyncHooks } from '../../powersync-db-collection/tests/hook-
 import { observeNativeBatchDecode } from '../../powersync-db-collection/tests/batch-decode-driver'
 import { observeNativeMutationRefusal } from '../../powersync-db-collection/tests/batch-decode-mutation-driver'
 import { openBrowserReceivingDatabase } from '../../powersync-db-collection/tests/native-receiving-browser'
-import { retainInitialReceiptCleanup } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'
+import { retainInitialReceiptCleanup } from '../../powersync-direct-db-collection/tests/persisted-initial-receipt-driver'
 import { inProcessSeams } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
 import {
   createBrowserWASQLitePersistence,
@@ -13,7 +13,7 @@ import {
 } from '../src'
 import { removeStartupOPFSArtifacts } from './persisted-startup-opfs-cleanup'
 import { removeClosedArtifacts } from './query-rejected-write-cutoff-cleanup'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 import type { HookHistory } from '../../powersync-db-collection/tests/hook-lifecycle-oracle'
 import type {
   NativeDecodeHistory,
