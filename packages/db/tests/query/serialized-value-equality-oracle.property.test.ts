@@ -2318,7 +2318,7 @@ describe(`value classes order arrays by their serialized value`, () => {
     ],
     histories: {
       arbitrary: orderHistoryArbitrary,
-      runs: 100,
+      runs: 300,
       fixedSeeds: [2459],
       states: orderStates,
       constructed: [
