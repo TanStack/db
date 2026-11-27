@@ -29,6 +29,7 @@ import {
 } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
+import type { BasicExpression } from '../src/query/ir'
 
 const normalizeChange = (change: any) => ({
   ...change,
@@ -1576,10 +1577,9 @@ describe(`Collection Indexes`, () => {
     })
 
     it(`should return array-valued rows for a range predicate consistently with a full scan`, async () => {
-      // Range predicates are evaluated with standard relational comparison,
-      // under which `[2] > [10]` is true (arrays compare as their string
-      // form). An index on an array-valued field must return the same rows as
-      // a full scan and must not drop this match.
+      // Range predicates compare arrays element by element, as sorting does,
+      // so `[2] < [10]`. An index on an array-valued field must return the
+      // same rows as a full scan.
       const arrayCollection = createCollection<
         { id: string; value: Array<number> },
         string
@@ -1598,14 +1598,18 @@ describe(`Collection Indexes`, () => {
         },
       })
       await arrayCollection.stateWhenReady()
+      const read = (where: BasicExpression<boolean>) =>
+        arrayCollection
+          .currentStateAsChanges({ where })!
+          .map((r) => r.value.id)
+          .sort()
+      const greater = gt(new PropRef([`value`]), [10])
+      const less = lt(new PropRef([`value`]), [10])
+      const scanned = [read(greater), read(less)]
       arrayCollection.createIndex((row) => row.value)
 
-      const result = arrayCollection.currentStateAsChanges({
-        where: gt(new PropRef([`value`]), [10]),
-      })!
-
-      const ids = result.map((r) => r.value.id).sort()
-      expect(ids).toEqual([`1`])
+      expect(scanned).toEqual([[], [`1`]])
+      expect([read(greater), read(less)]).toEqual(scanned)
     })
 
     it(`should match symbol range predicates consistently with a full scan`, async () => {

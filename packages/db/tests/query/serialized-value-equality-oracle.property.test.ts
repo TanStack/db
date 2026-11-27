@@ -1227,8 +1227,9 @@ async function runHistory(
         nestedKey(unequal),
       )
 
-      // Array ranges: an object leaf does not break a tie, so a shared and a
-      // distinct leaf of one shape are one query with one result.
+      // Array ranges: sorting orders two object leaves by reference, so a range
+      // ties from that leaf on (PR #2460 review), and a shared and a distinct
+      // leaf of one shape are one query with one result.
       const sharedLeaf = { shape: 1 }
       const mixed = createCollection(
         mockSyncCollectionOptions<Row>({
@@ -1242,15 +1243,12 @@ async function runHistory(
       )
       cleanup(() => mixed.cleanup())
       await mixed.stateWhenReady()
-      const spelled = (spec: { table: string; id: string }) =>
-        `${spec.table}:${spec.id}`
       const others = [
         recordProbe,
         unequalRecord(recordProbe, history.unequalBy),
       ]
       for (const [position, other] of others.entries()) {
-        const expected =
-          spelled(recordProbe) >= spelled(other) ? [`m`] : ([] as Array<string>)
+        const expected = [`m`]
         const captures = [sharedLeaf, { shape: 1 }].map((leaf) => [
           leaf,
           materialize(other),
@@ -2985,6 +2983,8 @@ const pooledStates = [
 ] as const
 type PooledState = (typeof pooledStates)[number]
 
+const pooledBatches = (...batches: Array<Array<PooledOp>>) => batches
+
 // Moves between the probe and copies are weighted, so swaps stay common.
 const pooledOp = fc.oneof(
   {
@@ -3130,7 +3130,7 @@ async function runPooledHistory(
       for (const { row, op } of batch) if (row < model.length) last.set(row, op)
       const shownBefore = expected()
       const orderBefore = groupOrder().join()
-      const before = new Set(shownBefore.map((entry) => entry.split(`:`)[0]))
+      const before = new Set(shownBefore.map((entry) => entry.split(`:`)[0]!))
       const shown = (index: number) =>
         before.has(model[index]!.id) || !history.residual
       let replacementsOnly = true
@@ -3168,7 +3168,7 @@ async function runPooledHistory(
       }
       source.utils.commit()
       const shownAfter = expected()
-      const after = new Set(shownAfter.map((entry) => entry.split(`:`)[0]))
+      const after = new Set(shownAfter.map((entry) => entry.split(`:`)[0]!))
       if (
         [...before].some((id) => !after.has(id)) &&
         [...after].some((id) => !before.has(id))
@@ -3243,14 +3243,14 @@ describe(`a residual pooled view rechecks its rows when read`, () => {
             initial: [`probe`, `copy`],
             residual: true,
             ordered: generated.ordered,
-            batches: [
+            batches: pooledBatches(
               [
                 { row: 0, op: `to-copy` },
                 { row: 1, op: `to-probe` },
               ],
               [{ row: 1, op: `bump` }],
               ...generated.batches,
-            ].slice(0, 4),
+            ).slice(0, 4),
           }),
         },
         {
@@ -3260,10 +3260,10 @@ describe(`a residual pooled view rechecks its rows when read`, () => {
             initial: [`probe`, ...generated.initial.slice(1)],
             residual: generated.residual,
             ordered: generated.ordered,
-            batches: [[{ row: 0, op: `retag` }], ...generated.batches].slice(
-              0,
-              4,
-            ),
+            batches: pooledBatches(
+              [{ row: 0, op: `retag` }],
+              ...generated.batches,
+            ).slice(0, 4),
           }),
         },
         {
@@ -3276,7 +3276,7 @@ describe(`a residual pooled view rechecks its rows when read`, () => {
             initial: [`probe`, `probe`],
             residual: generated.residual,
             ordered: true,
-            batches: [
+            batches: pooledBatches(
               [{ row: 1, op: `touch-at` }],
               [
                 { row: 0, op: `same-tag` },
@@ -3284,7 +3284,7 @@ describe(`a residual pooled view rechecks its rows when read`, () => {
               ],
               [{ row: 0, op: `touch-at` }],
               ...generated.batches,
-            ].slice(0, 4),
+            ).slice(0, 4),
           }),
         },
       ],
