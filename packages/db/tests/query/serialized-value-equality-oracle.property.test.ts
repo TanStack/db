@@ -1722,12 +1722,16 @@ describe(`value classes compare by their serialized value`, () => {
   })
 })
 
-// Range predicates order a value class by its serialized value. Inside an
-// array, a value class orders element by element: a null sorts first, a value
-// class sorts after a primitive and before any other object, and a nested
-// array sorts after any value that is not an array. Values that hold no
-// value class keep the native operators, including their throws. The model
-// recomputes this order from term specs; it never reads an instance.
+// Range predicates order a value class by its serialized value. Arrays order
+// element by element, whether or not they hold a value class, in one total
+// order that agrees with sorting: a null sorts first, then primitives, value
+// classes by their serialized value, Temporal values, other objects, and nested
+// arrays after any value that is not an array; a shorter prefix sorts first.
+// Where sorting would order two other objects by reference, range predicates
+// treat the arrays as equal from that element on, since equal captures are one
+// query. Values that are not arrays keep the native operators, including their
+// throws, unless one holds a value class. The model recomputes these orders
+// from term specs; it never reads an instance.
 type OrderTerm =
   | { k: `num`; v: number }
   | { k: `text`; v: string }
@@ -1747,7 +1751,7 @@ const orderStates = [
   `class-before-object`,
   // A value class met a primitive.
   `primitive-before-class`,
-  // A nested array met an object without a value class.
+  // A nested array met an object.
   `array-after-object`,
   // An array pair came up again inside its own comparison.
   `cycle-closed`,
@@ -1765,6 +1769,19 @@ const orderStates = [
   `typed-array-excluded`,
   // The sort order compared two plain objects.
   `objects-sorted-apart`,
+  // Two array elements that sorting orders by reference tied the arrays.
+  `objects-tied`,
+  // A Temporal element met another object without a value class.
+  `kinds-ranked`,
+  // A number element met a text element.
+  `mixed-primitives`,
+  // Arrays without a value class ordered by their elements.
+  `plain-arrays-ordered`,
+  // Three arrays in a strict chain were checked for transitivity.
+  `transitive-chain`,
+  // An array pair that sorting orders without references was checked
+  // against sorting.
+  `sort-agreed`,
 ] as const
 type OrderState = (typeof orderStates)[number]
 
@@ -1904,22 +1921,25 @@ function nativeOrder(left: OrderTerm, right: OrderTerm): number {
   return x < y ? -1 : x > y ? 1 : 0
 }
 
+type ModelVerdict = number | `tie`
+
 function modelOrder(
   left: OrderTerm,
   right: OrderTerm,
   reach: (state: OrderState) => void,
 ): number {
-  const nonNull = (
-    a: OrderTerm,
-    b: OrderTerm,
-    active: Map<OrderTerm, Set<OrderTerm>>,
-  ): number => {
+  const nonNull = (a: OrderTerm, b: OrderTerm): number => {
     if (a.k === `bytes` || b.k === `bytes`) reach(`typed-array-excluded`)
     if (a.k === `date` && b.k === `date`) {
       reach(`temporal-pair`)
       return signOf(a.day - b.day)
     }
-    if (holdsClass(a) || holdsClass(b)) return holding(a, b, active)
+    if (isArrayTerm(a) || isArrayTerm(b)) {
+      if (!holdsClass(a) && !holdsClass(b)) reach(`plain-arrays-ordered`)
+      const result = arrays(a, b, new Map())
+      return result === `tie` ? 0 : result
+    }
+    if (isClassTerm(a) || isClassTerm(b)) return withClass(a, b)
     reach(`native-order`)
     try {
       return nativeOrder(a, b)
@@ -1928,42 +1948,65 @@ function modelOrder(
       throw error
     }
   }
-  const holding = (
+  // At least one is an array.
+  const arrays = (
     a: OrderTerm,
     b: OrderTerm,
     active: Map<OrderTerm, Set<OrderTerm>>,
-  ): number => {
-    if (isArrayTerm(a) && isArrayTerm(b)) {
-      let partners = active.get(a)
-      if (partners === undefined) active.set(a, (partners = new Set()))
-      if (partners.has(b)) {
-        reach(`cycle-closed`)
-        return 0
-      }
-      partners.add(b)
-      const aItems = elementsOf(a)
-      const bItems = elementsOf(b)
-      for (
-        let index = 0;
-        index < Math.min(aItems.length, bItems.length);
-        index++
-      ) {
-        const x = aItems[index]!
-        const y = bItems[index]!
-        let result: number
-        if (x.k === `null` || y.k === `null`) {
-          if (x.k !== y.k) reach(`null-element`)
-          result = x.k === y.k ? 0 : x.k === `null` ? -1 : 1
-        } else result = nonNull(x, y, active)
-        if (result !== 0) return result
-      }
-      partners.delete(b)
-      return signOf(aItems.length - bItems.length)
-    }
+  ): ModelVerdict => {
     if (isArrayTerm(a) !== isArrayTerm(b)) {
       if (isObjectTerm(isArrayTerm(a) ? b : a)) reach(`array-after-object`)
       return isArrayTerm(a) ? 1 : -1
     }
+    let partners = active.get(a)
+    if (partners === undefined) active.set(a, (partners = new Set()))
+    if (partners.has(b)) {
+      reach(`cycle-closed`)
+      return 0
+    }
+    partners.add(b)
+    const aItems = elementsOf(a)
+    const bItems = elementsOf(b)
+    for (
+      let index = 0;
+      index < Math.min(aItems.length, bItems.length);
+      index++
+    ) {
+      const result = element(aItems[index]!, bItems[index]!, active)
+      if (result !== 0) return result
+    }
+    partners.delete(b)
+    return signOf(aItems.length - bItems.length)
+  }
+  const element = (
+    x: OrderTerm,
+    y: OrderTerm,
+    active: Map<OrderTerm, Set<OrderTerm>>,
+  ): ModelVerdict => {
+    if (x.k === `null` || y.k === `null`) {
+      if (x.k !== y.k) reach(`null-element`)
+      return x.k === y.k ? 0 : x.k === `null` ? -1 : 1
+    }
+    if (x.k === `bytes` || y.k === `bytes`) reach(`typed-array-excluded`)
+    if (isArrayTerm(x) || isArrayTerm(y)) return arrays(x, y, active)
+    if (isClassTerm(x) || isClassTerm(y)) return withClass(x, y)
+    if (isObjectTerm(x) && isObjectTerm(y)) {
+      if (x.k === `date` && y.k === `date`) {
+        reach(`temporal-pair`)
+        return signOf(x.day - y.day)
+      }
+      if (x.k === `date` || y.k === `date`) {
+        reach(`kinds-ranked`)
+        return x.k === `date` ? -1 : 1
+      }
+      reach(`objects-tied`)
+      return `tie`
+    }
+    if (isObjectTerm(x) !== isObjectTerm(y)) return isObjectTerm(x) ? 1 : -1
+    return primitives(x, y)
+  }
+  // Neither is an array and at least one is a value class.
+  const withClass = (a: OrderTerm, b: OrderTerm): number => {
     const aText = serializedTerm(a)
     const bText = serializedTerm(b)
     if (aText !== undefined && bText !== undefined) {
@@ -1971,14 +2014,64 @@ function modelOrder(
         reach(`shaped-key-order`)
       return aText < bText ? -1 : aText > bText ? 1 : 0
     }
-    // Neither is an array and one holds a value class, so it is one.
     const classSide = aText !== undefined ? a : b
     const other = classSide === a ? b : a
     const classFirst = isObjectTerm(other)
     reach(classFirst ? `class-before-object` : `primitive-before-class`)
     return (classSide === a) === classFirst ? -1 : 1
   }
-  return nonNull(left, right, new Map())
+  // Numbers by value and texts by code units; a number and a text that does
+  // not spell one compare equal, as the relational operators do.
+  const primitives = (x: OrderTerm, y: OrderTerm): number => {
+    if (x.k !== y.k) reach(`mixed-primitives`)
+    return nativeOrder(x, y)
+  }
+  return nonNull(left, right)
+}
+
+// How sorting (ascComparator with lexical strings and nulls first) orders two
+// arrays, or `reference` where it would read references or recurse forever.
+// `tie` marks a first reference read between two objects without a value
+// class, where range predicates must tie.
+function modelSortOrder(
+  left: OrderTerm,
+  right: OrderTerm,
+): number | `tie` | `reference` {
+  const sort = (a: OrderTerm, b: OrderTerm): number | `tie` | `reference` => {
+    if (a.k === `null` || b.k === `null`)
+      return a.k === b.k ? 0 : a.k === `null` ? -1 : 1
+    if (a.k === `loop` || b.k === `loop`) return `reference`
+    if (a.k === `array` && b.k === `array`) {
+      for (
+        let index = 0;
+        index < Math.min(a.items.length, b.items.length);
+        index++
+      ) {
+        const result = sort(a.items[index]!, b.items[index]!)
+        if (result !== 0) return result
+      }
+      return signOf(a.items.length - b.items.length)
+    }
+    if (a.k === `date` && b.k === `date`) return signOf(a.day - b.day)
+    if (isObjectTerm(a) && isObjectTerm(b)) {
+      const aText = serializedTerm(a)
+      const bText = serializedTerm(b)
+      if (aText !== undefined || bText !== undefined) {
+        if (aText === undefined) return 1
+        if (bText === undefined) return -1
+        return aText < bText ? -1 : aText > bText ? 1 : 0
+      }
+      return isArrayTerm(a) ||
+        isArrayTerm(b) ||
+        a.k === `date` ||
+        b.k === `date`
+        ? `reference`
+        : `tie`
+    }
+    if (isObjectTerm(a) !== isObjectTerm(b)) return isObjectTerm(a) ? 1 : -1
+    return nativeOrder(a, b)
+  }
+  return sort(left, right)
 }
 
 // Records over primitive leaves, so a constructed history can be taken back.
@@ -2131,6 +2224,74 @@ function runOrderHistory(
         `pair ${position}: toJSON reads`,
       ).toBeLessThanOrEqual(1)
   }
+  checkArrayOrder(
+    history.pairs.flat().filter((term) => isArrayTerm(term)),
+    reach,
+  )
+}
+
+const LEXICAL_ORDER = {
+  direction: `asc`,
+  nulls: `first`,
+  stringSort: `lexical`,
+} as const
+
+// Range predicates over the history's array operands form one total preorder:
+// opposite pairs have opposite signs and the order is transitive, except
+// through a number and a text, which the relational operators leave
+// unordered. They agree with sorting wherever sorting reads no reference, and
+// tie where sorting first orders two objects without a value class by
+// reference.
+function checkArrayOrder(
+  terms: Array<OrderTerm>,
+  reach: (state: OrderState) => void,
+) {
+  const values = terms.map(materializeTerm)
+  for (const value of [...values].reverse()) identifyObjects(value)
+  const [gtRange, , ltRange] = rangeEvaluators.map(([, evaluate]) => evaluate)
+  const sign = new Map<string, number>()
+  const unordered = new Set<string>()
+  for (const [i, a] of values.entries())
+    for (const [j, b] of values.entries()) {
+      const pair = `${i},${j}`
+      const row = { a, b }
+      sign.set(pair, gtRange!(row) ? 1 : ltRange!(row) ? -1 : 0)
+      const states = new Set<OrderState>()
+      modelOrder(terms[i]!, terms[j]!, (state) => states.add(state))
+      if (states.has(`mixed-primitives`)) unordered.add(pair)
+      const sort = modelSortOrder(terms[i]!, terms[j]!)
+      const label = `operands ${pair}`
+      if (sort === `tie`) {
+        expect(
+          sign.get(pair),
+          `${label}: tie where sorting reads references`,
+        ).toBe(0)
+      } else if (sort !== `reference`) {
+        expect(
+          Math.sign(ascComparator(a, b, LEXICAL_ORDER)),
+          `${label}: sort model`,
+        ).toBe(sort)
+        expect(sign.get(pair), `${label}: range agrees with sorting`).toBe(sort)
+        if (sort !== 0) reach(`sort-agreed`)
+      }
+    }
+  for (const i of values.keys())
+    for (const j of values.keys()) {
+      expect(sign.get(`${i},${j}`), `operands ${i},${j}: opposite`).toBe(
+        -sign.get(`${j},${i}`)! || 0,
+      )
+      for (const k of values.keys()) {
+        const pairs = [`${i},${j}`, `${j},${k}`, `${i},${k}`]
+        if (pairs.some((pair) => unordered.has(pair))) continue
+        const [first, second, whole] = pairs.map((pair) => sign.get(pair)!)
+        if (first! < 0 || second! < 0) continue
+        if (first! > 0 && second! > 0) reach(`transitive-chain`)
+        const label = `operands ${pairs.join(` `)}: transitive`
+        expect(whole, label).toBeGreaterThanOrEqual(
+          first! > 0 || second! > 0 ? 1 : 0,
+        )
+      }
+    }
 }
 
 const record = (table: Table, id: `a` | `b`): OrderTerm => ({
@@ -2147,9 +2308,9 @@ describe(`value classes order arrays by their serialized value`, () => {
   oracleProperty({
     id: orderProperty,
     law: {
-      statement: `Range predicates over arrays that hold a value class compare element by element: a null first, a primitive before a value class, a value class by its serialized value with record keys sorted and before any other object, and a nested array after any value that is not an array; a pair met again inside its own comparison is equal. A Temporal pair compares as Temporal values, and values that hold no value class, including typed arrays and Temporal values with toJSON(), keep the native operators and their throws. The sort order keeps two distinct plain objects apart, and each value class instance is serialized at most once.`,
-      authority: `Issue #2459, the "Value classes" section of docs/guides/live-queries.md, and the compareValues contract in packages/db/src/utils/comparison.ts.`,
-      limits: `Numbers 0..12, four texts, records and record-shaped toJSON() classes over two tables and two IDs, one plain object shape, an empty Uint8Array subclass, three PlainDates, null elements, and arrays of up to three terms nested and self-referencing up to fast-check's small depth; one to six operand pairs plus each left operand against a copy. Arrays shared at several depths are covered by fixed tests.`,
+      statement: `Range predicates compare arrays element by element, whether or not they hold a value class, in one total preorder: opposite pairs have opposite signs and the order is transitive. A null sorts first, then primitives, value classes by their serialized value with record keys sorted, Temporal values, other objects, and nested arrays after any value that is not an array; a shorter prefix sorts first, and a pair met again inside its own comparison is equal. Range predicates agree with sorting wherever sorting orders two arrays without reading a reference, and where sorting first orders two other objects by reference they treat the arrays as equal. Values that are not arrays keep the native operators and their throws unless one is a value class, which sorts after a primitive and before any other object; a Temporal pair compares as Temporal values. The sort order keeps two distinct plain objects apart, and each value class instance is serialized at most once.`,
+      authority: `Issue #2459, the "Value classes" section of docs/guides/live-queries.md, the compareValues contract in packages/db/src/utils/comparison.ts, and the PR #2460 review (array comparison is one total order that agrees with sorting).`,
+      limits: `Numbers 0..12, four texts, records and record-shaped toJSON() classes over two tables and two IDs, one plain object shape, an empty Uint8Array subclass, three PlainDates, null elements, and arrays of up to three terms nested and self-referencing up to fast-check's small depth; one to six operand pairs plus each left operand against a copy, and every pair and triple of the history's array operands. A number and a text are unordered, so transitivity is not checked through such a pair; sorting is compared only where it reads no reference and holds no self-referencing array, and where it orders a Temporal value, an array or another object by reference, range predicates may order them by kind instead. Arrays shared at several depths are covered by fixed tests.`,
     },
     owns: [
       'src/utils/comparison.ts#compareValues',
@@ -2168,6 +2329,7 @@ describe(`value classes order arrays by their serialized value`, () => {
             `primitive-before-class`,
             `typed-array-excluded`,
             `native-order`,
+            `objects-sorted-apart`,
           ],
           build: (generated): OrderHistory =>
             withPairs(
@@ -2176,6 +2338,8 @@ describe(`value classes order arrays by their serialized value`, () => {
                 [array(num(3)), array(record(`org`, `b`))],
                 [array({ k: `bytes` }), array(num(0))],
                 [array({ k: `bytes` }, record(`user`, `a`)), array(num(0))],
+                [num(2), num(10)],
+                [leaf, { k: `leaf`, shape: 1 }],
               ],
               generated,
             ),
@@ -2200,25 +2364,27 @@ describe(`value classes order arrays by their serialized value`, () => {
             ),
         },
         {
-          name: `values without a value class keep the native operators`,
+          name: `arrays order by their elements in one order with sorting`,
           enters: [
             `native-order`,
             `native-throws`,
             `temporal-pair`,
-            `objects-sorted-apart`,
+            `objects-tied`,
+            `kinds-ranked`,
+            `mixed-primitives`,
+            `plain-arrays-ordered`,
+            `transitive-chain`,
+            `sort-agreed`,
           ],
           build: (generated): OrderHistory =>
             withPairs(
               [
                 [array(leaf, num(2)), array(leaf, num(10))],
-                [array(array(leaf), num(2)), array(array(leaf), num(10))],
+                [array(num(10)), array(num(5), record(`user`, `a`))],
+                [array(date(1), num(2)), array(date(2), leaf)],
+                [array(date(1)), array(leaf, { k: `text`, v: `a` })],
                 [date(1), leaf],
-                [
-                  array(date(1), record(`org`, `a`)),
-                  array(date(2), record(`org`, `a`)),
-                ],
-                [array(date(1)), array(num(5))],
-                [leaf, { k: `leaf`, shape: 1 }],
+                [array(num(1)), array({ k: `text`, v: `a` })],
               ],
               generated,
             ),
