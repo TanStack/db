@@ -354,8 +354,8 @@ const VALUE_CLASS_ORDER: CompareOptions = {
   stringSort: `lexical`,
 }
 
-// The order sorting gives objects without a value class that it does not
-// order by reference: Dates, then Temporal values, then everything else.
+// Sorting orders objects of different kinds by reference, so a range ranks the
+// kinds instead to stay one total order: Dates, Temporal values, then others.
 function objectKind(value: object): number {
   return value instanceof Date ? 0 : isTemporal(value) ? 1 : 2
 }
