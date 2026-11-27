@@ -131,6 +131,5 @@ We're looking for TanStack DB Partners to join our mission! Partner with us to p
 - <a href="https://github.com/tanstack/virtual"><b>TanStack Virtual</b></a> – Virtualized rendering
 
 … and more at <a href="https://tanstack.com"><b>TanStack.com »</b></a>
-v>
 
 <!-- Use the force, Luke -->
