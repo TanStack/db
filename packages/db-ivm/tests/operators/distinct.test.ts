@@ -227,6 +227,52 @@ function testDistinct() {
     ])
   })
 
+  test(`accepts a cyclic payload outside the selected key`, () => {
+    const payload: Record<string, unknown> = {}
+    payload.self = payload
+    const graph = new D2()
+    const input = graph.newInput<[number, unknown]>()
+    const messages: Array<MultiSet<[number, unknown]>> = []
+    input.pipe(
+      distinct(([key]) => key),
+      output((message) => void messages.push(message)),
+    )
+    graph.finalize()
+
+    input.sendData(new MultiSet([[[1, payload], 1]]))
+    graph.run()
+    input.sendData(new MultiSet([[[1, payload], -1]]))
+    graph.run()
+
+    expect(messages.map((message) => message.getInner())).toEqual([
+      [[[hash(1), payload], 1]],
+      [[[hash(1), payload], -1]],
+    ])
+  })
+
+  test(`never shows an input of weight zero`, () => {
+    const graph = new D2()
+    const input = graph.newInput<[number, string]>()
+    const messages: Array<MultiSet<[number, string]>> = []
+    input.pipe(
+      distinct(() => `same selection`),
+      output((message) => void messages.push(message)),
+    )
+    graph.finalize()
+
+    input.sendData(
+      new MultiSet([
+        [[1, `zero`], 0],
+        [[2, `present`], 1],
+      ]),
+    )
+    graph.run()
+
+    expect(messages.map((message) => message.getInner())).toEqual([
+      [[[hash(`same selection`), `present`], 1]],
+    ])
+  })
+
   test(`distinct with multiple batches of same key that cancel out`, () => {
     const graph = new D2()
     const input = graph.newInput<[string, number]>()

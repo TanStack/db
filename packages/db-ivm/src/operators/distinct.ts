@@ -12,8 +12,10 @@ import type { KeyValue } from '../types.js'
 
 type GetValue<T> = T extends KeyValue<unknown, infer V> ? V : never
 
-// Inputs supporting one selection. Equal inputs share a count, so a fresh copy
-// retracts its original, while a deep-equal row replacement hashes apart.
+// Inputs supporting one selection, bucketed by their key's digest so that a
+// payload outside the selection need not be hashable. Equal inputs share a
+// count, so a fresh copy retracts its original, while a deep-equal row
+// replacement compares apart.
 type Support<T> = Map<Hash, Array<[input: T, multiplicity: number]>>
 
 type DistinctEntry<T> = {
@@ -27,8 +29,14 @@ type DistinctEntry<T> = {
   support: Support<T>
 }
 
-function addSupport<T>(support: Support<T>, input: T, diff: number): void {
-  const digest = hash(input)
+function addSupport<T extends KeyValue<unknown, unknown>>(
+  support: Support<T>,
+  input: T,
+  diff: number,
+): void {
+  // An input of weight zero supports nothing.
+  if (diff === 0) return
+  const digest = hash(input[0])
   let inputs = support.get(digest)
   if (!inputs) support.set(digest, (inputs = []))
   const index = inputs.findIndex(([held]) => equalHashValues(held, input))
@@ -43,8 +51,11 @@ function addSupport<T>(support: Support<T>, input: T, diff: number): void {
   if (inputs.length === 0) support.delete(digest)
 }
 
-function isSupported<T>(support: Support<T>, input: T): boolean {
-  return (support.get(hash(input)) ?? []).some(([held]) =>
+function isSupported<T extends KeyValue<unknown, unknown>>(
+  support: Support<T>,
+  input: T,
+): boolean {
+  return (support.get(hash(input[0])) ?? []).some(([held]) =>
     equalHashValues(held, input),
   )
 }
