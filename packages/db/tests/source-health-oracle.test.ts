@@ -223,7 +223,11 @@
 import { fc } from '@fast-check/vitest'
 import { afterAll, afterEach, beforeEach, describe, expect } from 'vitest'
 import { createCollection, findProblems } from '../src/collection/index.js'
-import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
+import { DbClient, collectionOptions } from '../src/client.js'
+import {
+  createLiveQueryCollection,
+  liveQueryCollectionOptions,
+} from '../src/query/live-query-collection.js'
 import { createEffect } from '../src/query/effect.js'
 import { createPooledLiveQuery } from '../src/query/pooled-live-query.js'
 import { Query } from '../src/query/builder/index.js'
@@ -1431,23 +1435,40 @@ function liveQuery(query: Collection<any, any>, inner?: Collection<any, any>) {
   }
 }
 
+// How the driver creates each live-query Collection. The law does not depend
+// on it, so both paths share the model: `createLiveQueryCollection`, or a
+// DbClient that materializes `liveQueryCollectionOptions`.
+const constructions = [`direct`, `client`] as const
+type Construction = (typeof constructions)[number]
+
 function buildQuery(
   shape: Shape,
   A: Collection<Row, number>,
   B: Collection<Row, number>,
+  construction: Construction,
 ): Subject {
+  const client = new DbClient()
+  const createQuery = ((query: any) => {
+    if (construction === `direct`) return createLiveQueryCollection(query)
+    const id = `health-oracle-query-${Math.random().toString(36).slice(2)}`
+    return client.collection(
+      collectionOptions(id, () =>
+        liveQueryCollectionOptions({ id, query, startSync: false }),
+      ) as any,
+    )
+  }) as typeof createLiveQueryCollection
   switch (shape) {
     case `direct`:
-      return liveQuery(createLiveQueryCollection((q) => q.from({ a: A })))
+      return liveQuery(createQuery((q) => q.from({ a: A })))
     case `join`:
       return liveQuery(
-        createLiveQueryCollection((q) =>
+        createQuery((q) =>
           q.from({ a: A }).join({ b: B }, ({ a, b }) => eq(a.id, b.id)),
         ),
       )
     case `self-join`:
       return liveQuery(
-        createLiveQueryCollection((q) =>
+        createQuery((q) =>
           q
             .from({ first: A })
             .join({ second: A }, ({ first, second }) =>
@@ -1456,9 +1477,9 @@ function buildQuery(
         ),
       )
     case `nested`: {
-      const inner = createLiveQueryCollection((q) => q.from({ a: A }))
+      const inner = createQuery((q) => q.from({ a: A }))
       return liveQuery(
-        createLiveQueryCollection((q) =>
+        createQuery((q) =>
           q
             .from({ inner })
             .join({ b: B }, ({ inner: row, b }) => eq(row.id, b.id)),
@@ -1469,7 +1490,7 @@ function buildQuery(
     case `include`:
       // An included subquery materializes one child Collection per parent row.
       return liveQuery(
-        createLiveQueryCollection((q) =>
+        createQuery((q) =>
           q.from({ b: B }).select(({ b }) => ({
             id: b.id,
             items: include(
@@ -1479,7 +1500,7 @@ function buildQuery(
         ),
       )
     case `pooled-nested`: {
-      const inner = createLiveQueryCollection((q) => q.from({ a: A }))
+      const inner = createQuery((q) => q.from({ a: A }))
       const view = createPooledLiveQuery(
         new Query()
           .from({ inner })
@@ -1790,12 +1811,14 @@ async function runHistory(
   steps: ReadonlyArray<Step>,
   directSubscribers = true,
   reach?: HistoryReach,
+  construction: Construction = `direct`,
 ): Promise<void> {
   const sources = { A: createSource(`A`), B: createSource(`B`) }
   const { query, inner, start, size } = buildQuery(
     shape,
     sources.A.collection,
     sources.B.collection,
+    construction,
   )
   const model = freshModel()
   // A pooled view ends for good when its source is cleaned up, and a later
@@ -3207,34 +3230,46 @@ describe(`source failure and health oracle`, () => {
   // its independent source and query models. The generated arbitrary maps
   // its histories without an unmapper, so it cannot take these back; they
   // register as one enumerated property.
-  const namedShapeHistories = shapes.flatMap((shape) =>
-    Object.entries(namedHistories).map(([name, steps]) => ({
-      shape,
-      name,
-      steps,
-    })),
+  const namedShapeHistories = constructions.flatMap((construction) =>
+    shapes.flatMap((shape) =>
+      Object.entries(namedHistories).map(([name, steps]) => ({
+        construction,
+        shape,
+        name,
+        steps,
+      })),
+    ),
   )
   oracleProperty<(typeof namedShapeHistories)[number], Verdict>({
     id: `source-health.history-fixed`,
     law: {
       statement: `Every generated source step preserves the independently derived status, rows, health tree and event identities.`,
       authority: `The source-health laws and independent source and query models stated above.`,
-      limits: `The named histories in each of the six shapes, which the generated arbitrary cannot take back; each is replayed through the same driver and models.`,
+      limits: `The named histories in each of the six shapes and both constructions, which the generated arbitrary cannot take back; each is replayed through the same driver and models.`,
     },
     owns: [
       `src/collection/health-tree.ts`,
       `src/collection/lifecycle.ts`,
       `src/collection/subscription.ts`,
+      `src/query/live/collection-registry.ts`,
     ],
     histories: namedShapeHistories,
-    label: ({ shape, name }) => `${shape}: ${name}`,
+    label: ({ construction, shape, name }) =>
+      `${construction} ${shape}: ${name}`,
     model: recordedAssertionJudgment,
     driver: (history, observe) =>
       recordAssertionJudgment(
         `source-health.history-fixed`,
         history,
         observe,
-        () => runHistory(history.shape, history.steps),
+        () =>
+          runHistory(
+            history.shape,
+            history.steps,
+            true,
+            undefined,
+            history.construction,
+          ),
       ),
     check: forwardAssertionJudgment,
   })
@@ -3486,19 +3521,21 @@ describe(`source failure and health oracle`, () => {
         [...(prefix ?? []), ...rest],
       ]),
     fc.boolean(),
+    fc.constantFrom(...constructions),
   )
-  type StructuralHistory = [[Shape, Array<Step>], boolean]
+  type StructuralHistory = [[Shape, Array<Step>], boolean, Construction]
   oracleProperty<StructuralHistory, Verdict>({
     id: `source-health.history`,
     law: {
       statement: `Every generated source step preserves the independently derived status, rows, health tree and event identities.`,
       authority: `The source-health laws and independent source and query models stated above.`,
-      limits: `The unchanged six shapes, optional reach prefixes, twelve-step suffix and direct-subscriber choices.`,
+      limits: `The unchanged six shapes, optional reach prefixes, twelve-step suffix, direct-subscriber choices and both constructions.`,
     },
     owns: [
       `src/collection/health-tree.ts`,
       `src/collection/lifecycle.ts`,
       `src/collection/subscription.ts`,
+      `src/query/live/collection-registry.ts`,
     ],
     histories: {
       arbitrary: historyArbitrary,
@@ -3509,7 +3546,7 @@ describe(`source failure and health oracle`, () => {
     model: recordedAssertionJudgment,
     driver: (history, observe) =>
       recordAssertionJudgment(`source health history`, history, observe, () => {
-        const [[shape, steps], directSubscribers] = history
+        const [[shape, steps], directSubscribers, construction] = history
         if (structuralCampaign) historiesRan = true
         const counts = structuralCampaign
           ? historyCounts
@@ -3520,6 +3557,7 @@ describe(`source failure and health oracle`, () => {
             steps,
             directSubscribers,
             healthHistoryReach(counts, observe),
+            construction,
           ),
         )
       }),

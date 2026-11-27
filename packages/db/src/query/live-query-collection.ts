@@ -1,9 +1,5 @@
 import { createCollection } from '../collection/index.js'
 import { CollectionConfigBuilder } from './live/collection-config-builder.js'
-import {
-  getBuilderFromConfig,
-  registerCollectionBuilder,
-} from './live/collection-registry.js'
 import type { LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 import type { LiveQueryCollectionConfig } from './live/types.js'
 import type {
@@ -216,16 +212,9 @@ function bridgeToCreateCollection<
 >(
   options: CollectionConfig<TResult> & { utils: TUtils },
 ): Collection<TResult, string | number, TUtils> {
-  const collection = createCollection(options as any) as unknown as Collection<
+  return createCollection(options as any) as unknown as Collection<
     TResult,
     string | number,
-    LiveQueryCollectionUtils
+    TUtils
   >
-
-  const builder = getBuilderFromConfig(options)
-  if (builder) {
-    registerCollectionBuilder(collection, builder)
-  }
-
-  return collection as unknown as Collection<TResult, string | number, TUtils>
 }
