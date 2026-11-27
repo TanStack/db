@@ -1,5 +1,18 @@
 # @tanstack/db-sqlite-persistence-core
 
+## 1.0.0-rc.1.6
+
+### Patch Changes
+
+- Abort stale persisted source writes and preserve scoped recovery after cache-claim expiry. Bind native PowerSync confirmations to the writing Collection's sync run. Reject impossible TrailBase confirmations promptly while retaining fresh evidence across delayed responses and preventing older events from confirming new writes. ([#2446](https://github.com/TanStack/db/pull/2446))
+
+- Make the TypeScript peer dependency optional so JavaScript consumers do not automatically install the compiler. Keep the existing minimum version requirement for projects that install TypeScript. ([#2417](https://github.com/TanStack/db/pull/2417))
+
+- Preserve source commit order when a queued SQLite hydration overlaps later sync writes. Keep partial-update baselines and independent-abort behavior when a subset read fails. ([#2446](https://github.com/TanStack/db/pull/2446))
+
+- Updated dependencies [[`55e8692`](https://github.com/TanStack/db/commit/55e8692a78c6ef4b6b58dff05c1e8cd2d5d7d260), [`83c8ebd`](https://github.com/TanStack/db/commit/83c8ebdf60d8a3bd5d2e2aa8c12870023691c634), [`01f7b32`](https://github.com/TanStack/db/commit/01f7b324cd6ff6445e986f5b765d28fd73e7f5ac)]:
+  - @tanstack/db@1.0.0-rc.1.6
+
 ## 1.0.0-rc.1.5
 
 ### Patch Changes
