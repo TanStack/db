@@ -110,10 +110,12 @@ export class LiveQueryObserverClient<
 
   getServerSnapshot(preloadRequested: boolean): LiveQuerySnapshot<T, TKey> {
     preloadRequested &&= this.client._isSsrStreamingEnabled()
+    // A disabled query renders no rows on the server, so no record is owed.
     if (
       typeof window !== `undefined` &&
       !this.authoritative &&
-      this.queryHash
+      this.queryHash &&
+      this.collection
     ) {
       const waiting = this.client._waitForSsrLiveQuery(this.queryHash, true)
       if (waiting) throw waiting

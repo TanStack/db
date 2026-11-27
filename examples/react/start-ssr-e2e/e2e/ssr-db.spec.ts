@@ -91,3 +91,23 @@ test(`TanStack Start streams a DB result snapshot and hands off to browser sync`
   )
   expect(browserErrors).toEqual([])
 })
+
+test(`TanStack Start hydrates a disabled live query after the DB stream ends`, async ({
+  page,
+}) => {
+  const browserErrors: Array<string> = []
+  page.on(`console`, (message) => {
+    if (message.type() === `error`) {
+      browserErrors.push(message.text())
+    }
+  })
+  page.on(`pageerror`, (error) => {
+    browserErrors.push(error.message)
+  })
+
+  await page.goto(`/disabled-query`)
+
+  await expect(page.getByTestId(`hydration-state`)).toHaveText(`hydrated`)
+  await expect(page.getByTestId(`query-status`)).toHaveText(`disabled`)
+  expect(browserErrors).toEqual([])
+})
