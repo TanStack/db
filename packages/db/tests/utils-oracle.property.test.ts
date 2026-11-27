@@ -1260,11 +1260,10 @@ describe(`row equality and value classes`, () => {
       )
       class Tagged {
         #json: string
-        constructor(
-          public field: number,
-          json: string,
-        ) {
-          this.#json = json
+        readonly field: number
+        constructor(value: number, serialized: string) {
+          this.field = value
+          this.#json = serialized
         }
         toJSON(): string {
           return this.#json
