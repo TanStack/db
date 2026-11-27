@@ -219,7 +219,7 @@ async function runSameKey(
         : [
             {
               type: endsAbsent ? `delete` : startsAbsent ? `insert` : `update`,
-              original: startsAbsent ? {} : endsAbsent ? first : original,
+              original: startsAbsent ? {} : original,
               modified: endsAbsent ? first : final,
               changes: endsAbsent
                 ? first

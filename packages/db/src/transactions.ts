@@ -180,7 +180,7 @@ function getTransactionAmbientScope(transaction: object): TransactionScope {
  * Merge behavior truth table:
  * - (insert, update) → insert (merge changes, keep empty original)
  * - (insert, delete) → null (cancel both mutations)
- * - (update, delete) → delete (delete dominates)
+ * - (update, delete) → delete (keep the first original)
  * - (update, update) → update (replace with latest, union changes)
  * - (delete, delete) → delete (replace with latest)
  * - (insert, insert) → insert (replace with latest)
@@ -220,8 +220,13 @@ function mergePendingMutations<T extends object>(
     }
 
     case `delete`:
-      // An insert followed by a delete cancels. Otherwise the delete dominates.
-      return existing.type === `insert` ? null : incoming
+      // An insert followed by a delete cancels.
+      if (existing.type === `insert`) return null
+      // A delete after an update keeps the row as it was before the transaction.
+      if (existing.type === `update`) {
+        return { ...incoming, original: existing.original }
+      }
+      return incoming
 
     case `insert`: {
       if (existing.type === `insert`) return incoming
@@ -554,7 +559,7 @@ class Transaction<T extends object = Record<string, unknown>> {
    *
    * - **insert + update** → insert (merge changes, keep empty original)
    * - **insert + delete** → removed (mutations cancel each other out)
-   * - **update + delete** → delete (delete dominates)
+   * - **update + delete** → delete (keep the first original)
    * - **update + update** → update (union changes, keep first original)
    * - **delete + insert** → removed if restored, otherwise update
    * - **same type** → replace with latest
