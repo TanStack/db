@@ -24,6 +24,7 @@ import {
   collectPropRefs,
   getFromSources,
   getPropRefSourceAlias,
+  getWhereExpression,
   requireCollectionSource,
 } from '../ir.js'
 import { compileExpression } from './evaluators.js'
@@ -250,7 +251,8 @@ export function processJoins(
     )
     const routeJoinedSource =
       parentKeyStream !== undefined &&
-      (joinClause.from.type === `queryRef` ||
+      ((joinClause.from.type === `queryRef` &&
+        !isSourceFilter(joinClause.from)) ||
         ((joinClause.type === `right` || joinClause.type === `full`) &&
           !mainSourceIsParentFiltered) ||
         joinedExpressionUsesParent)
@@ -474,6 +476,23 @@ export function processJoins(
 }
 
 type JoinRefRole = `joined` | `main` | `ancestor` | `unknown`
+
+// The optimizer pushes a source's own `where` into a subquery over that
+// source. The subquery reads no parent value, so an include need not route it
+// by parent: it joins like the source and keeps keyed lazy demand, and the
+// filter narrows each keyed load.
+export function isSourceFilter({ query }: QueryRef): boolean {
+  const { from, where = [], ...rest } = query
+  return (
+    (from.type === `collectionRef` || from.type === `descriptorRef`) &&
+    Object.values<unknown>(rest).every((value) => value === undefined) &&
+    where.every((clause) =>
+      collectPropRefs(getWhereExpression(clause)).every(
+        (ref) => ref.bindingId === from.bindingId,
+      ),
+    )
+  )
+}
 
 function getJoinRefAlias(ref: PropRef): string | undefined {
   return getPropRefSourceAlias(ref) ?? ref.path[0]

@@ -54,6 +54,7 @@ import type { Collection } from '../../src/collection/index.js'
 import type { LoadSubsetOptions } from '../../src/types.js'
 import type { Context, QueryBuilder } from '../../src/query/index.js'
 import type {
+  JoinFilter,
   SourceWork,
   WorkObservation,
 } from './includes-work-counter-support.js'
@@ -79,9 +80,15 @@ import type {
  * The input grammar varies an integer filler count from 1 through 24. Zero is
  * the ablated baseline; negative and fractional counts are invalid fixture
  * sizes. Joined queries vary unrelated links and join targets separately.
- * The join-free query grows every source together. Counts 1, 2, and 3 cover the
- * smallest valid boundary, 24 covers the upper bound, and fixed and random
- * campaigns sample the range.
+ * Both joined laws also vary a join filter: none, a `where` on the links
+ * alone, or a `where` on the joined targets alone. The optimizer pushes each
+ * filter into its own source, and laws 2 and 3 must still hold: the targets
+ * stay keyed by the kept links' join values, so a filter narrows the keyed
+ * load and must not replace it or make the include scan a side
+ * (live/ARCHITECTURE.md, Initial demand and Work). The reference drops the
+ * filtered row's link. The join-free query grows every source together.
+ * Counts 1, 2, and 3 cover the smallest valid boundary, 24 covers the upper
+ * bound, and fixed and random campaigns sample the range.
  *
  * The boundary conditions matter. Collections preload before they receive
  * B-tree indexes. Filler rows never match a selected route. This suite checks
@@ -98,6 +105,21 @@ const joinedBaselineWork: SourceWork = {
   links: { delivered: 2, examined: 2 },
 }
 
+// Each join filter drops one row after a keyed read. A target filter drops
+// one of the two named targets: the root and both named targets are
+// examined, the root and one target delivered. A link filter drops one of
+// the group's two links, so only the kept link's target is named.
+const joinedBaselineWorkByFilter: Record<JoinFilter, SourceWork> = {
+  none: joinedBaselineWork,
+  target: { ...joinedBaselineWork, terms: { delivered: 2, examined: 3 } },
+  link: {
+    ...joinedBaselineWork,
+    terms: { delivered: 2, examined: 2 },
+    links: { delivered: 1, examined: 2 },
+  },
+}
+const joinFilters = Object.keys(joinedBaselineWorkByFilter) as Array<JoinFilter>
+
 const joinFreeBaselineWork: SourceWork = {
   terms: { delivered: 1, examined: 1 },
   meanings: { delivered: 1, examined: 1 },
@@ -105,61 +127,49 @@ const joinFreeBaselineWork: SourceWork = {
   links: { delivered: 2, examined: 2 },
 }
 
-let joinedBaselineObservation: WorkObservation
+const joinedBaselineObservations = new Map<JoinFilter, WorkObservation>()
 let joinFreeBaselineObservation: WorkObservation
 
-async function expectCorrelatedJoinWorkBound(
-  fillerCount: number,
+// Both joined laws compare a scaled run with the minimal run of the same
+// query, under each join filter.
+async function expectJoinedWorkBound(
+  filler: { terms: number; links: number },
+  joinFilter: JoinFilter,
 ): Promise<void> {
-  const baseline = joinedBaselineObservation
+  const baseline = joinedBaselineObservations.get(joinFilter)!
   const scaled = await observeWork({
-    filler: {
-      terms: 0,
-      meanings: 0,
-      groups: 0,
-      links: fillerCount,
-    },
+    filler: { ...filler, meanings: 0, groups: 0 },
     joinTargets: true,
+    joinFilter,
   })
   oracleAssertion('includes work-counter-oracle comparison 112', () =>
-    expect(baseline.result).toEqual(expectedResult({ joinTargets: true })),
+    expect(baseline.result).toEqual(
+      expectedResult({ joinTargets: true, joinFilter }),
+    ),
   )
   oracleAssertion('includes work-counter-oracle comparison 113', () =>
     expect(scaled.result).toEqual(baseline.result),
   )
   oracleAssertion('includes work-counter-oracle comparison 114', () =>
-    expect(baseline.sourceWork).toEqual(joinedBaselineWork),
+    expect(baseline.sourceWork).toEqual(joinedBaselineWorkByFilter[joinFilter]),
   )
-
   oracleAssertion('includes work-counter-oracle comparison 116', () =>
     expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork),
   )
 }
 
-async function expectJoinTargetWorkBound(fillerCount: number): Promise<void> {
-  const baseline = joinedBaselineObservation
-  const scaled = await observeWork({
-    filler: {
-      terms: fillerCount,
-      meanings: 0,
-      groups: 0,
-      links: 0,
-    },
-    joinTargets: true,
-  })
+async function expectCorrelatedJoinWorkBound(
+  fillerCount: number,
+  joinFilter: JoinFilter = `none`,
+): Promise<void> {
+  await expectJoinedWorkBound({ terms: 0, links: fillerCount }, joinFilter)
+}
 
-  oracleAssertion('includes work-counter-oracle comparison 131', () =>
-    expect(baseline.result).toEqual(expectedResult({ joinTargets: true })),
-  )
-  oracleAssertion('includes work-counter-oracle comparison 132', () =>
-    expect(scaled.result).toEqual(baseline.result),
-  )
-  oracleAssertion('includes work-counter-oracle comparison 133', () =>
-    expect(baseline.sourceWork).toEqual(joinedBaselineWork),
-  )
-  oracleAssertion('includes work-counter-oracle comparison 134', () =>
-    expectSourceWorkBound(scaled.sourceWork, baseline.sourceWork),
-  )
+async function expectJoinTargetWorkBound(
+  fillerCount: number,
+  joinFilter: JoinFilter = `none`,
+): Promise<void> {
+  await expectJoinedWorkBound({ terms: fillerCount, links: 0 }, joinFilter)
 }
 
 async function expectJoinFreeWorkBound(fillerCount: number): Promise<void> {
@@ -198,12 +208,16 @@ const joinFreeLaw = `Join-free correlated includes keep source work flat as unre
 
 describe(`includes deterministic work-counter oracle`, () => {
   beforeAll(async () => {
-    const [joinedBaseline, joinFreeBaseline] = await Promise.all([
-      observeWork({ filler: noFillers, joinTargets: true }),
+    const [joinFreeBaseline, ...joinedBaselines] = await Promise.all([
       observeWork({ filler: noFillers, joinTargets: false }),
+      ...joinFilters.map((joinFilter) =>
+        observeWork({ filler: noFillers, joinTargets: true, joinFilter }),
+      ),
     ])
-    joinedBaselineObservation = joinedBaseline
     joinFreeBaselineObservation = joinFreeBaseline
+    joinFilters.forEach((joinFilter, index) =>
+      joinedBaselineObservations.set(joinFilter, joinedBaselines[index]!),
+    )
   })
 
   oracleProperty({
@@ -241,7 +255,7 @@ describe(`includes deterministic work-counter oracle`, () => {
     law: {
       statement: joinTargetsLaw,
       authority: `Law 12 (work) and the physical planning and work contract in packages/db/src/query/live/ARCHITECTURE.md, stated at the start of this owner.`,
-      limits: `The join-target filler range endpoints 1 and 24.`,
+      limits: `The join-target filler range endpoints 1 and 24, under each join filter.`,
     },
     owns: [
       `src/collection/index.ts#createCollection`,
@@ -249,13 +263,16 @@ describe(`includes deterministic work-counter oracle`, () => {
       `src/local-only.ts#localOnlyCollectionOptions`,
       `src/query/live-query-collection.ts#createLiveQueryCollection`,
     ],
-    histories: [1, 24],
-    label: (fillers) => `checks join-target growth at filler count ${fillers}`,
-    resolve: (fillers) => ({ fillers }),
+    histories: joinFilters.flatMap((joinFilter) =>
+      [1, 24].map((fillers) => ({ fillers, joinFilter })),
+    ),
+    label: ({ fillers, joinFilter }) =>
+      `checks join-target growth at filler count ${fillers} (join filter ${joinFilter})`,
+    resolve: (history) => ({ ...history }),
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>
       recordAssertionJudgment(joinTargetsLaw, plan, observe, () =>
-        expectJoinTargetWorkBound(plan.fillers),
+        expectJoinTargetWorkBound(plan.fillers, plan.joinFilter),
       ),
     check: forwardAssertionJudgment,
   })
@@ -284,42 +301,41 @@ describe(`includes deterministic work-counter oracle`, () => {
     check: forwardAssertionJudgment,
   })
 
-  for (const campaign of campaigns(1709, `includes-work.correlated-links`)) {
-    registerIncludesProperty(
-      [fc.integer({ min: 1, max: 24 })],
-      {
-        ...campaign.options,
-        owns: [
-          `src/collection/index.ts#createCollection`,
-          `src/indexes/btree-index.ts`,
-          `src/local-only.ts#localOnlyCollectionOptions`,
-          `src/query/live-query-collection.ts#createLiveQueryCollection`,
-        ],
-      },
-      `a join preserves correlated source pushdown (${campaign.name})`,
-      (...args: Parameters<typeof expectCorrelatedJoinWorkBound>) => {
-        return expectCorrelatedJoinWorkBound(...args)
-      },
-    )
-  }
-
-  for (const campaign of campaigns(170_900, `includes-work.join-targets`)) {
-    registerIncludesProperty(
-      [fc.integer({ min: 1, max: 24 })],
-      {
-        ...campaign.options,
-        owns: [
-          `src/collection/index.ts#createCollection`,
-          `src/indexes/btree-index.ts`,
-          `src/local-only.ts#localOnlyCollectionOptions`,
-          `src/query/live-query-collection.ts#createLiveQueryCollection`,
-        ],
-      },
-      `indexed join-target growth keeps source work flat (${campaign.name})`,
-      (...args: Parameters<typeof expectJoinTargetWorkBound>) => {
-        return expectJoinTargetWorkBound(...args)
-      },
-    )
+  for (const [property, seed, statement, check] of [
+    [
+      `includes-work.correlated-links`,
+      1709,
+      `a join preserves correlated source pushdown`,
+      expectCorrelatedJoinWorkBound,
+    ],
+    [
+      `includes-work.join-targets`,
+      170_900,
+      `indexed join-target growth keeps source work flat`,
+      expectJoinTargetWorkBound,
+    ],
+  ] as const) {
+    for (const campaign of campaigns(seed, property)) {
+      // Every generated filler count runs under each join filter, so each
+      // campaign reaches every filter state whatever its seed.
+      registerIncludesProperty(
+        [fc.integer({ min: 1, max: 24 })],
+        {
+          ...campaign.options,
+          owns: [
+            `src/collection/index.ts#createCollection`,
+            `src/indexes/btree-index.ts`,
+            `src/local-only.ts#localOnlyCollectionOptions`,
+            `src/query/live-query-collection.ts#createLiveQueryCollection`,
+          ],
+        },
+        `${statement} under each join filter (${campaign.name})`,
+        async (fillerCount: number) => {
+          for (const joinFilter of joinFilters)
+            await check(fillerCount, joinFilter)
+        },
+      )
+    }
   }
 
   for (const campaign of campaigns(17_090, `includes-work.join-free`)) {

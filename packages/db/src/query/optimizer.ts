@@ -1049,8 +1049,8 @@ function remapWhereForSubquery(
   whereClause: BasicExpression<boolean>,
   outerAlias: string,
 ): BasicExpression<boolean> | undefined {
-  const firstFromAlias = getFirstFromAlias(subquery)
-  if (firstFromAlias === undefined) return undefined
+  const firstFrom = getFromSources(subquery.from)[0]
+  if (firstFrom === undefined) return undefined
 
   const remapExpression = (expression: BasicExpression): BasicExpression => {
     if (expression instanceof PropRef) {
@@ -1060,14 +1060,22 @@ function remapWhereForSubquery(
       const projected = field ? subquery.select?.[field] : undefined
       const hasNamespacedResult =
         subquery.join !== undefined || subquery.from.type === `unionFrom`
-      const innerPath =
-        projected instanceof PropRef
-          ? [...projected.path, ...expression.path.slice(2)]
-          : hasNamespacedResult
-            ? expression.path.slice(1)
-            : [firstFromAlias, ...expression.path.slice(1)]
 
-      return new PropRef(innerPath)
+      if (projected instanceof PropRef) {
+        return new PropRef(
+          [...projected.path, ...expression.path.slice(2)],
+          undefined,
+          projected.bindingId,
+        )
+      }
+      if (hasNamespacedResult) {
+        return new PropRef(expression.path.slice(1))
+      }
+      return new PropRef(
+        [firstFrom.alias, ...expression.path.slice(1)],
+        undefined,
+        firstFrom.bindingId,
+      )
     }
 
     if (expression instanceof Func) {
