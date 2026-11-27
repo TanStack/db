@@ -1274,6 +1274,13 @@ export interface SubscribeChangesOptions<
    */
   owner?: CollectionDependent
   /**
+   * The subscriber evaluates rows by reference, as a query's joins, functional
+   * filters and downstream predicates do, so it also receives a write that
+   * replaces a row with a deep-equal one.
+   * @internal
+   */
+  observesRowIdentity?: boolean
+  /**
    * The subscriber drops the rows it was sent when the Collection is cleaned
    * up, so cleanup retains none of them to reconcile later writes against.
    * @internal

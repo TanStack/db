@@ -1,3 +1,4 @@
+import { equalHashValues, registerOpaqueHash } from '@tanstack/db-ivm'
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
 import { and, eq } from '../query/builder/functions.js'
 import { PropRef, Value, getPropRefPropertyPath } from '../query/ir.js'
@@ -14,6 +15,8 @@ import { codedMessage, devBuild } from '../error-message.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
+  isSilentReplacement,
+  markSilentReplacement,
 } from './change-events.js'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexReader } from '../indexes/base-index.js'
@@ -95,6 +98,8 @@ type CollectionSubscriptionOptions = {
   owner?: CollectionDependent
   /** The subscriber drops its rows when the Collection is cleaned up. */
   discardsRowsOnCleanup?: boolean
+  /** The subscriber evaluates rows by reference, so it sees deep-equal writes. */
+  observesRowIdentity?: boolean
 }
 
 type TruncateReplayPublicationControl = NonNullable<
@@ -216,6 +221,7 @@ export class CollectionSubscription
   private stalePublishedRows = new Map<string | number, object>()
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => boolean
+  private matchesWhere: ((row: any) => boolean) | undefined
 
   private orderByIndex: IndexReader<string | number> | undefined
 
@@ -287,6 +293,10 @@ export class CollectionSubscription
       }
       callback(changes)
     }
+
+    this.matchesWhere = options.whereExpression
+      ? createFilterFunctionFromExpression(options.whereExpression)
+      : undefined
 
     // Create a filtered callback if where clause is provided
     this.filteredCallback = options.whereExpression
@@ -842,13 +852,34 @@ export class CollectionSubscription
           key,
           value: previousValue,
         })
-      } else if (!sameRowValue(value, previousValue)) {
+        continue
+      }
+      // As for an ordinary change, query operators must not merge the new row
+      // with an old one that hashes alike.
+      if (value !== previousValue && equalHashValues(previousValue, value))
+        registerOpaqueHash(value)
+      if (
+        !sameRowValue(value, previousValue) ||
+        // A deep-equal replacement can still change the filter's answer.
+        (this.matchesWhere !== undefined &&
+          this.matchesWhere(value) !== this.matchesWhere(previousValue))
+      ) {
         replacement.push({
           type: `update`,
           key,
           value,
           previousValue,
         })
+      } else if (value !== previousValue && this.options.observesRowIdentity) {
+        // A query reads rows by reference, so it follows a deep-equal replacement.
+        replacement.push(
+          markSilentReplacement({
+            type: `update`,
+            key,
+            value,
+            previousValue,
+          }),
+        )
       }
     }
     for (const [key, value] of finalRows) {
@@ -1322,6 +1353,24 @@ export class CollectionSubscription
     // missing content. Delegated publication keeps its private D2 contributions.
     if (this.bufferPrivately(newChanges)) return false
     return this.filteredCallback(newChanges)
+  }
+
+  /**
+   * Drops deep-equal replacements this subscription cannot observe. A query
+   * reads rows by reference and sees them all; for anyone else one is visible
+   * only where it changes the filter's answer.
+   */
+  visibleChanges(
+    changes: Array<ChangeMessage<any, any>>,
+  ): Array<ChangeMessage<any, any>> {
+    return changes.filter(
+      (change) =>
+        !isSilentReplacement(change) ||
+        this.options.observesRowIdentity === true ||
+        (this.matchesWhere !== undefined &&
+          this.matchesWhere(change.previousValue) !==
+            this.matchesWhere(change.value)),
+    )
   }
 
   /** Keep direct snapshot reads private while an authoritative replay is open. */

@@ -10,6 +10,7 @@ import {
   createOptimisticAction,
   eq,
   gt,
+  gte,
   include,
   localOnlyCollectionOptions,
   lte,
@@ -3322,6 +3323,178 @@ describe(`Query Collections`, () => {
       )
       expect(warnings).toHaveLength(0)
       warnSpy.mockRestore()
+    })
+
+    it(`matches and keeps identity for equal value-class captures without queryKey`, async () => {
+      // A record ID shaped like the `surrealdb` SDK's `RecordId` (#2459).
+      class RecordId {
+        readonly table: string
+        readonly id: string
+        constructor(table: string, id: string) {
+          this.table = table
+          this.id = id
+        }
+        toString() {
+          return `${this.table}:${this.id}`
+        }
+        toJSON() {
+          return this.toString()
+        }
+      }
+      type User = { id: RecordId; name: string }
+      const users = createCollection(
+        localOnlyCollectionOptions({
+          id: `derived-identity-value-class`,
+          getKey: (user: User) => user.id.toString(),
+          initialData: [
+            { id: new RecordId(`user`, `abc`), name: `A` },
+            { id: new RecordId(`user`, `xyz`), name: `B` },
+          ],
+        }),
+      )
+
+      // Each render builds a new, equal instance, as code that reads a
+      // route parameter does.
+      const { result, rerender } = renderHook(
+        ({ id }) =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ user: users })
+                .where(({ user }) => eq(user.id, new RecordId(`user`, id)))
+                .findOne(),
+          }),
+        { initialProps: { id: `abc` } },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data?.name).toBe(`A`)
+      })
+      const firstCollection = result.current.collection
+      rerender({ id: `abc` })
+      expect(result.current.collection).toBe(firstCollection)
+      rerender({ id: `xyz` })
+      await waitFor(() => {
+        expect(result.current.data?.name).toBe(`B`)
+      })
+
+      // A queryKey may hold a value class too.
+      const keyed = renderHook(() =>
+        useLiveQuery({
+          queryKey: [`user`, new RecordId(`user`, `abc`)],
+          query: (q) =>
+            q
+              .from({ user: users })
+              .where(({ user }) => eq(user.id, new RecordId(`user`, `abc`))),
+        }),
+      )
+      await waitFor(() => {
+        expect(keyed.result.current.data.map((user) => user.name)).toEqual([
+          `A`,
+        ])
+      })
+    })
+
+    it(`orders value-class bounds by serialization through rerenders`, async () => {
+      class Bound {
+        constructor(
+          readonly json: string,
+          readonly rank: number,
+        ) {}
+        toJSON() {
+          return this.json
+        }
+        valueOf() {
+          return this.rank
+        }
+      }
+      type Row = { id: string; bound: Bound }
+      const rows = createCollection(
+        localOnlyCollectionOptions({
+          id: `derived-identity-value-class-range`,
+          getKey: (row: Row) => row.id,
+          initialData: [{ id: `row`, bound: new Bound(`b`, 1) }],
+        }),
+      )
+      const { result, rerender } = renderHook(
+        ({ json, rank }) =>
+          useLiveQuery({
+            query: (q) =>
+              q
+                .from({ row: rows })
+                .where(({ row }) => gt(row.bound, new Bound(json, rank))),
+          }),
+        { initialProps: { json: `a`, rank: 5 } },
+      )
+
+      await waitFor(() => {
+        expect(result.current.data.map((row) => row.id)).toEqual([`row`])
+      })
+      const firstCollection = result.current.collection
+
+      // valueOf() changed but the serialization did not: the same query.
+      rerender({ json: `a`, rank: 0 })
+      expect(result.current.collection).toBe(firstCollection)
+      expect(result.current.data.map((row) => row.id)).toEqual([`row`])
+
+      // A changed bound is a new query with its own result.
+      rerender({ json: `c`, rank: 0 })
+      await waitFor(() => {
+        expect(result.current.data).toEqual([])
+      })
+      rerender({ json: `a`, rank: 9 })
+      await waitFor(() => {
+        expect(result.current.data.map((row) => row.id)).toEqual([`row`])
+      })
+    })
+
+    it(`keeps array range results across shared and distinct object leaves`, async () => {
+      class Bound {
+        constructor(readonly json: string) {}
+        toJSON() {
+          return this.json
+        }
+      }
+      type Row = { id: string; pair: Array<unknown> }
+      const shared = { shape: 1 }
+      const rows = createCollection(
+        localOnlyCollectionOptions({
+          id: `derived-identity-mixed-array-range`,
+          getKey: (row: Row) => row.id,
+          initialData: [{ id: `row`, pair: [shared, new Bound(`a`)] }],
+        }),
+      )
+      const render = (initialLeaf: object) =>
+        renderHook(
+          ({ leaf }) =>
+            useLiveQuery({
+              query: (q) =>
+                q
+                  .from({ row: rows })
+                  .where(({ row }) =>
+                    gte(row.pair as never, [leaf, new Bound(`a`)] as never),
+                  ),
+            }),
+          { initialProps: { leaf: initialLeaf } },
+        )
+
+      const reused = render(shared)
+      await waitFor(() => {
+        expect(reused.result.current.data.map((row) => row.id)).toEqual([`row`])
+      })
+      const firstCollection = reused.result.current.collection
+      reused.rerender({ leaf: { shape: 1 } })
+      expect(reused.result.current.collection).toBe(firstCollection)
+      expect(reused.result.current.data.map((row) => row.id)).toEqual([`row`])
+
+      // Compiled on its own, the replacement query has the same result.
+      const independent = render({ shape: 1 })
+      await waitFor(() => {
+        expect(independent.result.current.status).toBe(`ready`)
+      })
+      expect(independent.result.current.data.map((row) => row.id)).toEqual([
+        `row`,
+      ])
     })
 
     it(`uses explicit queryKey for functional query variants`, async () => {

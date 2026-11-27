@@ -5,6 +5,7 @@ import { distinct } from '../../src/operators/distinct.js'
 import { output } from '../../src/operators/output.js'
 import { MessageTracker, assertResults } from '../test-utils.js'
 import { hash } from '../../src/hashing/index.js'
+import { distinctCollisionFamily } from '../distinct-incrementalization-oracle.js'
 
 describe(`Operators`, () => {
   describe(`Efficient distinct operation`, () => {
@@ -191,6 +192,110 @@ function testDistinct() {
         [[hash([`key1`, 2]), 2], 1],
         [[hash([`key2`, 1]), 1], 1],
       ],
+    ])
+  })
+
+  test(`moves off a retired row whose hash collides with a live one`, () => {
+    const [retired, live] = distinctCollisionFamily(hash) as Array<
+      [unknown, unknown]
+    >
+    const graph = new D2()
+    const input = graph.newInput<[unknown, unknown]>()
+    const net: Array<[number, unknown, number]> = []
+
+    input.pipe(
+      distinct(() => `same selection`),
+      output((message) => {
+        for (const [[key, row], weight] of message.getInner()) {
+          const held = net.find(([k, r]) => k === key && r === row)
+          if (held) held[2] += weight
+          else net.push([key, row, weight])
+        }
+      }),
+    )
+    graph.finalize()
+
+    input.sendData(
+      new MultiSet([
+        [retired!, 1],
+        [live!, 1],
+      ]),
+    )
+    graph.run()
+    input.sendData(new MultiSet([[retired!, -1]]))
+    graph.run()
+
+    expect(net.filter(([, , weight]) => weight !== 0)).toEqual([
+      [hash(`same selection`), live![1], 1],
+    ])
+  })
+
+  test(`accepts a cyclic key outside the selection`, () => {
+    const key: Record<string, unknown> = {}
+    key.self = key
+    const graph = new D2()
+    const input = graph.newInput<[unknown, string]>()
+    const messages: Array<MultiSet<[number, string]>> = []
+    input.pipe(
+      distinct(() => `selection`),
+      output((message) => void messages.push(message)),
+    )
+    graph.finalize()
+
+    input.sendData(new MultiSet([[[key, `value`], 1]]))
+    graph.run()
+    input.sendData(new MultiSet([[[key, `value`], -1]]))
+    graph.run()
+
+    expect(messages.map((message) => message.getInner())).toEqual([
+      [[[hash(`selection`), `value`], 1]],
+      [[[hash(`selection`), `value`], -1]],
+    ])
+  })
+
+  test(`accepts a cyclic payload outside the selected key`, () => {
+    const payload: Record<string, unknown> = {}
+    payload.self = payload
+    const graph = new D2()
+    const input = graph.newInput<[number, unknown]>()
+    const messages: Array<MultiSet<[number, unknown]>> = []
+    input.pipe(
+      distinct(([key]) => key),
+      output((message) => void messages.push(message)),
+    )
+    graph.finalize()
+
+    input.sendData(new MultiSet([[[1, payload], 1]]))
+    graph.run()
+    input.sendData(new MultiSet([[[1, payload], -1]]))
+    graph.run()
+
+    expect(messages.map((message) => message.getInner())).toEqual([
+      [[[hash(1), payload], 1]],
+      [[[hash(1), payload], -1]],
+    ])
+  })
+
+  test(`never shows an input of weight zero`, () => {
+    const graph = new D2()
+    const input = graph.newInput<[number, string]>()
+    const messages: Array<MultiSet<[number, string]>> = []
+    input.pipe(
+      distinct(() => `same selection`),
+      output((message) => void messages.push(message)),
+    )
+    graph.finalize()
+
+    input.sendData(
+      new MultiSet([
+        [[1, `zero`], 0],
+        [[2, `present`], 1],
+      ]),
+    )
+    graph.run()
+
+    expect(messages.map((message) => message.getInner())).toEqual([
+      [[[hash(`same selection`), `present`], 1]],
     ])
   })
 

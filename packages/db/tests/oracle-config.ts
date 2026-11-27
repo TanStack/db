@@ -808,6 +808,11 @@ const staticOracleProperties = [
   `ir-identity.output-denotation`,
   `ir-identity.union-output-aliases`,
   `ir-identity.reference-queries`,
+  `serialized-value.query-equality`,
+  `serialized-value.array-order`,
+  `serialized-value.truncate-replay`,
+  `serialized-value.effect-joined-load`,
+  `serialized-value.pooled-residual-swap`,
   `query-identity.compiled-output`,
   `query-identity.equality-partition`,
   `where-predicate.publication`,
@@ -972,6 +977,7 @@ const staticOracleProperties = [
   `ivm.distinct-collisions-tuple`,
   `ivm.distinct-representatives`,
   `ivm.distinct-representatives-unit-split`,
+  `ivm.distinct-support-collisions`,
   `includes.bucket-collisions`,
   `query.distinct-collisions`,
   `query.distinct-collisions-ordered`,
@@ -1000,7 +1006,7 @@ const publicationProperties = [
 
 // utils-oracle and comparison-oracle number their properties in file order.
 const utilsProperties = Array.from(
-  { length: 43 },
+  { length: 44 },
   (_, index) => `utils.${index + 1}`,
 )
 const comparisonProperties = Array.from(

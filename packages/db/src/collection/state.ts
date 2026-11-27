@@ -6,6 +6,7 @@ import {
   SyncQueueInvariantError,
   SyncTransactionAbortedError,
 } from '../errors.js'
+import { markSilentReplacement } from './change-events.js'
 import type { DuplicateKeySyncError } from '../errors.js'
 import type {
   VirtualOrigin,
@@ -1470,6 +1471,17 @@ export class CollectionStateManager<
             value: newVisibleValue,
             previousValue: withPreviousVirtualProps(previousVisibleValue),
           })
+        } else if (previousVisibleValue !== newVisibleValue) {
+          // A deep-equal row publishes nothing by value, but an index and a
+          // filter on a reference-valued field must follow the new instance.
+          events.push(
+            markSilentReplacement({
+              type: `update`,
+              key,
+              value: newVisibleValue,
+              previousValue: withPreviousVirtualProps(previousVisibleValue),
+            }),
+          )
         }
       }
 

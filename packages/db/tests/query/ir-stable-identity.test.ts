@@ -5,7 +5,7 @@
 // ir-stable-identity-support.ts.
 import { describe, expect, it, vi } from 'vitest'
 import { Temporal } from 'temporal-polyfill'
-import { CollectionImpl } from '../../src/collection/index.js'
+import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { Query, getQueryIR } from '../../src/query/builder/index.js'
 import {
   add,
@@ -32,7 +32,8 @@ import {
   sum,
   upper,
 } from '../../src/query/builder/functions.js'
-import { include } from '../../src/query/index.js'
+import { createLiveQueryCollection, include } from '../../src/query/index.js'
+import { localOnlyCollectionOptions } from '../../src/local-only.js'
 import {
   UnhashableQueryIRError,
   getLoadSubsetDemandKey,
@@ -50,6 +51,7 @@ import {
   getRuntimeReferenceIdentity,
 } from '../../src/query/runtime-reference-identity.js'
 import { createValueIdentity } from '../../src/query/equality-value-identity.js'
+import { normalizeValue } from '../../src/utils/comparison.js'
 import {
   createAlphaRenamedImplicitJoinQuery,
   createProfileValueQuery,
@@ -1090,5 +1092,186 @@ describe(`stable QueryIR identity smoke test`, () => {
     expect(() =>
       getQueryIdentity(createProfileValueQuery(new OpaqueValue())),
     ).not.toThrow()
+  })
+})
+
+// A record ID shaped like the `surrealdb` SDK's `RecordId` (issue #2459).
+class RecordId {
+  readonly table: string
+  readonly id: string
+  constructor(table: string, id: string) {
+    this.table = table
+    this.id = id
+  }
+  toString(): string {
+    return `${this.table}:${this.id}`
+  }
+  toJSON(): string {
+    return this.toString()
+  }
+}
+
+describe(`value classes`, () => {
+  it(`hash by their serialized value`, () => {
+    const hash = getStableValueHash(new RecordId(`user`, `abc`))
+
+    expect(hash).toBe(`["toJSON","\\"user:abc\\""]`)
+    expect(getStableValueHash(new RecordId(`user`, `abc`))).toBe(hash)
+    expect(getStableValueHash(new RecordId(`user`, `xyz`))).not.toBe(hash)
+    expect(getStableValueHash(`user:abc`)).not.toBe(hash)
+    expect(getStableValueHash({ table: `user`, id: `abc` })).not.toBe(hash)
+    expect(
+      getStableValueHash([`currentUser`, new RecordId(`user`, `abc`)]),
+    ).toBe(getStableValueHash([`currentUser`, new RecordId(`user`, `abc`)]))
+  })
+
+  it(`hash a serialized record independently of its key order`, () => {
+    class Point {
+      readonly order: `xy` | `yx`
+      constructor(order: `xy` | `yx`) {
+        this.order = order
+      }
+      toJSON() {
+        return this.order === `xy` ? { x: 1, y: 2 } : { y: 2, x: 1 }
+      }
+    }
+
+    expect(getStableValueHash(new Point(`xy`))).toBe(
+      getStableValueHash(new Point(`yx`)),
+    )
+  })
+
+  it(`keep the rules of built-in values and classes without toJSON`, () => {
+    class OpaqueValue {
+      value = `Tanner`
+    }
+    class NoValue {
+      toJSON() {
+        return undefined
+      }
+    }
+
+    expect(getStableValueHash(new Date(0))).toBe(
+      `["Date","1970-01-01T00:00:00.000Z"]`,
+    )
+    expect(getStableValueHash(new Uint8Array([1]))).toBe(
+      `["binary","Uint8Array",[1]]`,
+    )
+    expect(() => getStableValueHash(new OpaqueValue())).toThrow(
+      UnhashableQueryIRError,
+    )
+    expect(() => getStableValueHash(new NoValue())).toThrow(
+      UnhashableQueryIRError,
+    )
+    expect(() =>
+      getStableValueHash(Temporal.PlainDate.from(`2026-01-02`)),
+    ).toThrow(UnhashableQueryIRError)
+  })
+
+  it(`keep the built-in rules of Map, Set and ArrayBuffer subclasses with toJSON`, () => {
+    class IdMap extends Map<never, never> {
+      toJSON() {
+        return `user:abc`
+      }
+    }
+    class IdSet extends Set<never> {
+      toJSON() {
+        return `user:abc`
+      }
+    }
+    class IdBuffer extends ArrayBuffer {
+      toJSON() {
+        return `user:abc`
+      }
+    }
+
+    for (const [instance, base] of [
+      [new IdMap(), new Map()],
+      [new IdSet(), new Set()],
+      [new IdBuffer(1), new ArrayBuffer(1)],
+    ] as const) {
+      // Equality and hashing both follow the base type, not toJSON().
+      expect(normalizeValue(instance)).toBe(instance)
+      expect(getStableValueHash(instance)).toBe(getStableValueHash(base))
+      expect(normalizeValue(instance)).not.toBe(
+        normalizeValue(new RecordId(`user`, `abc`)),
+      )
+    }
+  })
+
+  it(`give equal captures one query identity`, () => {
+    const query = (value: unknown) =>
+      getQueryIR(
+        new Query()
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.id, value as never)),
+      )
+
+    expect(getQueryIdentity(query(new RecordId(`user`, `abc`)))).toBe(
+      getQueryIdentity(query(new RecordId(`user`, `abc`))),
+    )
+    expect(getQueryIdentity(query(new RecordId(`user`, `abc`)))).not.toBe(
+      getQueryIdentity(query(new RecordId(`user`, `xyz`))),
+    )
+    expect(getQueryIdentity(query(new RecordId(`user`, `abc`)))).not.toBe(
+      getQueryIdentity(query(`user:abc`)),
+    )
+  })
+
+  it(`match an equal instance in inArray`, () => {
+    const id = new PropRef<unknown>([`row`, `id`])
+    const row = { row: { id: new RecordId(`user`, `abc`) } }
+    const constantList = new Func<boolean>(`in`, [
+      id,
+      new Value([new RecordId(`user`, `abc`)]),
+    ])
+    const rowList = new Func<boolean>(`in`, [
+      new Value(new RecordId(`user`, `abc`)),
+      new PropRef<unknown>([`row`, `ids`]),
+    ])
+
+    expect(compileExpression(constantList)(row)).toBe(true)
+    expect(
+      compileExpression(rowList)({
+        row: { ids: [new RecordId(`user`, `abc`)] },
+      }),
+    ).toBe(true)
+    expect(
+      compileExpression(new Func<boolean>(`in`, [id, new Value([`user:abc`])]))(
+        row,
+      ),
+    ).toBe(false)
+  })
+
+  // The reproduction from issue #2459.
+  it(`reproduces issue 2459: eq matches a distinct equal instance`, async () => {
+    const users = createCollection(
+      localOnlyCollectionOptions({
+        id: `issue-2459-users`,
+        getKey: (user: { id: RecordId; name: string }) => user.id.toString(),
+        initialData: [{ id: new RecordId(`user`, `abc`), name: `A` }],
+      }),
+    )
+    const ir = (value: RecordId) =>
+      getQueryIR(
+        new Query()
+          .from({ user: users })
+          .where(({ user }) => eq(user.id, value)),
+      )
+
+    expect(() => getStableValueHash(new RecordId(`user`, `abc`))).not.toThrow()
+    expect(getQueryIdentity(ir(new RecordId(`user`, `abc`)))).toBe(
+      getQueryIdentity(ir(new RecordId(`user`, `abc`))),
+    )
+
+    const live = createLiveQueryCollection((q) =>
+      q
+        .from({ user: users })
+        .where(({ user }) => eq(user.id, new RecordId(`user`, `abc`))),
+    )
+    await live.preload()
+    expect(live.toArray.map((user) => user.name)).toEqual([`A`])
+    await live.cleanup()
+    await users.cleanup()
   })
 })

@@ -3,7 +3,8 @@ import { createSourceRecord } from '../utils/source-record.js'
 import { createDeferred, resolveOnAbort } from '../deferred.js'
 import { reportUncaught, runAllCallbacks } from '../utils/callbacks.js'
 import { normalizeError } from '../utils/error.js'
-import { samePublishedValue } from '../utils.js'
+import { samePublishedValue, sameRowValue } from '../utils.js'
+import { isSilentReplacement } from '../collection/change-events.js'
 import { codedMessage, devBuild } from '../error-message.js'
 import { buildHealthTree, healthNode } from '../collection/health-tree.js'
 import { isFailedStatus } from '../live-query-primitives.js'
@@ -488,6 +489,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // repairs additionally need the preceding coherent values across graph runs.
   private publishedRows: Set<unknown> | Map<unknown, TRow> = new Set()
 
+  // Deep-equal source replacements wait until the rest of a batch has run, so
+  // the outputs they alone touch can be told from those of other changes.
+  private readonly pendingSilentChanges = new Map<
+    string,
+    Map<string | number, ChangeMessage<any, string | number>>
+  >()
+  private applyingSilentChanges = false
+  // Other changes that arrive while replacements run, such as rows a join loads
+  // for a replaced reference. They run after them, keeping their provenance.
+  private readonly normalDuringSilent: Array<
+    [string, Array<ChangeMessage<any, string | number>>]
+  > = []
+  // Output keys that a change other than a deep-equal replacement touched.
+  private readonly normallyChangedKeys = new Set<unknown>()
+
   // skipInitial state
   private readonly skipInitial: boolean
   private initialLoadComplete = false
@@ -568,6 +584,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       output((data) => {
         const messages = data.getInner()
         messages.reduce(accumulateEffectChanges<TRow>, this.pendingChanges)
+        if (!this.applyingSilentChanges) {
+          for (const [[key]] of messages) this.normallyChangedKeys.add(key)
+        }
       }),
     )
 
@@ -686,6 +705,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           whereExpression,
         ),
         owner: this.dependent,
+        observesRowIdentity: true,
         onTruncateReplayStart: (completion) => {
           // A replay can replace initial demand before its adapter call returns.
           this.trackInitialLoad(completion)
@@ -887,6 +907,31 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     changes: Array<ChangeMessage<any, string | number>>,
     scheduleGraph = true,
   ): void {
+    const normal = changes.filter((change) => {
+      if (isSilentReplacement(change)) {
+        let silent = this.pendingSilentChanges.get(sourceId)
+        if (!silent)
+          this.pendingSilentChanges.set(sourceId, (silent = new Map()))
+        silent.set(change.key, change)
+        return false
+      }
+      // A later change supersedes a replacement that has not run yet.
+      this.pendingSilentChanges.get(sourceId)?.delete(change.key)
+      return true
+    })
+    // An empty batch still settles ordered demand.
+    if (normal.length > 0 || changes.length === 0) {
+      if (this.applyingSilentChanges)
+        this.normalDuringSilent.push([sourceId, normal])
+      else this.deliverSourceChanges(sourceId, normal)
+    }
+    if (scheduleGraph) this.scheduleGraphRun()
+  }
+
+  private deliverSourceChanges(
+    sourceId: string,
+    changes: Array<ChangeMessage<any, string | number>>,
+  ): void {
     if (this.optimizableOrderByCollections[sourceId]) {
       const source = this.collectionSources.find(
         (candidate) => candidate.sourceId === sourceId,
@@ -901,7 +946,6 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       changes = [...splitUpdates(changes)]
     }
     this.sendChangesToD2(sourceId, changes)
-    if (scheduleGraph) this.scheduleGraphRun()
   }
 
   private setDemand(
@@ -1027,20 +1071,26 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     this.isGraphRunning = true
     try {
-      if (!this.graph.pendingWork()) this.loadMoreIfNeeded()
-      // Ordered refill can also dispose the runner between graph steps.
-      while (!this.isDisposed() && this.graph.pendingWork()) {
-        this.graph.run()
-        // A handler (via onBatchProcessed) or source error callback may have
-        // called dispose() during graph.run(). Stop early to avoid operating
-        // on stale state. TS narrows disposed to false from the guard above
-        // but it can change during graph.run() via callbacks.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        if (this.disposed) break
-        // After each step, check if ordered queries need more data.
-        // loadMoreIfNeeded may send data to D2 inputs (via requestLimitedSnapshot),
-        // causing pendingWork() to return true for the next iteration.
-        this.loadMoreIfNeeded()
+      this.runGraphToQuiescence()
+      // Replacements run after other changes. Anything either pass brings,
+      // such as a joined load's rows, runs before the batch publishes.
+      while (!this.isDisposed() && this.pendingSilentChanges.size > 0) {
+        this.applyingSilentChanges = true
+        try {
+          const silent = [...this.pendingSilentChanges]
+          this.pendingSilentChanges.clear()
+          for (const [sourceId, changes] of silent) {
+            this.deliverSourceChanges(sourceId, [...changes.values()])
+          }
+          this.runGraphToQuiescence()
+        } finally {
+          this.applyingSilentChanges = false
+        }
+        const normal = this.normalDuringSilent.splice(0)
+        for (const [sourceId, changes] of normal) {
+          this.deliverSourceChanges(sourceId, changes)
+        }
+        this.runGraphToQuiescence()
       }
       // Emit all accumulated events once the graph reaches quiescence
       this.flushPendingChanges()
@@ -1057,9 +1107,31 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
   }
 
+  private runGraphToQuiescence(): void {
+    // A handler or provider may have disposed the Effect, clearing the graph.
+    if (this.isDisposed()) return
+    const graph = this.graph!
+    if (!graph.pendingWork()) this.loadMoreIfNeeded()
+    // Ordered refill can also dispose the runner between graph steps.
+    while (!this.isDisposed() && graph.pendingWork()) {
+      graph.run()
+      // A handler (via onBatchProcessed) or source error callback may have
+      // called dispose() during graph.run(). Stop early to avoid operating
+      // on stale state.
+      if (this.disposed) break
+      // After each step, check if ordered queries need more data.
+      // loadMoreIfNeeded may send data to D2 inputs (via requestLimitedSnapshot),
+      // causing pendingWork() to return true for the next iteration.
+      this.loadMoreIfNeeded()
+    }
+  }
+
   /** Classify accumulated changes into DeltaEvents and invoke the callback */
   private flushPendingChanges(): void {
-    if (this.pendingChanges.size === 0) return
+    if (this.pendingChanges.size === 0) {
+      this.normallyChangedKeys.clear()
+      return
+    }
 
     if (
       this.orderedPublicationFailed ||
@@ -1081,6 +1153,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
         key as TKey,
         changes,
         this.publishedRows,
+        !this.normallyChangedKeys.has(key),
       )
       if (event) {
         if (event.type === `exit`) this.publishedRows.delete(key)
@@ -1092,6 +1165,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
 
     this.pendingChanges = new Map()
+    this.normallyChangedKeys.clear()
 
     if (events.length > 0) {
       this.onBatchProcessed(events)
@@ -1255,6 +1329,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private clearPipelineState(): void {
     this.sentToD2RowsBySource.clear()
     this.pendingChanges.clear()
+    this.pendingSilentChanges.clear()
+    this.normalDuringSilent.length = 0
+    this.normallyChangedKeys.clear()
     this.publishedRows.clear()
     this.pendingOrderedPublications.clear()
     this.pendingInitialLoads.clear()
@@ -1337,6 +1414,10 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
   key: TKey,
   changes: EffectChanges<TRow>,
   publishedRows: ReadonlySet<unknown> | ReadonlyMap<unknown, TRow>,
+  // Only deep-equal source replacements touched this output. They reach the
+  // graph so that reference predicates can re-evaluate, and a row they leave
+  // in the result with an equal value did not change.
+  silentReplacement: boolean,
 ): DeltaEvent<TRow, TKey> | undefined {
   const { inserts, deletes, insertValue, deleteValue } = changes
   const wasPresent = publishedRows.has(key)
@@ -1359,6 +1440,7 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
     wasPresent &&
     isPresent &&
     insertValue !== undefined &&
+    !(silentReplacement && sameRowValue(previousValue, insertValue)) &&
     (publishedRows instanceof Set ||
       !samePublishedValue(previousValue, insertValue))
   ) {

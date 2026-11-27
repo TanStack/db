@@ -1,6 +1,7 @@
 import { isPlainObject } from '../utils/type-guards.js'
 import { UnhashableQueryIRError } from '../errors.js'
 import { normalizeValue } from '../utils/comparison.js'
+import { serializedClassValue } from '../utils.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
 import {
@@ -1036,6 +1037,13 @@ function canonicalizeRuntimeValue(
     return canonicalizeObject(value, path, seen)
   }
 
+  // A value class hashes by its serialized value. The tag keeps it apart from
+  // a plain string or record equal to that serialization.
+  const serialized = serializedClassValue(value)
+  if (serialized !== undefined) {
+    return [`toJSON`, serialized]
+  }
+
   throw new UnhashableQueryIRError(path, `non-plain object value`)
 }
 
@@ -1113,8 +1121,14 @@ function canonicalizeOrderingRuntimeValue(
     return canonicalizeRuntimeValue(Number.NaN, path, seen)
   }
 
+  // A valid Date keeps its own identity: a value class sorts before a Date but
+  // after the Date's timestamp.
   const normalized = normalizeValue(value)
-  if (normalized !== value && !(value instanceof Uint8Array)) {
+  if (
+    normalized !== value &&
+    !(value instanceof Uint8Array) &&
+    !(value instanceof Date)
+  ) {
     return canonicalizeRuntimeValue(normalized, path, seen)
   }
 

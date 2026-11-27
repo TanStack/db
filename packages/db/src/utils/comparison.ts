@@ -1,4 +1,4 @@
-import { durationFields, isTemporal } from '../utils'
+import { durationFields, isTemporal, serializedClassValue } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
 import type { DurationFields } from '../utils'
@@ -92,8 +92,17 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   const bIsObject = typeof b === `object`
 
   if (aIsObject || bIsObject) {
-    // Symbols and objects share the runtime's reference-identity sequence.
     if (aIsObject && bIsObject) {
+      // Value classes order by their serialized value, before other objects,
+      // so equal instances compare equal in sorts and tree indexes.
+      const aJSON = serializedClassValue(a)
+      const bJSON = serializedClassValue(b)
+      if (aJSON !== undefined || bJSON !== undefined) {
+        if (aJSON === undefined) return 1
+        if (bJSON === undefined) return -1
+        return aJSON < bJSON ? -1 : aJSON > bJSON ? 1 : 0
+      }
+      // Symbols and objects share the runtime's reference-identity sequence.
       const aId = getRuntimeReferenceIdentity(a)[2]
       const bId = getRuntimeReferenceIdentity(b)[2]
       return aId - bId
@@ -291,6 +300,13 @@ export function normalizeValue(value: any): any {
     return normalizeBinary(value)
   }
 
+  // A value class compares by its serialized value, in a namespace no plain
+  // string or other normalized value occupies.
+  const serialized = serializedClassValue(value)
+  if (serialized !== undefined) {
+    return normalizedKey(`toJSON`, serialized)
+  }
+
   return value
 }
 
@@ -332,13 +348,97 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
   return compare(a, b)
 }
 
+const VALUE_CLASS_ORDER: CompareOptions = {
+  direction: `asc`,
+  nulls: `first`,
+  stringSort: `lexical`,
+}
+
+// Sorting orders objects of different kinds by reference, so a range ranks the
+// kinds instead to stay one total order: Dates, Temporal values, then others.
+function objectKind(value: object): number {
+  return value instanceof Date ? 0 : isTemporal(value) ? 1 : 2
+}
+
+/**
+ * Order two array elements as sorting does, or return `undefined` where sorting
+ * would order them by reference. Query identity hashes plain objects by shape,
+ * so a range ties two arrays from such an element on.
+ */
+function compareElements(
+  a: unknown,
+  b: unknown,
+  visiting: Map<unknown, Set<unknown>>,
+): number | undefined {
+  if (a != null && b != null && !isUnorderable(a) && !isUnorderable(b)) {
+    if (Array.isArray(a) || Array.isArray(b))
+      return compareArrays(a, b, visiting)
+    if (
+      typeof a === `object` &&
+      typeof b === `object` &&
+      serializedClassValue(a) === undefined &&
+      serializedClassValue(b) === undefined
+    ) {
+      const aKind = objectKind(a)
+      const bKind = objectKind(b)
+      if (aKind !== bKind) return aKind < bKind ? -1 : 1
+      if (aKind === 2) return undefined
+    }
+    // Two symbols compare by identity, so they tie, as two plain objects do.
+    if (typeof a === `symbol` && typeof b === `symbol`) return undefined
+  }
+  return Math.sign(ascComparator(a, b, VALUE_CLASS_ORDER))
+}
+
+/**
+ * Order two values when at least one is an array: element by element, with a
+ * shorter prefix first and an array after any value that is not an array
+ * except a symbol, which sorting puts last.
+ */
+function compareArrays(
+  a: unknown,
+  b: unknown,
+  visiting = new Map<unknown, Set<unknown>>(),
+): number | undefined {
+  if (!Array.isArray(a) || !Array.isArray(b)) {
+    if (typeof a === `symbol`) return 1
+    if (typeof b === `symbol`) return -1
+    return Array.isArray(a) ? 1 : -1
+  }
+  // Only this pair coming up again inside its own comparison is a cycle. An
+  // array that both operands share at different depths is compared in full.
+  let partners = visiting.get(a)
+  if (partners === undefined) visiting.set(a, (partners = new Set()))
+  if (partners.has(b)) return 0
+  partners.add(b)
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    const result = compareElements(a[index], b[index], visiting)
+    if (result !== 0) return result
+  }
+  partners.delete(b)
+  return Math.sign(a.length - b.length)
+}
+
+function isValueClass(value: unknown): boolean {
+  return (
+    typeof value === `object` &&
+    value !== null &&
+    serializedClassValue(value) !== undefined
+  )
+}
+
 /**
  * Order two non-null values, returning -1, 0, or 1.
  *
  * Temporal types intentionally throw from `valueOf` to prevent silent
  * miscomparison via the native relational operators — delegate to
- * `compareTemporalValues` for them. For everything else (numbers, strings,
- * Dates via `valueOf`, etc.) the native operators do the right thing.
+ * `compareTemporalValues` for them; two Temporal types throw, inside an array
+ * as outside it, as they do in sorting. A value class uses the sort order, which
+ * reads its serialized value: equal captures are one query, so a range must
+ * not depend on `valueOf`. Arrays compare element by element in one order that
+ * agrees with sorting, tying where sorting would read references. For
+ * everything else (numbers, strings, Dates via `valueOf`, etc.) the native
+ * operators do the right thing.
  *
  * Callers must handle null/undefined themselves — this helper assumes both
  * arguments are non-null.
@@ -346,6 +446,10 @@ export function compareTemporalValues(a: unknown, b: unknown): number {
 export function compareValues(a: unknown, b: unknown): number {
   if (isTemporal(a) && isTemporal(b)) {
     return compareTemporalValues(a, b)
+  }
+  if (Array.isArray(a) || Array.isArray(b)) return compareArrays(a, b) ?? 0
+  if (isValueClass(a) || isValueClass(b)) {
+    return Math.sign(ascComparator(a, b, VALUE_CLASS_ORDER))
   }
   return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
 }

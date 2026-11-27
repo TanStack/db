@@ -884,6 +884,30 @@ Comparisons follow SQL/PostgreSQL conventions rather than raw JavaScript:
 - **`null` / `undefined` use three-valued logic.** Any comparison involving `null` or `undefined` evaluates to `UNKNOWN`, so the row is not matched. For example `eq(user.score, null)` matches nothing — use a dedicated null check (e.g. `isUndefined`) to match missing values.
 - **`NaN` follows PostgreSQL float semantics.** `NaN` is treated as equal to itself and greater than every other (non-null) value. So `eq(row.value, NaN)` matches `NaN` rows, `gt(row.value, x)` includes `NaN`, and ordering by such a field places `NaN` last. (Invalid `Date` values, whose timestamp is `NaN`, behave the same way.) This differs from JavaScript, where `NaN === NaN` is `false`, and matches how PostgreSQL orders and indexes floating-point values.
 
+#### Value classes
+
+A value class is a class whose instances define a `toJSON()` method, such as the `RecordId` of the `surrealdb` SDK or a decimal type. Queries compare its instances by their serialized value rather than by reference, so a distinct instance with the same `toJSON()` result matches:
+
+```tsx
+// userId and user.id are both RecordId instances, not the same object
+const { data: user } = useLiveQuery({
+  query: (q) =>
+    q
+      .from({ user: usersCollection })
+      .where(({ user }) => eq(user.id, userId))
+      .findOne(),
+})
+```
+
+This applies to `eq`, `inArray`, join conditions, `groupBy`, indexes and ordering, and to query identity: two captures with equal `toJSON()` results are the same query, so the hook needs no `queryKey`, and a `queryKey` may contain value class instances.
+
+- A value class instance never equals a plain value, even one equal to its serialization: `eq(user.id, 'user:abc')` does not match a `RecordId` that serializes to `'user:abc'`.
+- Instances of two classes that serialize to the same value are equal.
+- Ordering and range predicates (`gt`, `gte`, `lt`, `lte`) use a value class's serialized value, never `valueOf()`. A primitive sorts before a value class and any other object after it.
+- Range predicates compare arrays element by element in the order sorting gives them, whether or not they hold a value class: `[2]` is less than `[10]`. Where sorting would order two plain objects or other reference-compared objects by identity, range predicates treat the arrays as equal from that element on.
+- Built-in values keep their own rules: a `Date` compares by its timestamp, binary data by its bytes, and Temporal values by their own rules. Plain objects, arrays, and class instances without `toJSON()` compare by reference. A `Map`, `Set`, `RegExp` or `ArrayBuffer` keeps its built-in rule even in a subclass that defines `toJSON()`, so it is not a value class.
+- Treat value class instances as immutable. TanStack DB reads an instance's `toJSON()` once, the first time it compares or hashes it, and keeps using that serialization for the instance's lifetime, even after it leaves every query and row. To change a value, such as a `URL`'s path, create a new instance (`new URL(url)`) instead of mutating one that TanStack DB has already seen.
+
 ## Select
 
 Use `select` to specify which fields to include in your results and transform your data. Without `select`, you get the full schema.

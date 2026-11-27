@@ -2454,6 +2454,87 @@ The deep-equality and Collection change-event history owners check a Duration
 field replacement and its subscriber mirror. These fixed histories do not
 establish arbitrary multirow Duration updates or live-query publication.
 
+The [value class equality oracle](https://github.com/TanStack/db/blob/main/packages/db/tests/query/serialized-value-equality-oracle.property.test.ts)
+(`serialized-value.query-equality`, issue #2459) owns query equality for class
+instances with `toJSON()`. An independent model compares record references by
+their table and ID fields. Generated histories of up to four source rows, three
+join rows and three synced updates, with no index, a BasicIndex or a
+BTreeIndex, compare scans before and after indexing, an ordered read (equal
+values in one run), a live-query `eq` filter, range filters against a record
+probe, an inner join, query identity, demand keys and `getStableValueHash`,
+including an unequal record and a nested query key. Every row and probe is a
+fresh instance with its own `valueOf()`,
+and a constructed history replaces an indexed group's first instance with an
+equal one. Rows and join rows also hold Map, Set, ArrayBuffer and RegExp
+subclasses whose `toJSON()` spells a record reference; they keep their built-in rule and
+never match a record probe or join row, and a constructed history places one
+among equal records. Plain records and arrays hold a throwing `toJSON`
+accessor that must not be read. Array range filters compare captures with
+shared and distinct object leaves, and a row that holds the capture array
+itself. A constructed history replaces an indexed reference value with a
+deep-equal one before updating its row. Each stored built-in carrier is also a
+reference probe: a filtered subscription, a live query, a functional filter, a
+filter over a plain, ordered or joined projection, a join with a Collection
+holding the same instance, pooled views with attached and detached observers, and a fresh scan hold exactly
+the rows that store it when each commit returns, and an Effect does once it has
+run. An unfiltered subscriber and live query, ID filters and pooled ID views
+that stay matched, and an Effect receive a change only when a row's value
+changed, and a real update beside a replacement in one batch still reaches an
+Effect, and a `distinct` query shows an instance some row still holds, with
+at least one row and at most one per source row. A Date range bound and its
+timestamp have different query identities over a record row. It does
+not cover `inArray` (fixed tests in
+`ir-stable-identity.test.ts`), on-demand or persisted sources, exact-output
+identity, which keeps reference semantics, or throwing `toJSON()` methods.
+Its second property (`serialized-value.array-order`) checks `gt`, `gte`, `lt`
+and `lte` over generated arrays that mix value classes, record-shaped
+`toJSON()` classes, plain objects, numbers, text (one numeric), nulls,
+PlainDates, symbols, a typed array subclass and self-referencing arrays
+against an independent order
+model, including the native operators' throws, with the right operand's
+objects given runtime identities first, and each value class instance
+serialized at most once. Every array orders element by element. Over every
+pair and triple of a history's array operands it checks that opposite pairs
+have opposite signs and that the order is transitive, that range predicates
+agree with `ascComparator` wherever an independent sort model says sorting
+reads no reference, and that they tie where sorting first orders two objects
+or two symbols by identity (PR #2460 review). Transitivity is not
+checked through a number and a text that spells no number, which the
+relational operators leave unordered. Only one generated text spells a number:
+the relational operators and sorting compare a number with such a text as
+numbers but two texts by code units, which is not transitive
+(`5 < '10' < '2' < 5`) for bare values on main as well. Sorting is not compared through self-referencing arrays or
+where it orders a Temporal value, an array or another object by reference.
+Three more generated properties use small models.
+`serialized-value.truncate-replay` gives up to three rows a probe reference, a
+deep-equal copy or no row before a direct subscriber's truncate and after its
+replay, and requires the replay to publish nothing before it completes and
+then exactly the rows that stopped or started matching, to a filtered
+subscription, to an Effect that joins on the probe and to an Effect whose
+functional filter compares the reference with it, a `distinct` live query
+over the references to show an instance some row still holds, and an Effect
+that filters a `distinct` subquery on the probe to follow the replay.
+`serialized-value.effect-joined-load` opens an on-demand
+join load with a deep-equal or normal update; the provider moves one to three
+rows by real updates or deep-equal replacements and may dispose the Effect,
+and the model gives the one batch. `serialized-value.pooled-residual-swap`
+applies batches of moves, real updates, deep-equal sort-field and tag
+replacements, and tag serialization changes behind the same enumerable fields
+to a pooled group with or without a residual reference filter, in key or
+sort-field order. It compares attached and detached readers with the rows that
+pass, in order, with their tag's serialization, and requires a batch of
+deep-equal replacements that leaves the group's order and the shown rows as
+they were to keep the attached snapshot and notify no subscriber. In a residual
+view, a replacement that moves a row only past rows the view filters out is
+outside that silence claim. The deep-equality owner's `utils.44` requires row
+equality to tell apart value classes whose serialization differs behind equal
+enumerable fields, bare, in a record or in an array. The
+distinct representative oracle requires a shown payload to stay while the
+inputs that hold it do, and `ivm.distinct-support-collisions` adds and removes
+the four inputs of one verified digest family against a multiset model summed
+by output key and payload, with zero-weight inputs before a world's changes
+and self-referencing keys and payloads outside the selection.
+
 The
 [Temporal index order tests](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order.test.ts)
 (fixed tests; no oracle owner (tracked in #2264)) covers ZonedDateTime instant

@@ -9,7 +9,10 @@
  * Limits: immutable fixture selections, four colliding members plus an anchor,
  * eight slots and twelve random tail worlds; no external source scheduling.
  */
+import { fc } from '@fast-check/vitest'
 import { D2 } from '../src/d2.js'
+import { MultiSet } from '../src/multiset.js'
+import { output as outputOperator } from '../src/operators/output.js'
 import { hash } from '../src/hashing/hash.js'
 import { distinct } from '../src/operators/distinct.js'
 import { oracleProperty } from '../../db/tests/oracle-property.js'
@@ -25,6 +28,7 @@ import {
   checkDistinctCampaign,
   driveDistinctChecked,
 } from './distinct-property-oracle.js'
+import { OracleComparisonMismatch } from './incrementalization-law-oracle.js'
 import type {
   GeneratedHistories,
   OraclePropertyOptions,
@@ -37,6 +41,35 @@ import type {
 import type { Weighted } from './incrementalization-law-oracle.js'
 
 const family = distinctCollisionFamily(hash)
+
+// The visible payload for each selection in the accumulated output.
+function shownRows(
+  output: Weighted<[number, DistinctBucketRow]>,
+): Map<number, string> {
+  const counts = new Map<string, number>()
+  for (const [[key, row], weight] of output) {
+    const id = JSON.stringify([key, row])
+    counts.set(id, (counts.get(id) ?? 0) + weight)
+  }
+  const shown = new Map<number, string>()
+  for (const [id, count] of counts) {
+    if (count === 0) continue
+    const row = (JSON.parse(id) as [number, DistinctBucketRow])[1]
+    shown.set(row.member, JSON.stringify(row))
+  }
+  return shown
+}
+
+// Slots holding each payload.
+function holders(source: Map<number, DistinctBucketRow>) {
+  const slots = new Map<string, Set<number>>()
+  for (const [slot, row] of source) {
+    const id = JSON.stringify(row)
+    if (!slots.has(id)) slots.set(id, new Set())
+    slots.get(id)!.add(slot)
+  }
+  return slots
+}
 
 function drive(worlds: DistinctBucketHistory, split: boolean) {
   const graph = new D2()
@@ -57,16 +90,33 @@ function drive(worlds: DistinctBucketHistory, split: boolean) {
   graph.finalize()
   const output: Weighted<[number, DistinctBucketRow]> = []
   const source = new Map<number, DistinctBucketRow>()
-  const introduced: Array<DistinctBucketRow> = []
   let previous: Array<DistinctBucketRow> = []
+  let shown = new Map<number, string>()
+  let held = new Map<string, Set<number>>()
   const check = (checkpoint: string) => {
     for (const message of reader.drain()) output.push(...message.getInner())
-    checkDistinctRepresentatives(
-      output,
-      [...source.values()],
-      introduced,
-      checkpoint,
-    )
+    checkDistinctRepresentatives(output, [...source.values()], checkpoint)
+    // A shown payload whose every slot still holds it is still supported by
+    // the input it came from, so it stays.
+    const nowShown = shownRows(output)
+    const nowHeld = holders(source)
+    for (const [member, row] of shown) {
+      const before = held.get(row) ?? new Set<number>()
+      const after = nowHeld.get(row) ?? new Set<number>()
+      if (
+        [...before].every((slot) => after.has(slot)) &&
+        nowShown.get(member) !== row
+      )
+        throw new OracleComparisonMismatch(
+          `distinct representative moved while still supported at ${checkpoint}: ${JSON.stringify({ member, before: row, after: nowShown.get(member) })}`,
+          `distinct representative stability`,
+          checkpoint,
+          nowShown.get(member),
+          row,
+        )
+    }
+    shown = nowShown
+    held = nowHeld
   }
   for (const [checkpoint, world] of worlds.entries()) {
     const changes: Weighted<[number, DistinctBucketRow]> = []
@@ -75,10 +125,7 @@ function drive(worlds: DistinctBucketHistory, split: boolean) {
     for (const [slot, row] of world.entries()) changes.push([[slot, row], 1])
     for (const [[slot, row], weight] of changes) {
       if (weight < 0) source.delete(slot)
-      else {
-        source.set(slot, { ...row })
-        introduced.push({ ...row })
-      }
+      else source.set(slot, { ...row })
       input.sendData([[[slot, { ...row }], weight]])
       if (split) {
         graph.run()
@@ -116,9 +163,9 @@ function representativeOptions(split: boolean): CellOptions {
   >()
   return {
     law: {
-      statement: `The full accumulated distinct output has exactly one unit contribution for each supported selection, no negative residues, distinct simultaneous keys, and only historically introduced source payloads.`,
+      statement: `The full accumulated distinct output has exactly one unit contribution for each supported selection, no negative residues, distinct simultaneous keys, and only payloads a source row still holds; a shown payload stays while the inputs that hold it do.`,
       authority: `docs/guides/live-queries.md#distinct; packages/db/src/query/live/ARCHITECTURE.md, Weighted relations and public keys; 2026-10-30 distinct provenance review.`,
-      limits: `Four immutable native-collision selections plus an anchor; variants 0..3, at most eight slots and twelve random suffix worlds. Representative choice and cross-build key stability remain unspecified; no external source scheduling.`,
+      limits: `Four immutable native-collision selections plus an anchor; variants 0..3, at most eight slots and twelve random suffix worlds. Choice among live representatives and cross-build key stability remain unspecified; no external source scheduling.`,
     },
     histories: {
       arbitrary: distinctBucketRecipe,
@@ -217,6 +264,260 @@ oracleProperty<
   model: (): ReadonlyArray<string> => [],
   driver: ({ worlds }, observe) => {
     driveDistinctChecked(() => drive(worlds, false), observe)
+  },
+  check: checkDistinctCampaign,
+})
+
+// Input rows whose own digests collide share a support bucket. The family's
+// four members are whole [key, row] inputs with one digest, found with the
+// real hash, under one selection, and their keys collide too. Generated worlds
+// add and remove them; a world may first send members with weight zero, and
+// the keys and payloads may be cyclic, outside the selection. The model is the
+// multiset of live inputs. The output, summed by output key and payload, must
+// hold one unit row whose payload a live input holds, and keep that payload
+// while every input that held it stays live.
+type CollisionWorlds = Array<Array<number>>
+type CollisionPlan = {
+  worlds: CollisionWorlds
+  // Members sent with weight zero at the start of each world's batch.
+  zeros: CollisionWorlds
+  split: boolean
+  cyclic: boolean
+  cyclicKeys: boolean
+}
+const COLLISION_STATES = [
+  `colliding inputs live`,
+  `shown input retired beside a live one`,
+  `emptied`,
+  // A zero-weight input opened a selection that a live input then supported.
+  `zero weight opened a selection`,
+  // The live payloads were cyclic.
+  `cyclic payloads`,
+  // The live inputs' keys were cyclic.
+  `cyclic keys`,
+] as const
+
+function selfReferencing(value: unknown): Record<string, unknown> {
+  const wrapper: Record<string, unknown> = { value }
+  wrapper.self = wrapper
+  return wrapper
+}
+
+function driveSupportCollisions(
+  { worlds, zeros, split, cyclic, cyclicKeys }: CollisionPlan,
+  observe: (checkpoint: string, value: unknown) => void,
+) {
+  const members = (family.slice(0, 4) as Array<[unknown, unknown]>).map(
+    ([key, row]): [unknown, unknown] => [
+      cyclicKeys ? selfReferencing(key) : key,
+      cyclic ? selfReferencing(row) : row,
+    ],
+  )
+  const graph = new D2()
+  const input = graph.newInput<[unknown, unknown]>()
+  // Net weight by output key, then by payload reference, so a retraction under
+  // another key cannot cancel a row.
+  const net = new Map<unknown, Map<unknown, number>>()
+  input.pipe(
+    distinct(() => `one selection`),
+    outputOperator((message) => {
+      for (const [[key, row], weight] of message.getInner()) {
+        let rows = net.get(key)
+        if (!rows) net.set(key, (rows = new Map()))
+        rows.set(row, (rows.get(row) ?? 0) + weight)
+      }
+    }),
+  )
+  graph.finalize()
+  // Every delivery is a legal relation, so distinct accepts it, whatever the
+  // keys and payloads outside the selection hold.
+  const deliver = (
+    changes: Array<[[unknown, unknown], number]>,
+    at: string,
+  ) => {
+    try {
+      input.sendData(new MultiSet(changes))
+      graph.run()
+    } catch (error) {
+      throw new OracleComparisonMismatch(
+        `distinct threw on a legal delivery at ${at}: ${String(error)}`,
+        `distinct accepts legal relations`,
+        at,
+        String(error),
+        `no error`,
+      )
+    }
+  }
+  // Observations name a payload by its member, since a payload can be cyclic.
+  const member = (payload: unknown) =>
+    members.findIndex(([, row]) => row === payload)
+  let live: Array<number> = []
+  let shown: unknown
+  let held = new Map<number, number>()
+  // How many of each input are live.
+  const holders = (world: Array<number>) => {
+    const counts = new Map<number, number>()
+    for (const index of world) counts.set(index, (counts.get(index) ?? 0) + 1)
+    return counts
+  }
+  const check = (checkpoint: string, world: Array<number>) => {
+    const rows = [...net].flatMap(([key, payloads]) =>
+      [...payloads]
+        .filter(([, weight]) => weight !== 0)
+        .map(([row, weight]) => ({ key, row, weight })),
+    )
+    const payloads = world.map((index) => members[index]![1])
+    const unit =
+      world.length === 0
+        ? rows.length === 0
+        : rows.length === 1 &&
+          rows[0]!.weight === 1 &&
+          payloads.includes(rows[0]!.row)
+    if (!unit)
+      throw new OracleComparisonMismatch(
+        `distinct support collision diverged at ${checkpoint}`,
+        `distinct representative contribution`,
+        checkpoint,
+        rows.map(({ key, row, weight }) => [key, member(row), weight]),
+        world,
+      )
+    const now = holders(world)
+    const current = rows[0]?.row
+    // Every input that held the shown payload is still live, so it stays.
+    const kept =
+      shown !== undefined &&
+      [...held].every(
+        ([index, count]) =>
+          members[index]![1] !== shown || (now.get(index) ?? 0) >= count,
+      )
+    if (kept && current !== shown)
+      throw new OracleComparisonMismatch(
+        `distinct support collision moved while still supported at ${checkpoint}`,
+        `distinct representative stability`,
+        checkpoint,
+        member(current),
+        member(shown),
+      )
+    if (shown !== undefined && current !== shown && world.length > 0)
+      observe(`reach`, `shown input retired beside a live one`)
+    if (new Set(world).size > 1) observe(`reach`, `colliding inputs live`)
+    if (world.length === 0 && live.length > 0) observe(`reach`, `emptied`)
+    shown = current
+    held = now
+  }
+  for (const [checkpoint, world] of worlds.entries()) {
+    const zero = zeros[checkpoint] ?? []
+    // Recorded once the world's deliveries passed their checks: split delivery
+    // sends the zero-weight inputs alone first.
+    const zeroOpened = live.length === 0 && zero.length > 0 && world.length > 0
+    const changes: Array<[[unknown, unknown], number]> = [
+      ...zero.map(
+        (index) => [members[index]!, 0] as [[unknown, unknown], number],
+      ),
+      ...live.map(
+        (index) => [members[index]!, -1] as [[unknown, unknown], number],
+      ),
+      ...world.map(
+        (index) => [members[index]!, 1] as [[unknown, unknown], number],
+      ),
+    ]
+    if (split) {
+      const partial = [...live]
+      for (const [change, weight] of changes) {
+        const index = members.indexOf(change)
+        deliver([[change, weight]], `${checkpoint}/${index}/${weight}`)
+        if (weight < 0) partial.splice(partial.indexOf(index), 1)
+        else if (weight > 0) partial.push(index)
+        check(`${checkpoint}/${index}/${weight}`, partial)
+      }
+    } else {
+      deliver(changes, String(checkpoint))
+      check(String(checkpoint), world)
+    }
+    if (zeroOpened) observe(`reach`, `zero weight opened a selection`)
+    if (cyclic && world.length > 0) observe(`reach`, `cyclic payloads`)
+    if (cyclicKeys && world.length > 0) observe(`reach`, `cyclic keys`)
+    live = world
+  }
+}
+
+const collisionWorlds = fc.array(
+  fc.array(fc.integer({ min: 0, max: 3 }), { maxLength: 4 }),
+  { minLength: 1, maxLength: 10 },
+)
+const collisionConstructions = new WeakMap<
+  CollisionPlan,
+  ReadonlyArray<string>
+>()
+
+// Member 0 is shown alone, member 1 joins it, then member 0 alone retires, so
+// every lawful operator must move to member 1, batched or split. The world is
+// then emptied, and a zero-weight input precedes the next selection.
+function retirementPlan(
+  generated: CollisionPlan,
+  cyclicKeys: boolean,
+  enters: ReadonlyArray<string>,
+): CollisionPlan {
+  const plan: CollisionPlan = {
+    worlds: [[0], [0, 1], [1], [], [3], ...generated.worlds].slice(0, 10),
+    zeros: [[], [], [], [], [2], ...generated.zeros.slice(5)],
+    split: generated.split,
+    cyclic: true,
+    cyclicKeys,
+  }
+  collisionConstructions.set(plan, enters)
+  return plan
+}
+
+oracleProperty<CollisionPlan, ReadonlyArray<string>>({
+  id: `ivm.distinct-support-collisions`,
+  law: {
+    ...cell0.law,
+    statement: `${cell0.law.statement} Distinct accepts every legal relation: an input of weight zero supports nothing, and a key or payload outside the selection may be cyclic.`,
+    authority: `${cell0.law.authority} PR #2460 review: zero-weight inputs, and keys and payloads outside the selected identity.`,
+    limits: `The four inputs of one verified digest family under one selection; up to ten worlds of up to four inputs, each optionally preceded by up to two zero-weight inputs, with plain or self-referencing keys and payloads, delivered at once or one change at a time.`,
+  },
+  owns: [`src/operators/distinct.ts#distinct`],
+  histories: {
+    arbitrary: fc.record({
+      worlds: collisionWorlds,
+      zeros: fc.array(
+        fc.array(fc.integer({ min: 0, max: 3 }), { maxLength: 2 }),
+        { maxLength: 10 },
+      ),
+      split: fc.boolean(),
+      cyclic: fc.boolean(),
+      cyclicKeys: fc.boolean(),
+    }),
+    runs: 100,
+    fixedSeeds: [2309],
+    states: COLLISION_STATES,
+    constructed: [
+      {
+        name: `a shown input is retired beside a colliding live one`,
+        enters: COLLISION_STATES.filter((state) => state !== `cyclic keys`),
+        build: (generated) =>
+          retirementPlan(
+            generated,
+            false,
+            COLLISION_STATES.filter((state) => state !== `cyclic keys`),
+          ),
+      },
+      {
+        name: `inputs with cyclic keys share one support bucket`,
+        enters: [`cyclic keys`, `shown input retired beside a live one`],
+        build: (generated) =>
+          retirementPlan(generated, true, [
+            `cyclic keys`,
+            `shown input retired beside a live one`,
+          ]),
+      },
+    ],
+  },
+  resolve: (plan) => plan,
+  model: (plan) => collisionConstructions.get(plan) ?? [],
+  driver: (plan, observe) => {
+    driveDistinctChecked(() => driveSupportCollisions(plan, observe), observe)
   },
   check: checkDistinctCampaign,
 })

@@ -304,14 +304,13 @@ export function distinctCollisionFamily(
 
 // Sum the raw full-row output, preserving negative residues and duplicate
 // representatives. The expected selections are recomputed solely from source
-// rows. Introduced rows are independent copies of positive source inputs;
-// they let this check reject fabricated payloads without selecting a preferred
-// representative. Keys must distinguish simultaneous outputs; their numerical
+// rows. Each output row must still be a source input, which rejects fabricated
+// and retired payloads without selecting a preferred representative among the
+// live ones. Keys must distinguish simultaneous outputs; their numerical
 // values and cross-rebuild stability are deliberately unspecified by this law.
 export function checkDistinctRepresentatives(
   output: Weighted<[number, DistinctBucketRow]>,
   input: Array<DistinctBucketRow>,
-  introduced: Array<DistinctBucketRow>,
   checkpoint: string,
 ): void {
   const relation = new Map<
@@ -333,7 +332,7 @@ export function checkDistinctRepresentatives(
     rows.some(({ count }) => count !== 1) ||
     rows.some(
       ({ row }) =>
-        !introduced.some(
+        !input.some(
           (source) =>
             source.member === row.member && source.variant === row.variant,
         ),
