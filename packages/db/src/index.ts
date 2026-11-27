@@ -46,6 +46,7 @@ export {
   deleteDatabase,
 } from './indexed-db-wrapper'
 export * from './errors'
+export { withPublicationContext } from './scheduler'
 /** @internal Unstable protocol for persistence-aware collection adapters. */
 export * from './sync-persistence'
 export * from './sync-receipt'

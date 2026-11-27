@@ -178,6 +178,31 @@ The sync process follows this lifecycle:
 6. **reportError(error)** - After the Collection is ready, report a sync problem while you keep trying. It sets the node's `failureReason` without changing its status or rows
 7. **reportHealthy()** - After the Collection is ready, report that sync works again. It clears the `failureReason`, and does nothing when nothing is wrong
 
+### Committing several Collections together
+
+A source that syncs several Collections over one connection often receives one source state for all of them, such as one server checkpoint. Committed one by one, every live query that joins those Collections runs after each commit, over Collections that only some of the commits have reached, and can publish those intermediate results. Commit them inside one `withPublicationContext` call instead.
+
+The callback must be synchronous: the publication ends when it returns, so a commit after an `await` in it publishes on its own, and a rejected Promise is not handled as a throw. Do not commit inside a `transaction.mutate` callback within it either: live-query work inside `mutate` belongs to the transaction and publishes when `mutate` returns, before the commits after it. Await the source's input first, then commit inside the call:
+
+```typescript
+import { withPublicationContext } from '@tanstack/db'
+
+const collectionsInCheckpoint = await receiveCheckpoint()
+withPublicationContext(() => {
+  for (const { sync, changes } of collectionsInCheckpoint) {
+    try {
+      sync.begin()
+      for (const change of changes) sync.write(change)
+      sync.commit()
+    } catch (error) {
+      sync.fail(error)
+    }
+  }
+})
+```
+
+Live queries then run after the last commit and publish one batch, with every commit that applied at once. A commit made while an optimistic transaction is persisting applies when that transaction settles, in a later publication: `commit()` returns a receipt instead of `true`, and the call does not wait for it. Each Collection still notifies its own change subscribers when it commits, so this is not an atomic publication across the Collections. Catch each commit's failure inside the callback: if the callback throws, the live-query work of the commits it already made is discarded, and those live queries miss them until their sources change again.
+
 ### Reporting failures
 
 Users see two separate signals: whether data can be shown, and whether it is
