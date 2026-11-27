@@ -272,9 +272,10 @@ oracleProperty<
 // four members are whole [key, row] inputs with one digest, found with the
 // real hash, under one selection, and their keys collide too. Generated worlds
 // add and remove them; a world may first send members with weight zero, and
-// the payloads may be cyclic, outside the selection. The model is the multiset
-// of live inputs. The output must hold one unit row whose payload a live input
-// holds, and keep that payload while every input that held it stays live.
+// the keys and payloads may be cyclic, outside the selection. The model is the
+// multiset of live inputs. The output, summed by output key and payload, must
+// hold one unit row whose payload a live input holds, and keep that payload
+// while every input that held it stays live.
 type CollisionWorlds = Array<Array<number>>
 type CollisionPlan = {
   worlds: CollisionWorlds
@@ -282,6 +283,7 @@ type CollisionPlan = {
   zeros: CollisionWorlds
   split: boolean
   cyclic: boolean
+  cyclicKeys: boolean
 }
 const COLLISION_STATES = [
   `colliding inputs live`,
@@ -291,33 +293,44 @@ const COLLISION_STATES = [
   `zero weight opened a selection`,
   // The live payloads were cyclic.
   `cyclic payloads`,
+  // The live inputs' keys were cyclic.
+  `cyclic keys`,
 ] as const
 
+function selfReferencing(value: unknown): Record<string, unknown> {
+  const wrapper: Record<string, unknown> = { value }
+  wrapper.self = wrapper
+  return wrapper
+}
+
 function driveSupportCollisions(
-  { worlds, zeros, split, cyclic }: CollisionPlan,
+  { worlds, zeros, split, cyclic, cyclicKeys }: CollisionPlan,
   observe: (checkpoint: string, value: unknown) => void,
 ) {
   const members = (family.slice(0, 4) as Array<[unknown, unknown]>).map(
-    ([key, row]): [unknown, unknown] => {
-      if (!cyclic) return [key, row]
-      const payload: Record<string, unknown> = { row }
-      payload.self = payload
-      return [key, payload]
-    },
+    ([key, row]): [unknown, unknown] => [
+      cyclicKeys ? selfReferencing(key) : key,
+      cyclic ? selfReferencing(row) : row,
+    ],
   )
   const graph = new D2()
   const input = graph.newInput<[unknown, unknown]>()
-  const net = new Map<unknown, number>()
+  // Net weight by output key, then by payload reference, so a retraction under
+  // another key cannot cancel a row.
+  const net = new Map<unknown, Map<unknown, number>>()
   input.pipe(
     distinct(() => `one selection`),
     outputOperator((message) => {
-      for (const [[, row], weight] of message.getInner())
-        net.set(row, (net.get(row) ?? 0) + weight)
+      for (const [[key, row], weight] of message.getInner()) {
+        let rows = net.get(key)
+        if (!rows) net.set(key, (rows = new Map()))
+        rows.set(row, (rows.get(row) ?? 0) + weight)
+      }
     }),
   )
   graph.finalize()
-  // Every delivery is a legal relation with hashable keys, so distinct accepts
-  // it, whatever the payloads hold.
+  // Every delivery is a legal relation, so distinct accepts it, whatever the
+  // keys and payloads outside the selection hold.
   const deliver = (
     changes: Array<[[unknown, unknown], number]>,
     at: string,
@@ -348,24 +361,28 @@ function driveSupportCollisions(
     return counts
   }
   const check = (checkpoint: string, world: Array<number>) => {
-    const rows = [...net].filter(([, weight]) => weight !== 0)
+    const rows = [...net].flatMap(([key, payloads]) =>
+      [...payloads]
+        .filter(([, weight]) => weight !== 0)
+        .map(([row, weight]) => ({ key, row, weight })),
+    )
     const payloads = world.map((index) => members[index]![1])
     const unit =
       world.length === 0
         ? rows.length === 0
         : rows.length === 1 &&
-          rows[0]![1] === 1 &&
-          payloads.includes(rows[0]![0])
+          rows[0]!.weight === 1 &&
+          payloads.includes(rows[0]!.row)
     if (!unit)
       throw new OracleComparisonMismatch(
         `distinct support collision diverged at ${checkpoint}`,
         `distinct representative contribution`,
         checkpoint,
-        rows.map(([row, weight]) => [member(row), weight]),
+        rows.map(({ key, row, weight }) => [key, member(row), weight]),
         world,
       )
     const now = holders(world)
-    const current = rows[0]?.[0]
+    const current = rows[0]?.row
     // Every input that held the shown payload is still live, so it stays.
     const kept =
       shown !== undefined &&
@@ -390,9 +407,9 @@ function driveSupportCollisions(
   }
   for (const [checkpoint, world] of worlds.entries()) {
     const zero = zeros[checkpoint] ?? []
-    if (live.length === 0 && zero.length > 0 && world.length > 0)
-      observe(`reach`, `zero weight opened a selection`)
-    if (cyclic && world.length > 0) observe(`reach`, `cyclic payloads`)
+    // Recorded once the world's deliveries passed their checks: split delivery
+    // sends the zero-weight inputs alone first.
+    const zeroOpened = live.length === 0 && zero.length > 0 && world.length > 0
     const changes: Array<[[unknown, unknown], number]> = [
       ...zero.map(
         (index) => [members[index]!, 0] as [[unknown, unknown], number],
@@ -417,6 +434,9 @@ function driveSupportCollisions(
       deliver(changes, String(checkpoint))
       check(String(checkpoint), world)
     }
+    if (zeroOpened) observe(`reach`, `zero weight opened a selection`)
+    if (cyclic && world.length > 0) observe(`reach`, `cyclic payloads`)
+    if (cyclicKeys && world.length > 0) observe(`reach`, `cyclic keys`)
     live = world
   }
 }
@@ -430,13 +450,32 @@ const collisionConstructions = new WeakMap<
   ReadonlyArray<string>
 >()
 
+// Member 0 is shown alone, member 1 joins it, then member 0 alone retires, so
+// every lawful operator must move to member 1, batched or split. The world is
+// then emptied, and a zero-weight input precedes the next selection.
+function retirementPlan(
+  generated: CollisionPlan,
+  cyclicKeys: boolean,
+  enters: ReadonlyArray<string>,
+): CollisionPlan {
+  const plan: CollisionPlan = {
+    worlds: [[0], [0, 1], [1], [], [3], ...generated.worlds].slice(0, 10),
+    zeros: [[], [], [], [], [2], ...generated.zeros.slice(5)],
+    split: generated.split,
+    cyclic: true,
+    cyclicKeys,
+  }
+  collisionConstructions.set(plan, enters)
+  return plan
+}
+
 oracleProperty<CollisionPlan, ReadonlyArray<string>>({
   id: `ivm.distinct-support-collisions`,
   law: {
     ...cell0.law,
-    statement: `${cell0.law.statement} Distinct accepts every legal relation with hashable keys: an input of weight zero supports nothing, and a payload outside the selection may be cyclic.`,
-    authority: `${cell0.law.authority} PR #2460 review: zero-weight inputs and payloads outside the selected key.`,
-    limits: `The four inputs of one verified digest family under one selection; up to ten worlds of up to four inputs, each optionally preceded by up to two zero-weight inputs, with plain or self-referencing payloads, delivered at once or one change at a time.`,
+    statement: `${cell0.law.statement} Distinct accepts every legal relation: an input of weight zero supports nothing, and a key or payload outside the selection may be cyclic.`,
+    authority: `${cell0.law.authority} PR #2460 review: zero-weight inputs, and keys and payloads outside the selected identity.`,
+    limits: `The four inputs of one verified digest family under one selection; up to ten worlds of up to four inputs, each optionally preceded by up to two zero-weight inputs, with plain or self-referencing keys and payloads, delivered at once or one change at a time.`,
   },
   owns: [`src/operators/distinct.ts#distinct`],
   histories: {
@@ -448,6 +487,7 @@ oracleProperty<CollisionPlan, ReadonlyArray<string>>({
       ),
       split: fc.boolean(),
       cyclic: fc.boolean(),
+      cyclicKeys: fc.boolean(),
     }),
     runs: 100,
     fixedSeeds: [2309],
@@ -455,17 +495,22 @@ oracleProperty<CollisionPlan, ReadonlyArray<string>>({
     constructed: [
       {
         name: `a shown input is retired beside a colliding live one`,
-        enters: COLLISION_STATES,
-        build: (generated) => {
-          const plan: CollisionPlan = {
-            worlds: [[0, 1], [1], [], [3], ...generated.worlds].slice(0, 10),
-            zeros: [[], [], [], [2], ...generated.zeros.slice(4)],
-            split: generated.split,
-            cyclic: true,
-          }
-          collisionConstructions.set(plan, COLLISION_STATES)
-          return plan
-        },
+        enters: COLLISION_STATES.filter((state) => state !== `cyclic keys`),
+        build: (generated) =>
+          retirementPlan(
+            generated,
+            false,
+            COLLISION_STATES.filter((state) => state !== `cyclic keys`),
+          ),
+      },
+      {
+        name: `inputs with cyclic keys share one support bucket`,
+        enters: [`cyclic keys`, `shown input retired beside a live one`],
+        build: (generated) =>
+          retirementPlan(generated, true, [
+            `cyclic keys`,
+            `shown input retired beside a live one`,
+          ]),
       },
     ],
   },

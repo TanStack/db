@@ -201,13 +201,16 @@ function testDistinct() {
     >
     const graph = new D2()
     const input = graph.newInput<[unknown, unknown]>()
-    const net = new Map<unknown, number>()
+    const net: Array<[number, unknown, number]> = []
 
     input.pipe(
       distinct(() => `same selection`),
       output((message) => {
-        for (const [[, row], weight] of message.getInner())
-          net.set(row, (net.get(row) ?? 0) + weight)
+        for (const [[key, row], weight] of message.getInner()) {
+          const held = net.find(([k, r]) => k === key && r === row)
+          if (held) held[2] += weight
+          else net.push([key, row, weight])
+        }
       }),
     )
     graph.finalize()
@@ -222,8 +225,31 @@ function testDistinct() {
     input.sendData(new MultiSet([[retired!, -1]]))
     graph.run()
 
-    expect([...net].filter(([, weight]) => weight !== 0)).toEqual([
-      [live![1], 1],
+    expect(net.filter(([, , weight]) => weight !== 0)).toEqual([
+      [hash(`same selection`), live![1], 1],
+    ])
+  })
+
+  test(`accepts a cyclic key outside the selection`, () => {
+    const key: Record<string, unknown> = {}
+    key.self = key
+    const graph = new D2()
+    const input = graph.newInput<[unknown, string]>()
+    const messages: Array<MultiSet<[number, string]>> = []
+    input.pipe(
+      distinct(() => `selection`),
+      output((message) => void messages.push(message)),
+    )
+    graph.finalize()
+
+    input.sendData(new MultiSet([[[key, `value`], 1]]))
+    graph.run()
+    input.sendData(new MultiSet([[[key, `value`], -1]]))
+    graph.run()
+
+    expect(messages.map((message) => message.getInner())).toEqual([
+      [[[hash(`selection`), `value`], 1]],
+      [[[hash(`selection`), `value`], -1]],
     ])
   })
 

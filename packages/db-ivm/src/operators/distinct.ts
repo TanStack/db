@@ -18,6 +18,18 @@ type GetValue<T> = T extends KeyValue<unknown, infer V> ? V : never
 // replacement compares apart.
 type Support<T> = Map<Hash, Array<[input: T, multiplicity: number]>>
 
+// Digests are unsigned, so keys outside the hashing domain, such as cyclic
+// ones, share this bucket and are told apart by equality alone.
+const UNHASHABLE_KEY = -1
+
+function keyDigest(key: unknown): Hash {
+  try {
+    return hash(key)
+  } catch {
+    return UNHASHABLE_KEY
+  }
+}
+
 type DistinctEntry<T> = {
   identity: unknown
   key: number
@@ -36,7 +48,7 @@ function addSupport<T extends KeyValue<unknown, unknown>>(
 ): void {
   // An input of weight zero supports nothing.
   if (diff === 0) return
-  const digest = hash(input[0])
+  const digest = keyDigest(input[0])
   let inputs = support.get(digest)
   if (!inputs) support.set(digest, (inputs = []))
   const index = inputs.findIndex(([held]) => equalHashValues(held, input))
@@ -55,7 +67,7 @@ function isSupported<T extends KeyValue<unknown, unknown>>(
   support: Support<T>,
   input: T,
 ): boolean {
-  return (support.get(hash(input[0])) ?? []).some(([held]) =>
+  return (support.get(keyDigest(input[0])) ?? []).some(([held]) =>
     equalHashValues(held, input),
   )
 }
