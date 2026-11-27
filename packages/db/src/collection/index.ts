@@ -1141,17 +1141,17 @@ export class CollectionImpl<
    * @param options - Options including optional where filter
    * @returns An array of changes
    * @example
-   * // Get all items as changes
+   * import { eq, IR } from '@tanstack/db'
+   *
+   * // Given an existing collection with a `status` field,
+   * // get all rows as changes.
    * const allChanges = collection.currentStateAsChanges()
    *
-   * // Get only items matching a condition
+   * // Filter for active rows.
+   * // Use a row-relative path without a collection alias.
+   * const status = new IR.PropRef<string>(['status'])
    * const activeChanges = collection.currentStateAsChanges({
-   *   where: (row) => row.status === 'active'
-   * })
-   *
-   * // Get only items using a pre-compiled expression
-   * const activeChanges = collection.currentStateAsChanges({
-   *   whereExpression: eq(row.status, 'active')
+   *   where: eq(status, 'active'),
    * })
    */
   public currentStateAsChanges(
