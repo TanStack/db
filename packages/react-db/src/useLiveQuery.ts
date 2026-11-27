@@ -629,6 +629,8 @@ export function useLiveQueryImpl(
     }
 
     let queryHash = instance.queryHash
+    let preloadDuringRender = forSuspense && !dbClient
+    let bindClientSuspense: ((serverSnapshot: boolean) => void) | undefined
     let commitWindow: (() => void) | undefined
     let compile:
       | ((
@@ -636,6 +638,11 @@ export function useLiveQueryImpl(
           windowOwner: object,
         ) => Collection<object, string | number, {}> | null)
       | undefined
+    const rememberBinding = () => {
+      instance.config = configOrQueryOrCollection
+      instance.client = dbClient
+      if (!commitWindow) instance.queryHash = queryHash
+    }
     if (needsNewCollection) {
       // Preparation rejects unhashable derived inputs; keyed inputs must hash.
       queryHash = queryKey
@@ -670,7 +677,12 @@ export function useLiveQueryImpl(
         configOrQueryOrCollection.startSyncImmediate()
         instance.collection = configOrQueryOrCollection
       } else {
-        compile = (ownsCollection: boolean, windowOwner: object) => {
+        const hash = queryHash
+        const build = (
+          ownsCollection: boolean,
+          windowOwner: object,
+          startSync = !forSuspense || dbClient !== undefined,
+        ) => {
           // A keyed query claims nothing, so it reports an unbound descriptor
           // here; the other forms reported it when they claimed.
           if (!dbClient && queryKey !== undefined) {
@@ -691,8 +703,7 @@ export function useLiveQueryImpl(
             onWindowChange: (move) => {
               commitWindow = move
             },
-            // Without a DbClient, Suspense starts it through a preload below.
-            startSync: !forSuspense || dbClient !== undefined,
+            startSync,
           })
           // A render that never commits releases its deferred sync starts
           // when garbage collection reclaims the live query it built. A
@@ -706,16 +717,40 @@ export function useLiveQueryImpl(
           }
           return collection
         }
-        instance.collection = suspense
-          ? suspense.resolve(preparedQueryValue, queryHash, dbClient, compile)
-          : compile(true, instance)
-        // An abandoned render must leave invalidation pending. Its retry or
-        // urgent replacement still prepares and commits the requested move.
-        if (!commitWindow) instance.identityDeps = [...identityDeps]
+        // Private outputs forked from a ready peer keep normal startup.
+        compile = build
+        const resolve = (preloadLocal = false) => {
+          instance.collection = suspense
+            ? suspense.resolve(
+                preparedQueryValue,
+                hash,
+                dbClient,
+                preloadLocal
+                  ? (ownsCollection, windowOwner) =>
+                      build(ownsCollection, windowOwner, false)
+                  : build,
+              )
+            : build(true, instance)
+          // An abandoned render must leave invalidation pending.
+          if (!commitWindow) instance.identityDeps = [...identityDeps]
+        }
+        if (suspense && dbClient) {
+          bindClientSuspense = (serverSnapshot) => {
+            // A reused result records demand but does not itself start sync.
+            // Keep the original startup for that path and for server reads.
+            if (!serverSnapshot) {
+              const query = dbClient._getLiveQuery(hash)
+              preloadDuringRender =
+                !query ||
+                (query.status === `success` &&
+                  query.snapshot?.status !== undefined)
+            }
+            resolve(preloadDuringRender)
+            rememberBinding()
+          }
+        } else resolve()
       }
-      instance.config = configOrQueryOrCollection
-      instance.client = dbClient
-      if (!commitWindow) instance.queryHash = queryHash
+      if (!bindClientSuspense) rememberBinding()
     }
 
     // A client-backed move retains the graph but binds a fresh observer to the
@@ -743,14 +778,17 @@ export function useLiveQueryImpl(
         onPreload: resumeDeferredCollections,
         suspendUntilReady: forSuspense,
       })
-      // The subscribe function stays bound to the observer that created it.
+    }
+    if (needsNewCollection) {
+      if (!bindClientSuspense) watchCollection()
+      // A first read may fork a private Collection. Bind this subscription
+      // to the final observer for this render without changing its identity.
       subscribe = (onStoreChange: () => void) => {
         const unsubscribe = observer.subscribe(onStoreChange)
         resumeDeferredCollections()
         return unsubscribe
       }
     }
-    if (needsNewCollection) watchCollection()
     // Until commit, a proposed page's observer and transport identity belong
     // only to this render. Cancellation must leave the committed seed intact.
     useWindowCommitEffect(() => {
@@ -763,38 +801,46 @@ export function useLiveQueryImpl(
       }
       claim?.()
     })
-    // A Suspense render asks for its data. Preloading starts the sync run, so a
-    // source that already holds the rows makes it ready before the snapshot is
-    // read instead of suspending once. useLiveSuspenseQuery surfaces failures.
-    // A DbClient defers source starts past render and owns its streamed query.
-    if (
-      forSuspense &&
-      !dbClient &&
-      (instance.collection?.status === `idle` ||
-        instance.collection?.status === `cleaned-up`)
-    ) {
-      observer.preload().catch(() => {})
+    const finishBinding = () => {
+      if (
+        preloadDuringRender &&
+        (instance.collection?.status === `idle` ||
+          instance.collection?.status === `cleaned-up`)
+      ) {
+        // The Suspense wrapper owns rejection handling.
+        void observer.preload().catch(() => {})
+      }
+      const privateCollection =
+        compile && suspense?.forkReady(observer, compile)
+      if (privateCollection) {
+        instance.collection = privateCollection
+        watchCollection()
+      }
+      if (!commitWindow) {
+        instance.observer = observer
+        instance.subscribe = subscribe
+      }
     }
-
-    const privateCollection = compile && suspense?.forkReady(observer, compile)
-    if (privateCollection) {
-      instance.collection = privateCollection
-      watchCollection()
-    }
-    if (!commitWindow) {
-      instance.observer = observer
-      instance.subscribe = subscribe
+    if (!bindClientSuspense) finishBinding()
+    const read = (serverSnapshot: boolean) => {
+      // React selects the initial snapshot. Only that first read can bind a
+      // new DbClient Suspense query; later reads use the same observer.
+      const bind = bindClientSuspense
+      if (bind) {
+        bindClientSuspense = undefined
+        bind(serverSnapshot)
+        watchCollection()
+        finishBinding()
+      }
+      const snapshot = serverSnapshot
+        ? observer.getServerSnapshot(forSuspense)
+        : observer.getSnapshot()
+      return suspense ? suspense.read(snapshot) : snapshot
     }
     const returned = useSyncExternalStore(
       subscribe,
-      () => {
-        const snapshot = observer.getSnapshot()
-        return suspense ? suspense.read(snapshot) : snapshot
-      },
-      () => {
-        const snapshot = observer.getServerSnapshot(forSuspense)
-        return suspense ? suspense.read(snapshot) : snapshot
-      },
+      () => read(false),
+      () => read(true),
     )
     const claim = returned.isReady ? suspense?.claim() : undefined
     // Pass render-local metadata directly to the Suspense wrapper. The public

@@ -236,6 +236,7 @@ const staticOracleProperties = [
   `react.suspense-siblings`,
   `react.suspense-replacement-history`,
   `react.suspense-preload-restart-history`,
+  `react.suspense-startup`,
   `svelte.client-window`,
   `svelte.client-window-recovery`,
   `live-query-observer.hydration-subset-handoff.granular`,
