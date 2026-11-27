@@ -181,6 +181,8 @@ export interface TransactionSignaler {
   trackIssued?: (transactionId: string, active: boolean) => void
   /** A removed write's call finished: its running marker goes. */
   finishRunningRemoval?: (transactionId: string) => Promise<void>
+  /** A removal took this write's row while its call ran. */
+  removedWhileRunning?: (transactionId: string) => boolean
   resolveTransaction: (transactionId: string, result: any) => void
   rejectTransaction: (
     transactionId: string,

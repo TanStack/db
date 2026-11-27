@@ -337,6 +337,13 @@ export class TransactionExecutor {
       // that landed meanwhile must not settle it at a later replay.
       if (this.offlineExecutor.recordsOutcomes)
         await this.outbox.removeDecisions(transaction.id).catch(() => {})
+      // A removal took the row meanwhile; the update may have restored it.
+      if (this.offlineExecutor.removedWhileRunning?.(transaction.id)) {
+        await this.outbox.remove(transaction.id)
+        this.scheduler.markCompleted(transaction)
+        await this.publishRemovedOutcome(transaction.id, error)
+        return
+      }
     } catch (persistError) {
       // Public removal can finish while the named mutation function runs.
       // The removed row cannot be retried, but its caller still owns the

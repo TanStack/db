@@ -138,6 +138,8 @@ export class OfflineExecutor {
   // Running markers this leader recorded for removed writes, by id; each
   // overlapping removal leaves its own.
   private readonly runningRemovals = new Map<string, Set<string>>()
+  // Writes whose row a removal took while their call ran.
+  private readonly removedRunning = new Set<string>()
   // Removals this follower asked the leader for, by request.
   private readonly removals = new Map<
     string,
@@ -1164,6 +1166,26 @@ export class OfflineExecutor {
             }
             await outbox.remove(id)
             if (this.saving.has(id)) this.saving.set(id, true)
+            if (this.scheduler.isRunning(id)) {
+              this.removedRunning.add(id)
+              return
+            }
+            // A call that ended retryably meanwhile left a queued retry, which
+            // the removal takes like an unsent write.
+            if (
+              !this.scheduler
+                .getAllPendingTransactions()
+                .some((transaction) => transaction.id === id)
+            )
+              return
+            this.scheduler.removePendingTransactions([id])
+            try {
+              if (records(id)) await outbox.recordRejection(id, error)
+              await this.finishRunningRemoval(id)
+            } catch {
+              executor.retryDecided(id, error)
+            }
+            this.rejectTransaction(id, error)
             return
           }
           // A row whose call already settled keeps that outcome. A phase
@@ -1228,8 +1250,14 @@ export class OfflineExecutor {
     return yielded
   }
 
+  /** Whether a removal took this write's row while its call ran. */
+  removedWhileRunning(id: string): boolean {
+    return this.removedRunning.has(id)
+  }
+
   /** Withdraws the running markers of a removed write whose call finished. */
   async finishRunningRemoval(id: string): Promise<void> {
+    this.removedRunning.delete(id)
     const tokens = this.runningRemovals.get(id)
     if (!tokens) return
     this.runningRemovals.delete(id)

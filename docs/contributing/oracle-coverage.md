@@ -4268,8 +4268,10 @@ The post-merge review added three missing domains to existing owners:
   error. It also covers an added message while an unsent write's removal is
   being decided, a removed running write whose error record fails before its
   leader stops leading, a connectivity change during an outbox check that
-  then fails, a failed read of a sent row's phase during its removal, and a
-  readable decision beside an unreadable one. It does not cover real browser
+  then fails, a failed read of a sent row's phase during its removal, a
+  readable decision beside an unreadable one, and a removed running write
+  whose call fails retryably before the removal's deletion lands or between
+  the failure's read and rewrite of the row. It does not cover real browser
   contexts.
 - Settlement-time drop of optimistic state is owned by the
   [optimistic history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
