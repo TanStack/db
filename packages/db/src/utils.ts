@@ -399,8 +399,8 @@ export function isTemporal(a: unknown): a is TemporalLike {
  * and plain records and arrays are not value classes. Record keys
  * in the serialized value are sorted, so key order does not change it.
  */
-// Value classes must not change while a query or row holds them, so each is
-// serialized once. A throwing toJSON() caches nothing and throws again.
+// Value classes are immutable once read (the guide's contract), so each is
+// serialized once for its lifetime. A throwing toJSON() caches nothing.
 const serializedClassValues = new WeakMap<object, string | undefined>()
 
 export function serializedClassValue(value: object): string | undefined {
