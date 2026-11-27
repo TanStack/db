@@ -1,7 +1,6 @@
-import { durationFields, isTemporal } from '../utils'
+import { durationFields, isTemporal, serializedClassValue } from '../utils'
 import { getRuntimeReferenceIdentity } from '../query/runtime-reference-identity'
 import { codedMessage, devBuild } from '../error-message'
-import { isPlainObject } from './type-guards'
 import type { DurationFields } from '../utils'
 import type { CompareOptions } from '../query/builder/types'
 
@@ -261,49 +260,6 @@ function normalizeBinary(value: Uint8Array): string {
   const key = normalizedKey(`binary`, bytes)
   binaryKeys.set(value, key)
   return key
-}
-
-/**
- * The serialized value of a value class: an instance of a class with a
- * `toJSON()` method, such as a record ID or a decimal, that no other rule
- * covers. Built-in values (Dates, Temporal values, binary data, Maps and
- * Sets), including subclasses that define `toJSON()`, keep their own rules,
- * and plain records and arrays are not value classes. Record keys
- * in the serialized value are sorted, so key order does not change it.
- */
-// Value classes must not change while a query or row holds them, so each is
-// serialized once. A throwing toJSON() caches nothing and throws again.
-const serializedClassValues = new WeakMap<object, string | undefined>()
-
-export function serializedClassValue(value: object): string | undefined {
-  const cached = serializedClassValues.get(value)
-  if (cached !== undefined) return cached
-  // Excluded objects keep their own rules, so their `toJSON` is never read: it
-  // can be an accessor that throws.
-  if (
-    isPlainObject(value) ||
-    Array.isArray(value) ||
-    value instanceof Date ||
-    value instanceof Map ||
-    value instanceof Set ||
-    value instanceof ArrayBuffer ||
-    ArrayBuffer.isView(value) ||
-    isTemporal(value) ||
-    typeof (value as { toJSON?: unknown }).toJSON !== `function`
-  ) {
-    return undefined
-  }
-  const serialized = JSON.stringify(value, (_key, field: unknown) =>
-    isPlainObject(field)
-      ? Object.fromEntries(
-          Object.keys(field)
-            .sort()
-            .map((key) => [key, field[key]]),
-        )
-      : field,
-  )
-  serializedClassValues.set(value, serialized)
-  return serialized
 }
 
 /**

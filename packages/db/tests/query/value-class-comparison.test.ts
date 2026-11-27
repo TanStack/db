@@ -16,11 +16,8 @@ import {
 import { createPooledLiveQuery } from '../../src/query/pooled-live-query.js'
 import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
-import {
-  compareValues,
-  normalizeValue,
-  serializedClassValue,
-} from '../../src/utils/comparison.js'
+import { compareValues, normalizeValue } from '../../src/utils/comparison.js'
+import { serializedClassValue } from '../../src/utils.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
 // A built query is the builder class this entry point takes.

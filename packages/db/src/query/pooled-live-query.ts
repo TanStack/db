@@ -354,6 +354,8 @@ class Partition {
       PartitionGroup,
       Array<ChangeMessage<Row, string | number>>
     >()
+    // Ordered groups' keys before their first deep-equal replacement.
+    const orders = new Map<PartitionGroup, Array<string | number>>()
     const record = (
       group: PartitionGroup,
       change: ChangeMessage<Row, string | number>,
@@ -386,26 +388,40 @@ class Partition {
       if (next !== undefined) {
         const group = this.group(next)
         const existed = group.rows.has(change.key)
-        const stored = group.rows.get(change.key)
-        group.rows.set(change.key, change.value)
-        // A replacement that moves its row in the group's order is visible.
-        const silent =
+        if (
           existed &&
+          this.compareRows &&
           isSilentReplacement(change) &&
-          (this.compareRows?.(stored!, change.value) ?? 0) === 0
-        if (silent) group.replacements++
+          !orders.has(group)
+        )
+          orders.set(group, Array.from(group.rows.keys()))
+        group.rows.set(change.key, change.value)
         record(
           group,
           existed
-            ? change.type === `update` &&
-              (silent || !isSilentReplacement(change))
+            ? change.type === `update`
               ? change
               : { ...change, type: `update` }
             : { type: `insert`, key: change.key, value: change.value },
         )
       }
     }
+    // Replacements that change a group's order are visible, judged once the
+    // whole batch is in.
+    for (const [group, keys] of orders) {
+      if (Array.from(group.rows.keys()).every((key, at) => key === keys[at]))
+        continue
+      touched.set(
+        group,
+        touched
+          .get(group)!
+          .map((change) =>
+            isSilentReplacement(change) ? { ...change } : change,
+          ),
+      )
+    }
     for (const [group, groupChanges] of touched) {
+      if (groupChanges.some(isSilentReplacement)) group.replacements++
       if (!groupChanges.every(isSilentReplacement)) {
         group.revision = ++this.clock
       }

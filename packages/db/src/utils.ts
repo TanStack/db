@@ -3,6 +3,7 @@
  */
 
 import { InvalidKeyError, UndefinedKeyError } from './errors'
+import { isPlainObject } from './utils/type-guards'
 import type { CompareOptions } from './query/builder/types'
 
 interface TypedArray {
@@ -319,6 +320,10 @@ export function deepEqualsInternal(
     )
       return false
     if (mode & PUBLICATION && !(plain && plainB)) return false
+    // A value class's serialization can live outside its enumerable keys, and
+    // queries compare it by that serialization, so a row that changes it changed.
+    if (mode & ROW && serializedClassValue(a) !== serializedClassValue(b))
+      return false
 
     // Compare enumerable symbol keys as well as string keys. Query results may
     // use user-owned symbols, and a symbol-only update is still a value change.
@@ -384,6 +389,49 @@ export function isTemporal(a: unknown): a is TemporalLike {
   if (a == null || typeof a !== `object`) return false
   const tag = (a as Record<symbol, unknown>)[Symbol.toStringTag]
   return typeof tag === `string` && temporalTypes.has(tag)
+}
+
+/**
+ * The serialized value of a value class: an instance of a class with a
+ * `toJSON()` method, such as a record ID or a decimal, that no other rule
+ * covers. Built-in values (Dates, Temporal values, binary data, Maps and
+ * Sets), including subclasses that define `toJSON()`, keep their own rules,
+ * and plain records and arrays are not value classes. Record keys
+ * in the serialized value are sorted, so key order does not change it.
+ */
+// Value classes must not change while a query or row holds them, so each is
+// serialized once. A throwing toJSON() caches nothing and throws again.
+const serializedClassValues = new WeakMap<object, string | undefined>()
+
+export function serializedClassValue(value: object): string | undefined {
+  const cached = serializedClassValues.get(value)
+  if (cached !== undefined) return cached
+  // Excluded objects keep their own rules, so their `toJSON` is never read: it
+  // can be an accessor that throws.
+  if (
+    isPlainObject(value) ||
+    Array.isArray(value) ||
+    value instanceof Date ||
+    value instanceof Map ||
+    value instanceof Set ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value) ||
+    isTemporal(value) ||
+    typeof (value as { toJSON?: unknown }).toJSON !== `function`
+  ) {
+    return undefined
+  }
+  const serialized = JSON.stringify(value, (_key, field: unknown) =>
+    isPlainObject(field)
+      ? Object.fromEntries(
+          Object.keys(field)
+            .sort()
+            .map((key) => [key, field[key]]),
+        )
+      : field,
+  )
+  serializedClassValues.set(value, serialized)
+  return serialized
 }
 
 export const DEFAULT_COMPARE_OPTIONS: Exclude<

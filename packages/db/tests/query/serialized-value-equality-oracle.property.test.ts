@@ -1467,7 +1467,7 @@ describe(`value classes compare by their serialized value`, () => {
     },
     owns: [
       'src/utils/comparison.ts#normalizeValue',
-      'src/utils/comparison.ts#serializedClassValue',
+      'src/utils.ts#serializedClassValue',
       'src/utils/comparison.ts#compareValues',
       'src/collection/state.ts#CollectionStateManager.commitPendingTransactions',
       'src/collection/subscription.ts#CollectionSubscription.visibleChanges',
@@ -2153,7 +2153,7 @@ describe(`value classes order arrays by their serialized value`, () => {
     },
     owns: [
       'src/utils/comparison.ts#compareValues',
-      'src/utils/comparison.ts#serializedClassValue',
+      'src/utils.ts#serializedClassValue',
     ],
     histories: {
       arbitrary: orderHistoryArbitrary,

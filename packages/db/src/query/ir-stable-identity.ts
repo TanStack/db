@@ -1,6 +1,7 @@
 import { isPlainObject } from '../utils/type-guards.js'
 import { UnhashableQueryIRError } from '../errors.js'
-import { normalizeValue, serializedClassValue } from '../utils/comparison.js'
+import { normalizeValue } from '../utils/comparison.js'
+import { serializedClassValue } from '../utils.js'
 import { isRefProxy, toExpression } from './builder/ref-proxy.js'
 import { getQueryIR } from './builder/query-ir.js'
 import {
