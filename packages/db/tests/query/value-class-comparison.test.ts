@@ -18,7 +18,7 @@ import { createLiveQueryObserver } from '../../src/live-query-observer.js'
 import { Func, PropRef, Value } from '../../src/query/ir.js'
 import { compareValues, normalizeValue } from '../../src/utils/comparison.js'
 import { serializedClassValue } from '../../src/utils.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { flushPromises, mockSyncCollectionOptions } from '../utils.js'
 
 // A built query is the builder class this entry point takes.
 const poolQuery = (query: unknown) => createPooledLiveQuery(query as never)
@@ -66,7 +66,14 @@ describe(`compareValues with value classes`, () => {
     expect(compareValues(2, 10)).toBe(-1)
     expect(compareValues(`b`, `a`)).toBe(1)
     expect(compareValues(new Date(2), new Date(1))).toBe(1)
-    expect(compareValues([2], [10])).toBe(1)
+  })
+
+  it(`orders every array element by element, as sorting does`, () => {
+    const withClass = [5, new Bound(`a`, 1)]
+    expect(compareValues([2], [10])).toBe(-1)
+    expect(compareValues([10], withClass)).toBe(1)
+    expect(compareValues(withClass, [2])).toBe(1)
+    expect(compareValues([10], [2])).toBe(1)
   })
 })
 
@@ -79,10 +86,10 @@ describe(`compareValues with object leaves in value class arrays`, () => {
     expect(compareValues([{ shape: 1 }, new Bound(`a`, 2)], row)).toBe(0)
   })
 
-  it(`orders by the value class after an object leaf`, () => {
+  it(`ties arrays from an object leaf that sorting orders by reference`, () => {
     const row = [{ shape: 1 }, new Bound(`b`, 1)]
-    expect(compareValues(row, [{ shape: 1 }, new Bound(`a`, 9)])).toBe(1)
-    expect(compareValues([{ shape: 1 }, new Bound(`a`, 9)], row)).toBe(-1)
+    expect(compareValues(row, [{ shape: 1 }, new Bound(`a`, 9)])).toBe(0)
+    expect(compareValues([{ shape: 1 }, new Bound(`a`, 9)], row)).toBe(0)
   })
 
   it(`orders an array holding a value class apart from a plain object`, () => {
@@ -99,6 +106,16 @@ describe(`compareValues with object leaves in value class arrays`, () => {
     left.push(left)
     right.push(right)
     expect(compareValues(left, right)).toBe(0)
+  })
+})
+
+describe(`a value class's serialization`, () => {
+  it(`is read once and kept for the instance's lifetime`, () => {
+    const url = new URL(`https://example.com/a`)
+    const before = normalizeValue(url)
+    url.pathname = `/b`
+    expect(normalizeValue(url)).toBe(before)
+    expect(normalizeValue(new URL(url))).not.toBe(before)
   })
 })
 
@@ -481,7 +498,11 @@ describe(`pooled queries follow a deep-equal row replacement`, () => {
     }
   }
   let sources = 0
-  const setup = async (ref: object, where: any) => {
+  const setup = async (
+    ref: object,
+    where: any,
+    { ordered = false }: { ordered?: boolean } = {},
+  ) => {
     const source = createCollection(
       mockSyncCollectionOptions<Row>({
         id: `pooled-replacement-${sources++}`,
@@ -491,7 +512,10 @@ describe(`pooled queries follow a deep-equal row replacement`, () => {
       }),
     )
     await source.stateWhenReady()
-    const build = () => new Query().from({ item: source }).where(where)
+    const build = () => {
+      const query = new Query().from({ item: source }).where(where)
+      return ordered ? query.orderBy(({ item }) => item.ref as never) : query
+    }
     const view = poolQuery(build())!
     const ordinary = createLiveQueryCollection({ query: () => build() as any })
     await ordinary.preload()
@@ -556,6 +580,33 @@ describe(`pooled queries follow a deep-equal row replacement`, () => {
     query.expectRows([`a`])
     query.replace(new Hidden(`n`))
     query.expectRows([])
+    await query.done()
+  })
+
+  it(`shows a new serialization behind the same enumerable fields`, async () => {
+    const query = await setup(new Hidden(`old`), ({ item }: any) =>
+      eq(item.id, `a`),
+    )
+    query.replace(new Hidden(`new`))
+    const [row] = query.attached.getSnapshot().data as Array<Row>
+    expect((row!.ref as Hidden).toJSON()).toBe(`new`)
+    await query.done()
+  })
+
+  it(`keeps an ordered snapshot when a replacement leaves the order`, async () => {
+    const query = await setup(new Map(), ({ item }: any) => eq(item.id, `a`), {
+      ordered: true,
+    })
+    let told = 0
+    const stop = query.attached.subscribe(() => void told++)
+    await flushPromises()
+    told = 0
+    const before = query.attached.getSnapshot()
+    query.replace(new Map())
+    await flushPromises()
+    expect(query.attached.getSnapshot()).toBe(before)
+    expect(told).toBe(0)
+    stop()
     await query.done()
   })
 

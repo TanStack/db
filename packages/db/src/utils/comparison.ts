@@ -354,83 +354,72 @@ const VALUE_CLASS_ORDER: CompareOptions = {
   stringSort: `lexical`,
 }
 
-function arrayHoldsValueClass(
-  array: ReadonlyArray<unknown>,
-  seen?: Set<unknown>,
-): boolean {
-  for (const item of array) {
-    if (typeof item !== `object` || item === null) continue
-    if (!Array.isArray(item)) {
-      if (serializedClassValue(item) !== undefined) return true
-      continue
-    }
-    // Cycle tracking starts at the first nested array.
-    seen ??= new Set([array])
-    if (seen.has(item)) continue
-    seen.add(item)
-    if (arrayHoldsValueClass(item, seen)) return true
-  }
-  return false
-}
-
-function holdsValueClass(value: unknown): boolean {
-  if (typeof value !== `object` || value === null) return false
-  return Array.isArray(value)
-    ? arrayHoldsValueClass(value)
-    : serializedClassValue(value) !== undefined
+// The order sorting gives objects without a value class that it does not
+// order by reference: Dates, then Temporal values, then everything else.
+function objectKind(value: object): number {
+  return value instanceof Date ? 0 : isTemporal(value) ? 1 : 2
 }
 
 /**
- * Order two values when at least one holds a value class. Query identity hashes
- * plain objects by shape, so this order must not read an object's reference:
- * inside an array, objects without a value class keep the native comparison,
- * and an array sorts after any value that is not an array.
+ * Order two array elements as sorting does, or return `undefined` where sorting
+ * would order them by reference. Query identity hashes plain objects by shape,
+ * so a range ties two arrays from such an element on.
  */
-function compareHoldingValueClass(
+function compareElements(
   a: unknown,
   b: unknown,
-  visiting?: Map<unknown, Set<unknown>>,
-): number {
-  const aIsArray = Array.isArray(a)
-  const bIsArray = Array.isArray(b)
-  if (aIsArray && bIsArray) {
-    // Only this pair coming up again inside its own comparison is a cycle. An
-    // array that both operands share at different depths is compared in full.
-    const active = visiting ?? new Map<unknown, Set<unknown>>()
-    let partners = active.get(a)
-    if (partners === undefined) active.set(a, (partners = new Set()))
-    if (partners.has(b)) return 0
-    partners.add(b)
-    for (let index = 0; index < Math.min(a.length, b.length); index++) {
-      const left = a[index]
-      const right = b[index]
-      const result =
-        left == null || right == null
-          ? Math.sign(ascComparator(left, right, VALUE_CLASS_ORDER))
-          : compareNonNullValues(left, right, active)
-      if (result !== 0) return result
+  visiting: Map<unknown, Set<unknown>>,
+): number | undefined {
+  if (a != null && b != null && !isUnorderable(a) && !isUnorderable(b)) {
+    if (Array.isArray(a) || Array.isArray(b))
+      return compareArrays(a, b, visiting)
+    if (
+      typeof a === `object` &&
+      typeof b === `object` &&
+      serializedClassValue(a) === undefined &&
+      serializedClassValue(b) === undefined
+    ) {
+      const aKind = objectKind(a)
+      const bKind = objectKind(b)
+      if (aKind !== bKind) return aKind < bKind ? -1 : 1
+      if (aKind === 2) return undefined
     }
-    partners.delete(b)
-    return Math.sign(a.length - b.length)
+    if (typeof a === `symbol` && typeof b === `symbol` && a !== b)
+      return undefined
   }
-  // The sort order already puts an array after a primitive or a value class;
-  // after another object it would read references.
-  if (aIsArray !== bIsArray) return aIsArray ? 1 : -1
   return Math.sign(ascComparator(a, b, VALUE_CLASS_ORDER))
 }
 
-function compareNonNullValues(
+/**
+ * Order two values when at least one is an array: element by element, with a
+ * shorter prefix first and an array after any value that is not an array.
+ */
+function compareArrays(
   a: unknown,
   b: unknown,
-  visiting?: Map<unknown, Set<unknown>>,
-): number {
-  if (isTemporal(a) && isTemporal(b)) {
-    return compareTemporalValues(a, b)
+  visiting = new Map<unknown, Set<unknown>>(),
+): number | undefined {
+  if (!Array.isArray(a) || !Array.isArray(b)) return Array.isArray(a) ? 1 : -1
+  // Only this pair coming up again inside its own comparison is a cycle. An
+  // array that both operands share at different depths is compared in full.
+  let partners = visiting.get(a)
+  if (partners === undefined) visiting.set(a, (partners = new Set()))
+  if (partners.has(b)) return 0
+  partners.add(b)
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    const result = compareElements(a[index], b[index], visiting)
+    if (result !== 0) return result
   }
-  if (holdsValueClass(a) || holdsValueClass(b)) {
-    return compareHoldingValueClass(a, b, visiting)
-  }
-  return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
+  partners.delete(b)
+  return Math.sign(a.length - b.length)
+}
+
+function isValueClass(value: unknown): boolean {
+  return (
+    typeof value === `object` &&
+    value !== null &&
+    serializedClassValue(value) !== undefined
+  )
 }
 
 /**
@@ -438,17 +427,25 @@ function compareNonNullValues(
  *
  * Temporal types intentionally throw from `valueOf` to prevent silent
  * miscomparison via the native relational operators — delegate to
- * `compareTemporalValues` for them. A value class, alone or inside an array,
- * uses the sort order, which reads its serialized value: equal captures are
- * one query, so a range must not depend on `valueOf`. For everything else
- * (numbers, strings, Dates via `valueOf`, etc.) the native operators do the
- * right thing.
+ * `compareTemporalValues` for them. A value class uses the sort order, which
+ * reads its serialized value: equal captures are one query, so a range must
+ * not depend on `valueOf`. Arrays compare element by element in one order that
+ * agrees with sorting, tying where sorting would read references. For
+ * everything else (numbers, strings, Dates via `valueOf`, etc.) the native
+ * operators do the right thing.
  *
  * Callers must handle null/undefined themselves — this helper assumes both
  * arguments are non-null.
  */
 export function compareValues(a: unknown, b: unknown): number {
-  return compareNonNullValues(a, b)
+  if (isTemporal(a) && isTemporal(b)) {
+    return compareTemporalValues(a, b)
+  }
+  if (Array.isArray(a) || Array.isArray(b)) return compareArrays(a, b) ?? 0
+  if (isValueClass(a) || isValueClass(b)) {
+    return Math.sign(ascComparator(a, b, VALUE_CLASS_ORDER))
+  }
+  return (a as any) < (b as any) ? -1 : (a as any) > (b as any) ? 1 : 0
 }
 
 /**

@@ -20,10 +20,12 @@
  * and any other object after it. Equal captures are one query, so a predicate
  * must not depend on anything outside the serialization. Plain records, arrays
  * and other excluded objects keep reference semantics without their `toJSON`
- * property being read. Inside an array range, an excluded object leaf does not
- * break a tie, so two captures with one query identity keep one result whether
- * they share that object or hold a distinct one of the same shape. An array
- * that the row and the capture share is ordered like a copy of it.
+ * property being read. Arrays compare element by element in one order that
+ * agrees with sorting; where sorting would order an excluded object leaf by
+ * reference, the range ties, so two captures with one query identity keep one
+ * result whether they share that object or hold a distinct one of the same
+ * shape. An array that the row and the capture share is ordered like a copy of
+ * it.
  *
  * An index and a filter follow the stored row. A sync write can replace a
  * reference-valued field with a deep-equal instance. An unfiltered subscriber
