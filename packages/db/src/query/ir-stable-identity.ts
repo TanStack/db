@@ -1121,8 +1121,14 @@ function canonicalizeOrderingRuntimeValue(
     return canonicalizeRuntimeValue(Number.NaN, path, seen)
   }
 
+  // A valid Date keeps its own identity: a value class sorts before a Date but
+  // after the Date's timestamp.
   const normalized = normalizeValue(value)
-  if (normalized !== value && !(value instanceof Uint8Array)) {
+  if (
+    normalized !== value &&
+    !(value instanceof Uint8Array) &&
+    !(value instanceof Date)
+  ) {
     return canonicalizeRuntimeValue(normalized, path, seen)
   }
 

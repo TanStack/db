@@ -1,3 +1,4 @@
+import { equalHashValues, registerOpaqueHash } from '@tanstack/db-ivm'
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
 import { and, eq } from '../query/builder/functions.js'
 import { PropRef, Value, getPropRefPropertyPath } from '../query/ir.js'
@@ -851,7 +852,13 @@ export class CollectionSubscription
           key,
           value: previousValue,
         })
-      } else if (
+        continue
+      }
+      // As for an ordinary change, query operators must not merge the new row
+      // with an old one that hashes alike.
+      if (value !== previousValue && equalHashValues(previousValue, value))
+        registerOpaqueHash(value)
+      if (
         !sameRowValue(value, previousValue) ||
         // A deep-equal replacement can still change the filter's answer.
         (this.matchesWhere !== undefined &&

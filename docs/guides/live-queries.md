@@ -905,7 +905,7 @@ This applies to `eq`, `inArray`, join conditions, `groupBy`, indexes and orderin
 - Instances of two classes that serialize to the same value are equal.
 - Ordering and range predicates (`gt`, `gte`, `lt`, `lte`) use a value class's serialized value, never `valueOf()`. A primitive sorts before a value class and any other object after it.
 - Range predicates compare arrays element by element in the order sorting gives them, whether or not they hold a value class: `[2]` is less than `[10]`. Where sorting would order two plain objects or other reference-compared objects by identity, range predicates treat the arrays as equal from that element on.
-- Built-in values keep their own rules: a `Date` compares by its timestamp, binary data by its bytes, and Temporal values by their own rules. Plain objects, arrays, and class instances without `toJSON()` compare by reference. A `Map`, `Set` or `ArrayBuffer` keeps its built-in rule even in a subclass that defines `toJSON()`, so it is not a value class.
+- Built-in values keep their own rules: a `Date` compares by its timestamp, binary data by its bytes, and Temporal values by their own rules. Plain objects, arrays, and class instances without `toJSON()` compare by reference. A `Map`, `Set`, `RegExp` or `ArrayBuffer` keeps its built-in rule even in a subclass that defines `toJSON()`, so it is not a value class.
 - Treat value class instances as immutable. TanStack DB reads an instance's `toJSON()` once, the first time it compares or hashes it, and keeps using that serialization for the instance's lifetime, even after it leaves every query and row. To change a value, such as a `URL`'s path, create a new instance (`new URL(url)`) instead of mutating one that TanStack DB has already seen.
 
 ## Select

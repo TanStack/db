@@ -196,7 +196,9 @@ describe(`indexes follow a deep-equal row replacement`, () => {
       })
       await collection.stateWhenReady()
       const index = collection.createIndex((row) => row.ref)
-      for (const ref of [new Map(), null]) {
+      // A draft drops a deep-equal assignment, so the first write changes the
+      // Map's contents to reach the index.
+      for (const ref of [new Map([[`k`, 1]]), null]) {
         collection.update(`r1`, (draft) => {
           draft.ref = ref
         })

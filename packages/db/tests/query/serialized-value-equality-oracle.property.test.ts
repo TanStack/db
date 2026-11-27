@@ -46,7 +46,7 @@
  * Model: `modelEq` compares record references by their table and ID fields.
  * It never calls `toJSON()` and imports no query normalization. A text value
  * spelled like a record reference is a different kind, and null is UNKNOWN.
- * A built-in carrier (a Map, Set or ArrayBuffer subclass whose `toJSON()`
+ * A built-in carrier (a Map, Set, ArrayBuffer or RegExp subclass whose `toJSON()`
  * spells a record reference) compares by reference, and every materialized
  * value is a fresh instance, so it equals nothing.
  *
@@ -153,6 +153,8 @@ const reachStates = [
   `range-equal-record`,
   // Identity compared a record probe with an unequal record.
   `unequal-record-probe`,
+  // Identity compared a Date range bound and its timestamp over a record row.
+  `date-bound-apart`,
   // A plain record or array held a toJSON accessor that must not be read.
   `excluded-accessor-held`,
   // An array range compared captures with shared and distinct object leaves.
@@ -186,7 +188,8 @@ type RefSpec =
   | { kind: `text`; table: Table; id: `a` | `b` }
   | { kind: `builtin`; carrier: Carrier; table: Table; id: `a` | `b` }
   | { kind: `null` }
-type Carrier = `Map` | `Set` | `ArrayBuffer` | `PlainRecord` | `Array`
+type Carrier =
+  `Map` | `Set` | `ArrayBuffer` | `RegExp` | `PlainRecord` | `Array`
 type UnequalBy = `table` | `id` | `both`
 type IndexMode = `none` | `basic` | `btree`
 type History = {
@@ -230,8 +233,8 @@ class RecordRef {
   }
 }
 
-// Built-in carriers: subclasses of Map, Set and ArrayBuffer whose toJSON()
-// spells a record reference, as RecordRef's does.
+// Built-in carriers: subclasses of Map, Set, ArrayBuffer and RegExp whose
+// toJSON() spells a record reference, as RecordRef's does.
 class RecordMap extends Map<never, never> {
   readonly ref: string
   constructor(ref: string) {
@@ -250,6 +253,13 @@ class RecordSet extends Set<never> {
   }
   toJSON(): string {
     return this.ref
+  }
+}
+// Its pattern is the reference, so row equality, which reads a RegExp's
+// pattern and flags, tells two apart exactly when they spell different ones.
+class RecordRegExp extends RegExp {
+  toJSON(): string {
+    return this.source
   }
 }
 class RecordBuffer extends ArrayBuffer {
@@ -437,6 +447,7 @@ const carrierArbitrary = fc.constantFrom<Carrier>(
   `Map`,
   `Set`,
   `ArrayBuffer`,
+  `RegExp`,
   `PlainRecord`,
   `Array`,
 )
@@ -479,6 +490,8 @@ function materializeCarrier(carrier: Carrier, ref: string): object {
       return new RecordSet(ref)
     case `ArrayBuffer`:
       return new RecordBuffer(ref)
+    case `RegExp`:
+      return new RecordRegExp(ref)
     case `PlainRecord`:
       return withThrowingToJSON({ ref })
     case `Array`:
@@ -1009,6 +1022,16 @@ async function runHistory(
           expect(read(), `${label}: ${reader}`).toEqual(holders)
         }
       }
+      // Every row has a reference, null included, and equal references share
+      // a distinct row, so there is at least one and at most one per row.
+      expect(
+        distinctRefs.size,
+        `${checkpoint}: distinct rows`,
+      ).toBeGreaterThanOrEqual(1)
+      expect(
+        distinctRefs.size,
+        `${checkpoint}: distinct rows`,
+      ).toBeLessThanOrEqual(stored.size)
       const held = new Set<unknown>(stored.values())
       for (const row of distinctRefs.toArray) {
         expect(
@@ -1204,6 +1227,21 @@ async function runHistory(
       expect(getStableValueHash(first), `record and text: value hash`).not.toBe(
         getStableValueHash(text),
       )
+    }
+    // A primitive sorts before a value class and a Date after it, so a Date
+    // bound and its timestamp split a record row differently: they are two
+    // queries.
+    if ([...model.values()].some((spec) => spec.kind === `record`)) {
+      reach(`date-bound-apart`)
+      const after = (bound: unknown) =>
+        getQueryIdentity(
+          getQueryIR(
+            new Query()
+              .from({ item: source })
+              .where(({ item }) => gt(item.ref, bound as never)),
+          ),
+        )
+      expect(after(new Date(1)), `Date and timestamp bounds`).not.toBe(after(1))
     }
     if (recordProbe !== undefined) {
       reach(`unequal-record-probe`)
@@ -1461,9 +1499,9 @@ describe(`value classes compare by their serialized value`, () => {
   oracleProperty({
     id: property,
     law: {
-      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values. Range predicates order a value class by that serialization, never valueOf(), and order an array the row and the capture share like a copy of it. A Map, Set or ArrayBuffer subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read. When a sync write replaces such a value with a deep-equal instance, a filter on either instance, a join, a functional filter, a filter over a projection or an ordered result and a pooled view follow the stored one by the time the commit returns, an ordered query takes the new instance's position, a distinct query shows an instance some row still holds, a subscriber, live query or Effect that keeps the row is told nothing, and another row's update in the same batch still reaches an Effect.`,
+      statement: `Query equality, exact index lookup, live-query filters and joins match distinct class instances whose toJSON() values are equal, never a plain value equal to that serialization; query identity and getStableValueHash follow the same relation and separate unequal values, and a Date range bound from its timestamp. Range predicates order a value class by that serialization, never valueOf(), and order an array the row and the capture share like a copy of it. A Map, Set, ArrayBuffer or RegExp subclass with toJSON() keeps its built-in rule and never equals a value class, and a plain record or array keeps reference semantics without its toJSON property being read. When a sync write replaces such a value with a deep-equal instance, a filter on either instance, a join, a functional filter, a filter over a projection or an ordered result and a pooled view follow the stored one by the time the commit returns, an ordered query takes the new instance's position, a distinct query shows an instance some row still holds, with at least one row and at most one per source row, a subscriber, live query or Effect that keeps the row is told nothing, and another row's update in the same batch still reaches an Effect.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
-      limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set and ArrayBuffer subclass look-alikes, plain records and arrays with a throwing toJSON accessor (never probes), and null; up to four source rows, three join rows and three synced updates; range reads use record probes; no inArray, on-demand or persisted sources, or exact-output identity.`,
+      limits: `One toJSON() class over two tables and two IDs, its text look-alike, empty Map, Set, ArrayBuffer and RegExp subclass look-alikes, plain records and arrays with a throwing toJSON accessor (never probes), and null; up to four source rows, three join rows and three synced updates; range reads use record probes; no inArray, on-demand or persisted sources, or exact-output identity.`,
     },
     owns: [
       'src/utils/comparison.ts#normalizeValue',
@@ -1614,6 +1652,7 @@ describe(`value classes compare by their serialized value`, () => {
         {
           name: `an indexed group keeps an equal reference after its first instance is replaced`,
           enters: [
+            `date-bound-apart`,
             `distinct-instance-matched`,
             `indexed-equal-replacement`,
             `join-matched`,
@@ -1665,9 +1704,10 @@ describe(`value classes compare by their serialized value`, () => {
               table: probe.table,
               id: probe.id,
             }
+            const pattern = { ...lookalike, carrier: `RegExp` as const }
             return {
               ...generated,
-              rows: [probe, lookalike, probe, ...generated.rows.slice(3)],
+              rows: [probe, lookalike, probe, pattern],
               joinRows: [lookalike, probe, ...generated.joinRows.slice(2)],
               probe,
             }
@@ -1725,8 +1765,9 @@ describe(`value classes compare by their serialized value`, () => {
 // Range predicates order a value class by its serialized value. Arrays order
 // element by element, whether or not they hold a value class, in one total
 // order that agrees with sorting: a null sorts first, then primitives, value
-// classes by their serialized value, Temporal values, other objects, and nested
-// arrays after any value that is not an array; a shorter prefix sorts first.
+// classes by their serialized value, Temporal values, other objects, nested
+// arrays after any value that is not an array, and symbols last; a shorter
+// prefix sorts first.
 // Where sorting would order two other objects by reference, range predicates
 // treat the arrays as equal from that element on, since equal captures are one
 // query. Values that are not arrays keep the native operators, including their
@@ -1741,6 +1782,8 @@ type OrderTerm =
   | { k: `leaf`; shape: number }
   | { k: `bytes` }
   | { k: `date`; day: number }
+  // One of two symbols, only ever inside an array.
+  | { k: `symbol`; n: number }
   | { k: `array`; items: Array<OrderTerm> }
   // An array whose last element is the array itself.
   | { k: `loop`; items: Array<OrderTerm> }
@@ -1773,8 +1816,12 @@ const orderStates = [
   `objects-tied`,
   // A Temporal element met another object without a value class.
   `kinds-ranked`,
-  // A number element met a text element.
+  // A number element met a text element that spells no number.
   `mixed-primitives`,
+  // A number element met a text element that spells one.
+  `numeric-text`,
+  // A symbol element met an element of another kind or another symbol.
+  `symbol-last`,
   // Arrays without a value class ordered by their elements.
   `plain-arrays-ordered`,
   // Three arrays in a strict chain were checked for transitivity.
@@ -1832,6 +1879,8 @@ function materializeTerm(term: OrderTerm): unknown {
       return new RecordBytes(0)
     case `date`:
       return Temporal.PlainDate.from({ year: 2024, month: 1, day: term.day })
+    case `symbol`:
+      return orderSymbols[term.n]
     case `array`:
       return term.items.map(materializeTerm)
     case `loop`: {
@@ -1842,13 +1891,18 @@ function materializeTerm(term: OrderTerm): unknown {
   }
 }
 
+const orderSymbols = [Symbol(`s0`), Symbol(`s1`)]
+
 class ModelThrows extends Error {}
 
 const isArrayTerm = (term: OrderTerm) => term.k === `array` || term.k === `loop`
 const isClassTerm = (term: OrderTerm) =>
   term.k === `record` || term.k === `shaped`
 const isObjectTerm = (term: OrderTerm) =>
-  term.k !== `num` && term.k !== `text` && term.k !== `null`
+  term.k !== `num` &&
+  term.k !== `text` &&
+  term.k !== `null` &&
+  term.k !== `symbol`
 const elementsOf = (term: OrderTerm): Array<OrderTerm> =>
   term.k === `loop`
     ? [...term.items, term]
@@ -1923,6 +1977,9 @@ function nativeOrder(left: OrderTerm, right: OrderTerm): number {
 
 type ModelVerdict = number | `tie`
 
+const spellsNumber = (term: OrderTerm) =>
+  term.k === `text` && !Number.isNaN(Number(term.v))
+
 function modelOrder(
   left: OrderTerm,
   right: OrderTerm,
@@ -1987,6 +2044,13 @@ function modelOrder(
       if (x.k !== y.k) reach(`null-element`)
       return x.k === y.k ? 0 : x.k === `null` ? -1 : 1
     }
+    // Sorting puts a symbol after every other value, an array included. Two
+    // symbols compare by identity, so they tie, as two plain objects do.
+    if (x.k === `symbol` || y.k === `symbol`) {
+      reach(`symbol-last`)
+      if (x.k === y.k) return `tie`
+      return x.k === `symbol` ? 1 : -1
+    }
     if (x.k === `bytes` || y.k === `bytes`) reach(`typed-array-excluded`)
     if (isArrayTerm(x) || isArrayTerm(y)) return arrays(x, y, active)
     if (isClassTerm(x) || isClassTerm(y)) return withClass(x, y)
@@ -2020,10 +2084,16 @@ function modelOrder(
     reach(classFirst ? `class-before-object` : `primitive-before-class`)
     return (classSide === a) === classFirst ? -1 : 1
   }
-  // Numbers by value and texts by code units; a number and a text that does
-  // not spell one compare equal, as the relational operators do.
+  // Numbers by value and texts by code units, as the relational operators
+  // compare them: a number and a text that spells one compare as numbers,
+  // and a number and a text that does not compare equal.
   const primitives = (x: OrderTerm, y: OrderTerm): number => {
-    if (x.k !== y.k) reach(`mixed-primitives`)
+    if (x.k !== y.k)
+      reach(
+        spellsNumber(x.k === `text` ? x : y)
+          ? `numeric-text`
+          : `mixed-primitives`,
+      )
     return nativeOrder(x, y)
   }
   return nonNull(left, right)
@@ -2040,6 +2110,10 @@ function modelSortOrder(
   const sort = (a: OrderTerm, b: OrderTerm): number | `tie` | `reference` => {
     if (a.k === `null` || b.k === `null`)
       return a.k === b.k ? 0 : a.k === `null` ? -1 : 1
+    if (a.k === `symbol` || b.k === `symbol`) {
+      if (a.k === b.k) return `tie`
+      return a.k === `symbol` ? 1 : -1
+    }
     if (a.k === `loop` || b.k === `loop`) return `reference`
     if (a.k === `array` && b.k === `array`) {
       for (
@@ -2084,7 +2158,7 @@ const orderLeaf = fc.oneof(
   }),
   fc.record({
     k: fc.constant(`text` as const),
-    v: fc.constantFrom(`a`, `b`, `user:a`, `org:a`),
+    v: fc.constantFrom(`a`, `b`, `user:a`, `org:a`, `10`),
   }),
   fc.record({ k: fc.constant(`null` as const) }),
   fc.record({
@@ -2107,6 +2181,10 @@ const orderLeaf = fc.oneof(
     k: fc.constant(`date` as const),
     day: fc.integer({ min: 1, max: 3 }),
   }),
+  fc.record({
+    k: fc.constant(`symbol` as const),
+    n: fc.integer({ min: 0, max: 1 }),
+  }),
 )
 const { orderTerm } = fc.letrec<{
   orderTerm: OrderTerm
@@ -2128,7 +2206,10 @@ const { orderTerm } = fc.letrec<{
     items: fc.array(tie(`orderTerm`), { maxLength: 2 }),
   }),
 }))
-const orderOperand = orderTerm.filter((term) => term.k !== `null`)
+// The native operators throw for a bare symbol, so symbols stay inside arrays.
+const orderOperand = orderTerm.filter(
+  (term) => term.k !== `null` && term.k !== `symbol`,
+)
 const MAX_ORDER_PAIRS = 6
 const orderHistoryArbitrary: fc.Arbitrary<OrderHistory> = fc.record({
   pairs: fc.array(fc.tuple(orderOperand, orderOperand), {
@@ -2238,10 +2319,10 @@ const LEXICAL_ORDER = {
 
 // Range predicates over the history's array operands form one total preorder:
 // opposite pairs have opposite signs and the order is transitive, except
-// through a number and a text, which the relational operators leave
-// unordered. They agree with sorting wherever sorting reads no reference, and
-// tie where sorting first orders two objects without a value class by
-// reference.
+// through a number and a text that spells no number, which the relational
+// operators leave unordered. They agree with sorting wherever sorting reads no
+// reference, and tie where sorting first orders two objects without a value
+// class by reference.
 function checkArrayOrder(
   terms: Array<OrderTerm>,
   reach: (state: OrderState) => void,
@@ -2308,9 +2389,9 @@ describe(`value classes order arrays by their serialized value`, () => {
   oracleProperty({
     id: orderProperty,
     law: {
-      statement: `Range predicates compare arrays element by element, whether or not they hold a value class, in one total preorder: opposite pairs have opposite signs and the order is transitive. A null sorts first, then primitives, value classes by their serialized value with record keys sorted, Temporal values, other objects, and nested arrays after any value that is not an array; a shorter prefix sorts first, and a pair met again inside its own comparison is equal. Range predicates agree with sorting wherever sorting orders two arrays without reading a reference, and where sorting first orders two other objects by reference they treat the arrays as equal. Values that are not arrays keep the native operators and their throws unless one is a value class, which sorts after a primitive and before any other object; a Temporal pair compares as Temporal values. The sort order keeps two distinct plain objects apart, and each value class instance is serialized at most once.`,
-      authority: `Issue #2459, the "Value classes" section of docs/guides/live-queries.md, the compareValues contract in packages/db/src/utils/comparison.ts, and the PR #2460 review (array comparison is one total order that agrees with sorting).`,
-      limits: `Numbers 0..12, four texts, records and record-shaped toJSON() classes over two tables and two IDs, one plain object shape, an empty Uint8Array subclass, three PlainDates, null elements, and arrays of up to three terms nested and self-referencing up to fast-check's small depth; one to six operand pairs plus each left operand against a copy, and every pair and triple of the history's array operands. A number and a text are unordered, so transitivity is not checked through such a pair; sorting is compared only where it reads no reference and holds no self-referencing array, and where it orders a Temporal value, an array or another object by reference, range predicates may order them by kind instead. Arrays shared at several depths are covered by fixed tests.`,
+      statement: `Range predicates compare arrays element by element, whether or not they hold a value class, in one total preorder: opposite pairs have opposite signs and the order is transitive. A null sorts first, then primitives, value classes by their serialized value with record keys sorted, Temporal values, other objects, nested arrays after any value that is not an array, and symbols last; a shorter prefix sorts first, and a pair met again inside its own comparison is equal. Range predicates agree with sorting wherever sorting orders two arrays without reading a reference, and where sorting first orders two other objects or two symbols by identity they treat the arrays as equal. Values that are not arrays keep the native operators and their throws unless one is a value class, which sorts after a primitive and before any other object; a Temporal pair compares as Temporal values. The sort order keeps two distinct plain objects apart, and each value class instance is serialized at most once.`,
+      authority: `Issue #2459, the "Value classes" section of docs/guides/live-queries.md, the compareValues contract in packages/db/src/utils/comparison.ts, the ascComparator rule that symbols sort after every other value, and the PR #2460 review (array comparison is one total order that agrees with sorting).`,
+      limits: `Numbers 0..12, five texts (one spelling a number), two symbols inside arrays, records and record-shaped toJSON() classes over two tables and two IDs, one plain object shape, an empty Uint8Array subclass, three PlainDates, null elements, and arrays of up to three terms nested and self-referencing up to fast-check's small depth; one to six operand pairs plus each left operand against a copy, and every pair and triple of the history's array operands. A number and a text that spells no number are unordered, so transitivity is not checked through such a pair. Only one text spells a number: the native operators compare a number and such a text as numbers but two texts by code units, which is not transitive (5 < '10' < '2' < 5) for bare values and sorting alike; sorting is compared only where it reads no reference and holds no self-referencing array, and where it orders a Temporal value, an array or another object by reference, range predicates may order them by kind instead. Arrays shared at several depths are covered by fixed tests.`,
     },
     owns: [
       'src/utils/comparison.ts#compareValues',
@@ -2390,6 +2471,22 @@ describe(`value classes order arrays by their serialized value`, () => {
             ),
         },
         {
+          name: `symbols sort last and numeric text compares as a number`,
+          enters: [`symbol-last`, `numeric-text`],
+          build: (generated): OrderHistory =>
+            withPairs(
+              [
+                [array(array(num(1))), array({ k: `symbol`, n: 0 })],
+                [
+                  array({ k: `symbol`, n: 0 }),
+                  array({ k: `symbol`, n: 1 }, num(1)),
+                ],
+                [array(num(5)), array({ k: `text`, v: `10` })],
+              ],
+              generated,
+            ),
+        },
+        {
           name: `a serialized record ignores its key order`,
           enters: [`shaped-key-order`],
           build: (generated): OrderHistory =>
@@ -2446,6 +2543,10 @@ const replayStates = [
   `removed`,
   // The replay delivered a deep-equal copy where the probe had been.
   `replay-delivered-copy`,
+  // No row held the instance a distinct query showed after the replay.
+  `distinct-shown-replaced`,
+  // A filter on the probe after distinct gained or lost its row.
+  `distinct-filter-followed`,
 ] as const
 type ReplayState = (typeof replayStates)[number]
 
@@ -2478,77 +2579,89 @@ async function runReplayHistory(
   const replay = createDeferred<void>()
   let loaded = false
   let replaying = false
-  const collection = createCollection<ReplayRow>({
-    id: `serialized-value-replay-${replayRuns++}`,
-    getKey: ({ id }) => id,
-    syncMode: `on-demand`,
-    sync: {
-      sync: (operations) => {
-        ;({ begin, write, commit, truncate } = operations)
-        operations.markReady()
-        return {
-          loadSubset: () => {
-            if (replaying) return replay.promise
-            if (loaded) return true
-            loaded = true
-            begin()
-            for (const [index, row] of history.rows.entries()) {
-              if (row.before === `absent`) continue
-              write({
-                type: `insert`,
-                value: {
-                  id: ids[index]!,
-                  ref: row.before === `probe` ? probe : copy(),
-                },
-              })
-            }
-            commit()
-            return true
-          },
-          unloadSubset: () => {},
+  // Later resources read earlier ones, so they are cleaned up first.
+  const cleanups: Array<() => unknown> = []
+  const cleanup = (step: () => unknown) => cleanups.unshift(step)
+  await withOracleCleanup(async () => {
+    const collection = createCollection<ReplayRow>({
+      id: `serialized-value-replay-${replayRuns++}`,
+      getKey: ({ id }) => id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (operations) => {
+          ;({ begin, write, commit, truncate } = operations)
+          operations.markReady()
+          return {
+            loadSubset: () => {
+              if (replaying) return replay.promise
+              if (loaded) return true
+              loaded = true
+              begin()
+              for (const [index, row] of history.rows.entries()) {
+                if (row.before === `absent`) continue
+                write({
+                  type: `insert`,
+                  value: {
+                    id: ids[index]!,
+                    ref: row.before === `probe` ? probe : copy(),
+                  },
+                })
+              }
+              commit()
+              return true
+            },
+            unloadSubset: () => {},
+          }
+        },
+      },
+    })
+    cleanup(() => collection.cleanup())
+    // Settle the replay before anything is torn down.
+    cleanup(async () => {
+      replay.resolve()
+      await flushPromises()
+    })
+    const visible = new Set<string>()
+    const events: Array<string> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        for (const change of changes) {
+          events.push(`${change.type}:${String(change.key)}`)
+          if (change.type === `delete`) visible.delete(String(change.key))
+          else visible.add(String(change.key))
         }
       },
-    },
-  })
-  const visible = new Set<string>()
-  const events: Array<string> = []
-  const subscription = collection.subscribeChanges(
-    (changes) => {
-      for (const change of changes) {
-        events.push(`${change.type}:${String(change.key)}`)
-        if (change.type === `delete`) visible.delete(String(change.key))
-        else visible.add(String(change.key))
-      }
-    },
-    {
-      whereExpression: new Func(`eq`, [new PropRef([`ref`]), new Value(probe)]),
-    },
-  )
-  const matching = (state: (row: ReplayRowSpec) => RefState) =>
-    ids.filter((_, index) => state(history.rows[index]!) === `probe`)
-  // An Effect reads rows by reference: its join holds a row only while the
-  // row's reference is the probe instance.
-  const probeSide = createCollection(
-    mockSyncCollectionOptions<{ id: string; ref: Map<string, number> }>({
-      id: `serialized-value-replay-probe-${replayRuns}`,
-      getKey: ({ id }) => id,
-      initialData: [{ id: `p`, ref: probe }],
-    }),
-  )
-  const held = new Set<string>()
-  const effectEvents: Array<string> = []
-  let effect: ReturnType<typeof createEffect> | undefined
-  // A second Effect reads the reference in a functional filter, which runs
-  // after the subscription and sees only the rows it is sent.
-  const filterHeld = new Set<string>()
-  const filterEvents: Array<string> = []
-  let filterEffect: ReturnType<typeof createEffect> | undefined
-  try {
+      {
+        whereExpression: new Func(`eq`, [
+          new PropRef([`ref`]),
+          new Value(probe),
+        ]),
+      },
+    )
+    cleanup(() => subscription.unsubscribe())
+    const matching = (state: (row: ReplayRowSpec) => RefState) =>
+      ids.filter((_, index) => state(history.rows[index]!) === `probe`)
+    // An Effect reads rows by reference: its join holds a row only while the
+    // row's reference is the probe instance.
+    const probeSide = createCollection(
+      mockSyncCollectionOptions<{ id: string; ref: Map<string, number> }>({
+        id: `serialized-value-replay-probe-${replayRuns}`,
+        getKey: ({ id }) => id,
+        initialData: [{ id: `p`, ref: probe }],
+      }),
+    )
+    cleanup(() => probeSide.cleanup())
+    const held = new Set<string>()
+    const effectEvents: Array<string> = []
+    // A second Effect reads the reference in a functional filter, which runs
+    // after the subscription and sees only the rows it is sent.
+    const filterHeld = new Set<string>()
+    const filterEvents: Array<string> = []
     subscription.requestSnapshot({ optimizedOnly: false })
     expect([...visible].sort(), `before the truncate`).toEqual(
       matching((row) => row.before),
     )
-    effect = createEffect({
+    const effect = createEffect({
       query: (q) =>
         q
           .from({ row: collection })
@@ -2563,7 +2676,8 @@ async function runReplayHistory(
         }
       },
     })
-    filterEffect = createEffect({
+    cleanup(() => effect.dispose())
+    const filterEffect = createEffect({
       query: (q) =>
         q
           .from({ row: collection })
@@ -2578,6 +2692,64 @@ async function runReplayHistory(
         }
       },
     })
+    cleanup(() => filterEffect.dispose())
+    // Every reference is deep-equal, so a distinct query over them has one row
+    // while any row exists, and it must show an instance a row still holds.
+    const distinctRefs = createLiveQueryCollection({
+      id: `serialized-value-replay-distinct-${replayRuns}`,
+      query: (q) =>
+        q
+          .from({ row: collection })
+          .select(({ row }) => ({ ref: row.ref }))
+          .distinct(),
+    })
+    cleanup(() => distinctRefs.cleanup())
+    await distinctRefs.preload()
+    // An Effect buffers the replay and receives it as one diff, which can
+    // replace a row by a deep-equal instance. Its functional filter on the
+    // probe instance runs after distinct, so it holds the distinct row only
+    // while that row shows the probe. Distinct may show any instance a row
+    // holds, so the filter must hold one row when every row holds the probe
+    // and none when no row does.
+    const probeAfterDistinct = new Set<string | number>()
+    const distinctEffect = createEffect({
+      query: (q) =>
+        q
+          .from({
+            d: q
+              .from({ row: collection })
+              .select(({ row }) => ({ ref: row.ref }))
+              .distinct(),
+          })
+          .fn.where(({ d }) => d.ref === probe)
+          .select(({ d }) => ({ ref: d.ref })),
+      onBatch: (batch) => {
+        for (const event of batch) {
+          if (event.type === `exit`) probeAfterDistinct.delete(event.key)
+          else probeAfterDistinct.add(event.key)
+        }
+      },
+    })
+    cleanup(() => distinctEffect.dispose())
+    const checkDistinct = (checkpoint: string, present: Array<string>) => {
+      const instances = new Set(present.map((id) => collection.get(id)?.ref))
+      expect(distinctRefs.size, `${checkpoint}: distinct rows`).toBe(
+        present.length > 0 ? 1 : 0,
+      )
+      for (const row of distinctRefs.toArray)
+        expect(
+          instances.has(row.ref),
+          `${checkpoint}: distinct row holds a live instance`,
+        ).toBe(true)
+      const holders = present.filter((id) => collection.get(id)?.ref === probe)
+      if (holders.length > 0 && holders.length < present.length) return
+      const expected = holders.length > 0 ? 1 : 0
+      expect(
+        probeAfterDistinct.size,
+        `${checkpoint}: probe filter after distinct`,
+      ).toBe(expected)
+      return expected
+    }
     await flushPromises()
     expect([...held].sort(), `Effect before the truncate`).toEqual(
       matching((row) => row.before),
@@ -2585,6 +2757,14 @@ async function runReplayHistory(
     expect([...filterHeld].sort(), `filter Effect before the truncate`).toEqual(
       matching((row) => row.before),
     )
+    const presentBefore = ids.filter(
+      (_, index) => history.rows[index]!.before !== `absent`,
+    )
+    const filteredBefore = checkDistinct(`before the truncate`, presentBefore)
+    const shownBefore = distinctRefs.toArray[0]?.ref
+    events.length = 0
+    effectEvents.length = 0
+    filterEvents.length = 0
     replaying = true
     begin()
     truncate()
@@ -2607,9 +2787,13 @@ async function runReplayHistory(
       }
       commit()
     }
-    events.length = 0
-    effectEvents.length = 0
-    filterEvents.length = 0
+    await flushPromises()
+    // The replay publishes once, when it completes.
+    expect(events, `while the replay is pending`).toEqual([])
+    expect(effectEvents, `Effect while the replay is pending`).toEqual([])
+    expect(filterEvents, `filter Effect while the replay is pending`).toEqual(
+      [],
+    )
     replay.resolve()
     await flushPromises()
 
@@ -2657,26 +2841,33 @@ async function runReplayHistory(
       [...filterEvents].sort(),
       `filter Effect replay publication`,
     ).toEqual(expectedEffectEvents.sort())
-  } finally {
-    replay.resolve()
-    await flushPromises()
-    await effect?.dispose()
-    await filterEffect?.dispose()
-    subscription.unsubscribe()
-    await collection.cleanup()
-    await probeSide.cleanup()
-  }
+    const presentAfter = ids.filter(
+      (_, index) => history.rows[index]!.after !== `absent`,
+    )
+    if (
+      shownBefore !== undefined &&
+      presentAfter.length > 0 &&
+      !presentAfter.some((id) => collection.get(id)?.ref === shownBefore)
+    )
+      reach(`distinct-shown-replaced`)
+    const filteredAfter = checkDistinct(`after the replay`, presentAfter)
+    if (
+      filteredBefore !== undefined &&
+      filteredAfter !== undefined &&
+      filteredBefore !== filteredAfter
+    )
+      reach(`distinct-filter-followed`)
+  }, cleanups)
 }
-
 const replayProperty = `serialized-value.truncate-replay`
 
 describe(`a truncate replay follows reference replacements`, () => {
   oracleProperty({
     id: replayProperty,
     law: {
-      statement: `When a direct subscriber's truncate replay completes, a filter on a reference, an Effect that joins on it and an Effect whose functional filter compares it show exactly the rows that hold that instance, and the replay publishes a delete (an Effect exit) for each row that stopped matching, including by a deep-equal replacement, an insert (an Effect enter) for each that started, and nothing for a row that still matches.`,
+      statement: `A direct subscriber's truncate replay publishes nothing while it is pending. When it completes, a filter on a reference, an Effect that joins on it and an Effect whose functional filter compares it show exactly the rows that hold that instance, and the replay publishes a delete (an Effect exit) for each row that stopped matching, including by a deep-equal replacement, an insert (an Effect enter) for each that started, and nothing for a row that still matches. A distinct live query over the references shows an instance some row still holds, and an Effect that filters a distinct query on the instance holds its row when every row holds it and none when no row does.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
-      limits: `One on-demand Collection with a Map-valued reference filter, one Effect with an inner join on that reference, one Effect with a functional filter on it, and one replay; up to three rows, each absent, holding the probe or holding a deep-equal copy before the truncate and after the replay.`,
+      limits: `One on-demand Collection with a Map-valued reference filter, one Effect with an inner join on that reference, one Effect with a functional filter on it, a distinct live query and an Effect filtering a distinct subquery, and one replay; which instance distinct shows while rows hold both is unspecified; up to three rows, each absent, holding the probe or holding a deep-equal copy before the truncate and after the replay.`,
     },
     owns: [
       'src/collection/subscription.ts#CollectionSubscription.createStateDiff',
@@ -2704,7 +2895,12 @@ describe(`a truncate replay follows reference replacements`, () => {
         },
         {
           name: `a matching row is not delivered again or comes back as a copy`,
-          enters: [`removed`, `replay-delivered-copy`],
+          enters: [
+            `removed`,
+            `replay-delivered-copy`,
+            `distinct-shown-replaced`,
+            `distinct-filter-followed`,
+          ],
           build: (): ReplayHistory => ({
             rows: [
               { before: `probe`, after: `absent`, viaProbe: false },
@@ -3078,50 +3274,58 @@ async function runPooledHistory(
       tag: new PrivateTag(`tag-0`),
     }
   })
-  const source = createCollection(
-    mockSyncCollectionOptions<SwapRow>({
-      id: `serialized-value-pooled-${pooledRuns++}`,
-      getKey: (row) => row.id,
-      initialData: stored.map((row) => ({ ...row })),
-      autoIndex: `off`,
-    }),
-  )
-  await source.stateWhenReady()
-  const base = new Query()
-    .from({ item: source })
-    .where(({ item }) =>
-      history.residual
-        ? and(eq(item.team, `t`), eq(item.ref, probe as never))
-        : eq(item.team, `t`),
+  // Later resources read earlier ones, so they are cleaned up first.
+  const cleanups: Array<() => unknown> = []
+  const cleanup = (step: () => unknown) => cleanups.unshift(step)
+  await withOracleCleanup(async () => {
+    const source = createCollection(
+      mockSyncCollectionOptions<SwapRow>({
+        id: `serialized-value-pooled-${pooledRuns++}`,
+        getKey: (row) => row.id,
+        initialData: stored.map((row) => ({ ...row })),
+        autoIndex: `off`,
+      }),
     )
-  const view = poolQuery(
-    history.ordered ? base.orderBy(({ item }) => item.at as never) : base,
-  )!
-  const attached = createLiveQueryObserver<SwapRow, string>(view as never)
-  let told = 0
-  const stop = attached.subscribe(() => void told++)
-  const detached = createLiveQueryObserver<SwapRow, string>(view as never)
-  const rows = (observer: typeof attached) =>
-    (observer.getSnapshot().data as Array<SwapRow>).map(
-      (row) => `${row.id}:${row.n}:${row.tag.toJSON()}`,
-    )
-  // The group's order: by sort field when ordered, then by key.
-  const groupOrder = () =>
-    [...model]
-      .sort((a, b) =>
-        history.ordered && a.atSeq !== b.atSeq
-          ? a.atSeq - b.atSeq
-          : a.id < b.id
-            ? -1
-            : 1,
+    cleanup(() => source.cleanup())
+    await source.stateWhenReady()
+    const base = new Query()
+      .from({ item: source })
+      .where(({ item }) =>
+        history.residual
+          ? and(eq(item.team, `t`), eq(item.ref, probe as never))
+          : eq(item.team, `t`),
       )
-      .map((row) => row.id)
-  const expected = () =>
-    groupOrder()
-      .map((id) => model.find((row) => row.id === id)!)
-      .filter((row) => !history.residual || row.ref === `probe`)
-      .map((row) => `${row.id}:${row.n}:tag-${row.tag}`)
-  try {
+    const view = poolQuery(
+      history.ordered ? base.orderBy(({ item }) => item.at as never) : base,
+    )!
+    cleanup(() => view.cleanup())
+    const attached = createLiveQueryObserver<SwapRow, string>(view as never)
+    cleanup(() => attached.dispose())
+    let told = 0
+    const stop = attached.subscribe(() => void told++)
+    cleanup(stop)
+    const detached = createLiveQueryObserver<SwapRow, string>(view as never)
+    cleanup(() => detached.dispose())
+    const rows = (observer: typeof attached) =>
+      (observer.getSnapshot().data as Array<SwapRow>).map(
+        (row) => `${row.id}:${row.n}:${row.tag.toJSON()}`,
+      )
+    // The group's order: by sort field when ordered, then by key.
+    const groupOrder = () =>
+      [...model]
+        .sort((a, b) =>
+          history.ordered && a.atSeq !== b.atSeq
+            ? a.atSeq - b.atSeq
+            : a.id < b.id
+              ? -1
+              : 1,
+        )
+        .map((row) => row.id)
+    const expected = () =>
+      groupOrder()
+        .map((id) => model.find((row) => row.id === id)!)
+        .filter((row) => !history.residual || row.ref === `probe`)
+        .map((row) => `${row.id}:${row.n}:tag-${row.tag}`)
     expect(rows(attached), `initial: attached`).toEqual(expected())
     expect(rows(detached), `initial: detached`).toEqual(expected())
     for (const [step, batch] of history.batches.entries()) {
@@ -3202,13 +3406,7 @@ async function runPooledHistory(
       )
         reach(`ordered-replacement-moved`)
     }
-  } finally {
-    stop()
-    attached.dispose()
-    detached.dispose()
-    await view.cleanup()
-    await source.cleanup()
-  }
+  }, cleanups)
 }
 
 const pooledSwapProperty = `serialized-value.pooled-residual-swap`

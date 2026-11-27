@@ -384,22 +384,27 @@ function compareElements(
       if (aKind !== bKind) return aKind < bKind ? -1 : 1
       if (aKind === 2) return undefined
     }
-    if (typeof a === `symbol` && typeof b === `symbol` && a !== b)
-      return undefined
+    // Two symbols compare by identity, so they tie, as two plain objects do.
+    if (typeof a === `symbol` && typeof b === `symbol`) return undefined
   }
   return Math.sign(ascComparator(a, b, VALUE_CLASS_ORDER))
 }
 
 /**
  * Order two values when at least one is an array: element by element, with a
- * shorter prefix first and an array after any value that is not an array.
+ * shorter prefix first and an array after any value that is not an array
+ * except a symbol, which sorting puts last.
  */
 function compareArrays(
   a: unknown,
   b: unknown,
   visiting = new Map<unknown, Set<unknown>>(),
 ): number | undefined {
-  if (!Array.isArray(a) || !Array.isArray(b)) return Array.isArray(a) ? 1 : -1
+  if (!Array.isArray(a) || !Array.isArray(b)) {
+    if (typeof a === `symbol`) return 1
+    if (typeof b === `symbol`) return -1
+    return Array.isArray(a) ? 1 : -1
+  }
   // Only this pair coming up again inside its own comparison is a cycle. An
   // array that both operands share at different depths is compared in full.
   let partners = visiting.get(a)
@@ -427,7 +432,8 @@ function isValueClass(value: unknown): boolean {
  *
  * Temporal types intentionally throw from `valueOf` to prevent silent
  * miscomparison via the native relational operators — delegate to
- * `compareTemporalValues` for them. A value class uses the sort order, which
+ * `compareTemporalValues` for them; two Temporal types throw, inside an array
+ * as outside it, as they do in sorting. A value class uses the sort order, which
  * reads its serialized value: equal captures are one query, so a range must
  * not depend on `valueOf`. Arrays compare element by element in one order that
  * agrees with sorting, tying where sorting would read references. For

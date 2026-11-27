@@ -2465,8 +2465,8 @@ probe, an inner join, query identity, demand keys and `getStableValueHash`,
 including an unequal record and a nested query key. Every row and probe is a
 fresh instance with its own `valueOf()`,
 and a constructed history replaces an indexed group's first instance with an
-equal one. Rows and join rows also hold Map, Set and ArrayBuffer subclasses
-whose `toJSON()` spells a record reference; they keep their built-in rule and
+equal one. Rows and join rows also hold Map, Set, ArrayBuffer and RegExp
+subclasses whose `toJSON()` spells a record reference; they keep their built-in rule and
 never match a record probe or join row, and a constructed history places one
 among equal records. Plain records and arrays hold a throwing `toJSON`
 accessor that must not be read. Array range filters compare captures with
@@ -2480,14 +2480,17 @@ the rows that store it when each commit returns, and an Effect does once it has
 run. An unfiltered subscriber and live query, ID filters and pooled ID views
 that stay matched, and an Effect receive a change only when a row's value
 changed, and a real update beside a replacement in one batch still reaches an
-Effect, and a `distinct` query shows an instance some row still holds. It does
+Effect, and a `distinct` query shows an instance some row still holds, with
+at least one row and at most one per source row. A Date range bound and its
+timestamp have different query identities over a record row. It does
 not cover `inArray` (fixed tests in
 `ir-stable-identity.test.ts`), on-demand or persisted sources, exact-output
 identity, which keeps reference semantics, or throwing `toJSON()` methods.
 Its second property (`serialized-value.array-order`) checks `gt`, `gte`, `lt`
 and `lte` over generated arrays that mix value classes, record-shaped
-`toJSON()` classes, plain objects, numbers, text, nulls, PlainDates, a typed
-array subclass and self-referencing arrays against an independent order
+`toJSON()` classes, plain objects, numbers, text (one numeric), nulls,
+PlainDates, symbols, a typed array subclass and self-referencing arrays
+against an independent order
 model, including the native operators' throws, with the right operand's
 objects given runtime identities first, and each value class instance
 serialized at most once. Every array orders element by element. Over every
@@ -2495,16 +2498,22 @@ pair and triple of a history's array operands it checks that opposite pairs
 have opposite signs and that the order is transitive, that range predicates
 agree with `ascComparator` wherever an independent sort model says sorting
 reads no reference, and that they tie where sorting first orders two objects
-without a value class by reference (PR #2460 review). Transitivity is not
-checked through a number and a text, which the relational operators leave
-unordered, and sorting is not compared through self-referencing arrays or
+or two symbols by identity (PR #2460 review). Transitivity is not
+checked through a number and a text that spells no number, which the
+relational operators leave unordered. Only one generated text spells a number:
+the relational operators and sorting compare a number with such a text as
+numbers but two texts by code units, which is not transitive
+(`5 < '10' < '2' < 5`) for bare values on main as well. Sorting is not compared through self-referencing arrays or
 where it orders a Temporal value, an array or another object by reference.
 Three more generated properties use small models.
 `serialized-value.truncate-replay` gives up to three rows a probe reference, a
 deep-equal copy or no row before a direct subscriber's truncate and after its
-replay, and requires the replay to publish exactly the rows that stopped or
-started matching, to a filtered subscription, to an Effect that joins on the
-probe and to an Effect whose functional filter compares the reference with it.
+replay, and requires the replay to publish nothing before it completes and
+then exactly the rows that stopped or started matching, to a filtered
+subscription, to an Effect that joins on the probe and to an Effect whose
+functional filter compares the reference with it, a `distinct` live query
+over the references to show an instance some row still holds, and an Effect
+that filters a `distinct` subquery on the probe to follow the replay.
 `serialized-value.effect-joined-load` opens an on-demand
 join load with a deep-equal or normal update; the provider moves one to three
 rows by real updates or deep-equal replacements and may dispose the Effect,
@@ -2522,9 +2531,9 @@ equality to tell apart value classes whose serialization differs behind equal
 enumerable fields, bare, in a record or in an array. The
 distinct representative oracle requires a shown payload to stay while the
 inputs that hold it do, and `ivm.distinct-support-collisions` adds and removes
-the four inputs of one verified digest family against a multiset model, with
-zero-weight inputs before a world's changes and self-referencing payloads
-outside the selection.
+the four inputs of one verified digest family against a multiset model summed
+by output key and payload, with zero-weight inputs before a world's changes
+and self-referencing keys and payloads outside the selection.
 
 The
 [Temporal index order tests](https://github.com/TanStack/db/blob/main/packages/db/tests/temporal-index-order.test.ts)
