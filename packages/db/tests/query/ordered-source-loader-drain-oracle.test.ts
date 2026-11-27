@@ -44,6 +44,15 @@
  * joined-settlement driver runs a live query whose first page settles while
  * the joined source's load is pending, then settles that load and observes
  * the live query's status and rows.
+ *
+ * Each property declares the paths its cells must execute as enumerated
+ * states, and each driver reports the path it observed: the chain's length
+ * answered inside `start`, which observation held the refill (a joined-work
+ * read answering pending, or a tie that advanced the graph input), and a
+ * refill held while the joined load was pending and issued after it settled,
+ * with the rows that settlement delivered. A history that misses its cell's
+ * state fails its own check, and the reach test fails when no history enters
+ * a declared state.
  */
 import { describe, expect } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
@@ -55,9 +64,8 @@ import {
   isUndefined,
 } from '../../src/query/index.js'
 import { OrderedSourceLoader } from '../../src/query/live/ordered-source-loader.js'
-import { oracleProperty } from '../oracle-config.js'
+import { oracleProperty, violation } from '../oracle-config.js'
 import {
-  forwardAssertionJudgment,
   recordAssertionJudgment,
   recordedAssertionJudgment,
 } from '../oracle-assertion-adapter.js'
@@ -67,6 +75,7 @@ import {
   createOrderByInfo,
 } from './ordered-source-loader-support.js'
 import type { CollectionSubscription } from '../../src/collection/subscription.js'
+import type { Observation, Verdict } from '../oracle-config.js'
 import type { RequestOptions } from './ordered-source-loader-support.js'
 
 const drainCases = [false, true].flatMap((joinedPending) =>
@@ -87,13 +96,56 @@ function expectedRequests({ joinedPending, tieWritesInput }: DrainCase) {
   }
 }
 
-async function runDrainCell(cell: DrainCase): Promise<void> {
+// The paths the drain cells must execute. A refill is held when the tie's
+// return issues none and the pass after the joined settlement issues it; what
+// held it is what the run observed: a joined-work read that answered pending,
+// or a tie answer that advanced the graph input revision.
+const drainStates = [
+  `refill at the tie's return`,
+  `refill held by pending joined work with no new input`,
+  `refill held by new input`,
+] as const
+type DrainState = (typeof drainStates)[number]
+
+function requiredDrainState({
+  joinedPending,
+  tieWritesInput,
+}: DrainCase): DrainState {
+  if (tieWritesInput) return `refill held by new input`
+  return joinedPending
+    ? `refill held by pending joined work with no new input`
+    : `refill at the tie's return`
+}
+
+function observedDrainState(run: {
+  refillsAtTieReturn: number
+  refillsAfterSettlement: number
+  pendingJoinedReads: number
+  inputAdvanced: boolean
+}): DrainState | undefined {
+  if (run.refillsAtTieReturn === 1) return `refill at the tie's return`
+  if (run.refillsAtTieReturn !== 0 || run.refillsAfterSettlement !== 1)
+    return undefined
+  if (run.inputAdvanced) return `refill held by new input`
+  if (run.pendingJoinedReads > 0)
+    return `refill held by pending joined work with no new input`
+  return undefined
+}
+
+async function runDrainCell(
+  cell: DrainCase,
+  reached: (state: DrainState) => void,
+): Promise<void> {
   const expected = expectedRequests(cell)
   const requests: Array<`page` | `tie`> = []
   const firstPage = createDeferred()
   let graphInputRevision = 0
   let joinedPending = false
   let joinedReads = 0
+  let pendingJoinedReads = 0
+  let tieReturned = false
+  let refillsAtTieReturn = 0
+  let inputAdvanced = false
   const subscription = {
     setOrderByIndex: () => {},
     readOrderedSnapshot: () => [{ value: { rank: 1 } }],
@@ -120,14 +172,19 @@ async function runDrainCell(cell: DrainCase): Promise<void> {
       if (++joinedReads > joinedReadBudget) {
         throw new Error(`joined-work read budget exceeded`)
       }
+      if (joinedPending && !tieReturned) pendingJoinedReads++
       return joinedPending
     },
   )
+  const refills = () => requests.filter((r, i) => r === `page` && i > 0).length
   try {
     loader.start()
     joinedPending = cell.joinedPending
     firstPage.resolve()
     await flushPromises().catch(() => {})
+    tieReturned = true
+    refillsAtTieReturn = refills()
+    inputAdvanced = graphInputRevision > 0
     expect(joinedReads, `drain terminates`).toBeLessThanOrEqual(
       joinedReadBudget,
     )
@@ -138,6 +195,13 @@ async function runDrainCell(cell: DrainCase): Promise<void> {
     joinedPending = false
     loader.loadMore()
     await flushPromises()
+    const state = observedDrainState({
+      refillsAtTieReturn,
+      refillsAfterSettlement: refills() - refillsAtTieReturn,
+      pendingJoinedReads,
+      inputAdvanced,
+    })
+    if (state) reached(state)
     expect(requests, `requests after joined work settles`).toEqual(
       expected.afterJoinedSettles,
     )
@@ -153,9 +217,24 @@ async function runDrainCell(cell: DrainCase): Promise<void> {
 // stays in flight.
 const chainCases = [{ pages: 1 }, { pages: 20_000 }]
 
-function runSynchronousChain({ pages }: (typeof chainCases)[number]): void {
+// The chain lengths that must run inside one `start` call. The long chain is
+// longer than any call stack a recursive drain could hold.
+const longChain = 10_000
+const chainStates = [`one synchronous page`, `long synchronous chain`] as const
+type ChainState = (typeof chainStates)[number]
+
+function requiredChainState({ pages }: (typeof chainCases)[number]) {
+  return pages > longChain ? `long synchronous chain` : `one synchronous page`
+}
+
+function runSynchronousChain(
+  { pages }: (typeof chainCases)[number],
+  reached: (state: ChainState) => void,
+): void {
   let pageRequests = 0
   let rank = 0
+  let inStart = false
+  let answeredInStart = 0
   const subscription = {
     setOrderByIndex: () => {},
     readOrderedSnapshot: () => [{ value: { rank } }],
@@ -163,6 +242,7 @@ function runSynchronousChain({ pages }: (typeof chainCases)[number]): void {
       pageRequests++
       rank++
       const result = pageRequests > pages ? new Promise<void>(() => {}) : true
+      if (inStart && result === true) answeredInStart++
       options.onLoadSubsetResult?.(result, options, () => {})
     },
     requestSnapshot: (options: RequestOptions) => {
@@ -178,7 +258,16 @@ function runSynchronousChain({ pages }: (typeof chainCases)[number]): void {
     () => 0,
   )
   try {
-    expect(() => loader.start(), `chain returns`).not.toThrow()
+    expect(() => {
+      inStart = true
+      try {
+        loader.start()
+      } finally {
+        inStart = false
+      }
+    }, `chain returns`).not.toThrow()
+    if (answeredInStart === 1) reached(`one synchronous page`)
+    if (answeredInStart > longChain) reached(`long synchronous chain`)
     expect(pageRequests, `pages issued`).toBe(pages + 1)
   } finally {
     loader.dispose()
@@ -199,6 +288,19 @@ const settlementRows = [
 ]
 const settlementLimit = 3
 
+// The paths the settlement cells must execute: the first page settles, the
+// refill stays held while the joined load is pending, and the settlement,
+// with the rows it actually delivered, resumes it.
+const settlementStates = [`lazy`, `eager`].flatMap((joined) =>
+  [`no row`, `a row`].map(
+    (rows) => `held ${joined} refill resumed by a settlement with ${rows}`,
+  ),
+)
+
+function settlementState(joined: string, deliveredRows: number) {
+  return `held ${joined} refill resumed by a settlement with ${deliveredRows === 0 ? `no row` : `a row`}`
+}
+
 function expectedSettledWindow({ markedRows }: SettlementCase) {
   return {
     status: `ready`,
@@ -210,7 +312,10 @@ function expectedSettledWindow({ markedRows }: SettlementCase) {
   }
 }
 
-async function runSettlementCell(cell: SettlementCase): Promise<void> {
+async function runSettlementCell(
+  cell: SettlementCase,
+  reached: (state: string) => void,
+): Promise<void> {
   type Row = (typeof settlementRows)[number]
   type Marker = { id: number; rowId: number }
   const firstPage = createDeferred()
@@ -287,10 +392,14 @@ async function runSettlementCell(cell: SettlementCase): Promise<void> {
     await flushPromises()
     firstPage.resolve()
     await flushPromises()
+    const heldPages = pages
+    const held = joinedLoads.length > 0 && live.status !== `ready`
     while (joinedLoads.length > 0) {
       joinedLoads.shift()!()
       await flushPromises()
     }
+    if (held && pages > heldPages)
+      reached(settlementState(cell.joined, markers.size))
     expect(
       { status: live.status, ids: live.toArray.map(({ row }) => row.id) },
       `window after the joined settlement`,
@@ -301,6 +410,50 @@ async function runSettlementCell(cell: SettlementCase): Promise<void> {
   }
 }
 
+// A history must enter the state its cell names, after its comparisons pass,
+// so lost premise coverage fails its own history and not only the reach test.
+function requireReach(
+  judgment: Verdict,
+  trace: ReadonlyArray<Observation>,
+  state: string,
+  law: string,
+): Verdict {
+  if (judgment.kind === `violation`) return judgment
+  return trace.some(
+    ({ checkpoint, value }) => checkpoint === `reach` && value === state,
+  )
+    ? judgment
+    : violation(`reach`, `history did not enter ${state}`, law)
+}
+
+// One control per state: the history that must enter it, with its reach
+// removed from the trace, fails under the reach law.
+function missingStateControls<TCell>(
+  cells: ReadonlyArray<TCell>,
+  required: (cell: TCell) => string,
+  label: (cell: TCell) => string,
+  states: ReadonlyArray<string>,
+  law: string,
+) {
+  return states.map((state) => ({
+    name: `rejects a history missing ${state}`,
+    law,
+    difference: state,
+    history: { enumerated: label(cells.find((c) => required(c) === state)!) },
+    corrupt: (trace: ReadonlyArray<Observation>) =>
+      trace.filter(({ checkpoint }) => checkpoint !== `reach`),
+  }))
+}
+
+const chainLabel = ({ pages }: (typeof chainCases)[number]) =>
+  `drains ${pages} synchronous pages`
+const drainLabel = ({ joinedPending, tieWritesInput }: DrainCase) =>
+  `drains a synchronous tie with joined ${joinedPending ? `pending` : `idle`} and ${tieWritesInput ? `new` : `no new`} input`
+const settlementLabel = ({ joined, markedRows }: SettlementCase) =>
+  `publishes after a ${joined} joined settlement with ${markedRows.length} rows`
+const requiredSettlementState = ({ joined, markedRows }: SettlementCase) =>
+  settlementState(joined, markedRows.length)
+
 describe(`OrderedSourceLoader joined drain`, () => {
   oracleProperty({
     id: `ordered-source-loader.synchronous-chain`,
@@ -310,15 +463,28 @@ describe(`OrderedSourceLoader joined drain`, () => {
       limits: `Two chain lengths on a fake subscription with no joined work.`,
     },
     owns: ['src/query/live/ordered-source-loader.ts'],
-    histories: chainCases,
-    label: ({ pages }) => `drains ${pages} synchronous pages`,
+    histories: { enumerated: chainCases, states: chainStates },
+    label: chainLabel,
     resolve: (cell) => ({ cell }),
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>
       recordAssertionJudgment(`synchronous chain`, plan, observe, () =>
-        runSynchronousChain(plan.cell),
+        runSynchronousChain(plan.cell, (state) => observe(`reach`, state)),
       ),
-    check: forwardAssertionJudgment,
+    check: (plan, trace, judgment) =>
+      requireReach(
+        judgment,
+        trace,
+        requiredChainState(plan.cell),
+        `synchronous chain reach`,
+      ),
+    calibrations: missingStateControls(
+      chainCases,
+      requiredChainState,
+      chainLabel,
+      chainStates,
+      `synchronous chain reach`,
+    ),
   })
 
   oracleProperty({
@@ -329,16 +495,28 @@ describe(`OrderedSourceLoader joined drain`, () => {
       limits: `The four cells of drainCases on a fake subscription; failures, truncates and window moves belong to the request-authority oracle.`,
     },
     owns: ['src/query/live/ordered-source-loader.ts'],
-    histories: drainCases,
-    label: ({ joinedPending, tieWritesInput }) =>
-      `drains a synchronous tie with joined ${joinedPending ? `pending` : `idle`} and ${tieWritesInput ? `new` : `no new`} input`,
+    histories: { enumerated: drainCases, states: drainStates },
+    label: drainLabel,
     resolve: (cell) => ({ cell }),
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>
       recordAssertionJudgment(`joined drain requests`, plan, observe, () =>
-        runDrainCell(plan.cell),
+        runDrainCell(plan.cell, (state) => observe(`reach`, state)),
       ),
-    check: forwardAssertionJudgment,
+    check: (plan, trace, judgment) =>
+      requireReach(
+        judgment,
+        trace,
+        requiredDrainState(plan.cell),
+        `joined drain reach`,
+      ),
+    calibrations: missingStateControls(
+      drainCases,
+      requiredDrainState,
+      drainLabel,
+      drainStates,
+      `joined drain reach`,
+    ),
   })
 
   oracleProperty({
@@ -352,15 +530,27 @@ describe(`OrderedSourceLoader joined drain`, () => {
       'src/query/live/collection-subscriber.ts',
       'src/query/live/ordered-source-loader.ts',
     ],
-    histories: settlementCases,
-    label: ({ joined, markedRows }) =>
-      `publishes after a ${joined} joined settlement with ${markedRows.length} rows`,
+    histories: { enumerated: settlementCases, states: settlementStates },
+    label: settlementLabel,
     resolve: (cell) => ({ cell }),
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>
       recordAssertionJudgment(`joined settlement window`, plan, observe, () =>
-        runSettlementCell(plan.cell),
+        runSettlementCell(plan.cell, (state) => observe(`reach`, state)),
       ),
-    check: forwardAssertionJudgment,
+    check: (plan, trace, judgment) =>
+      requireReach(
+        judgment,
+        trace,
+        requiredSettlementState(plan.cell),
+        `joined settlement reach`,
+      ),
+    calibrations: missingStateControls(
+      settlementCases,
+      requiredSettlementState,
+      settlementLabel,
+      settlementStates,
+      `joined settlement reach`,
+    ),
   })
 })
