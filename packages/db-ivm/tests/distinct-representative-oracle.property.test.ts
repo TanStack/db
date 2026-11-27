@@ -316,6 +316,9 @@ function driveSupportCollisions(
     }),
   )
   graph.finalize()
+  // Observations name a payload by its member, since a payload can be cyclic.
+  const member = (payload: unknown) =>
+    members.findIndex(([, row]) => row === payload)
   let live: Array<number> = []
   let shown: unknown
   let held = new Map<number, number>()
@@ -339,8 +342,8 @@ function driveSupportCollisions(
         `distinct support collision diverged at ${checkpoint}`,
         `distinct representative contribution`,
         checkpoint,
-        rows,
-        payloads,
+        rows.map(([row, weight]) => [member(row), weight]),
+        world,
       )
     const now = holders(world)
     const current = rows[0]?.[0]
@@ -356,8 +359,8 @@ function driveSupportCollisions(
         `distinct support collision moved while still supported at ${checkpoint}`,
         `distinct representative stability`,
         checkpoint,
-        current,
-        shown,
+        member(current),
+        member(shown),
       )
     if (shown !== undefined && current !== shown && world.length > 0)
       observe(`reach`, `shown input retired beside a live one`)
