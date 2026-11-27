@@ -432,6 +432,7 @@ const staticOracleProperties = [
   `offline.executor-connectivity-barrier`,
   `offline.executor-connectivity-query-db`,
   `offline.executor-environment`,
+  `offline.durable-follower-writes`,
   `offline.fifo-retry`,
   `offline.leadership.serial-work`,
   `offline.leadership.report`,

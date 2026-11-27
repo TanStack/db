@@ -4262,6 +4262,37 @@ The post-merge review added three missing domains to existing owners:
   holds real storage-read delivery across successful and permanently rejected
   durable removals, with bounded scans, concurrent loads, and unfinished peers.
   This is distinct from exactly-once execution across independent owners.
+- [Durable follower writes](https://github.com/TanStack/db/blob/main/packages/offline-transactions/tests/durable-follower-oracle.property.test.ts)
+  checks delivery and settlement of `followerWrites: 'durable'` across three
+  tabs that write, close, reopen and hand over leadership, with controlled
+  election, connectivity and BroadcastChannel. It also checks that only the
+  leader sends a durable write, that a lost settlement (including a rejection)
+  is recovered for the same write, that a leader retries a saved write it could
+  not read, that a stale admission read cannot send a write twice, that a write
+  made before initialization takes the online path, and which rejection
+  records remain. It also covers a failed row removal after a successful send,
+  an undecodable saved row, a follower's failed outbox check, an admission read
+  across a change of leadership, and a `beforeRetry` exclusion whose settlement
+  is lost. It also covers a failed rejection record, a late admission during an
+  exclusion, a write removed before it was sent, a save acknowledged after a
+  handover, a faulted former leader that saves for its successor, a failed
+  start, a save that ends after its tab closed, and tabs that name their
+  collections differently under one key. It also covers a failed replay
+  that runs again on connectivity, a replay that outlives its term,
+  removals of a running write that wait for its call, also when they
+  overlap, unreadable outcome records and decisions, and a removed running
+  write whose call fails with a retryable error. It also covers an added message while an unsent write's removal is
+  being decided, a removed running write whose rejection record fails before
+  its leader stops leading, a connectivity change during an outbox check that
+  then fails, a failed read of a sent row's phase during its removal, a
+  readable decision beside an unreadable one, a writer's checks while each
+  record of a removed running write's retry is held, and a removed running
+  write whose call fails retryably between the failure's read and rewrite of
+  the row, then whose deletion fails. It also covers a leader's save that
+  acknowledges while its removal is decided, a replacement over a removal
+  that yields after its executor was disposed, a failed readmission after a
+  failed removal, and failed reads of outcome records. It does not cover real
+  browser contexts.
 - Settlement-time drop of optimistic state is owned by the
   [optimistic history model](https://github.com/TanStack/db/blob/main/packages/db/tests/optimistic-history-oracle.ts)
   and

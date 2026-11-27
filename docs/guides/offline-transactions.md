@@ -175,7 +175,7 @@ Register `saveBatch` in `mutationFns` before you use this example. `commit()` ca
 
 On the web, the executor tests IndexedDB first. It uses localStorage if IndexedDB is unavailable. You can pass a `storage` adapter to choose a different store.
 
-One tab leads outbox processing. The executor prefers Web Locks and then BroadcastChannel for leader election. A follower uses the normal online mutation path without an outbox entry. The same online-only path applies when durable storage is unavailable.
+One tab leads outbox processing. The executor prefers Web Locks and then BroadcastChannel for leader election. By default, a follower uses the normal online mutation path without an outbox entry; with `followerWrites: 'durable'`, an initialized follower saves to the shared outbox instead, as described below. The same online-only path applies when durable storage is unavailable.
 
 If neither election API exists, the current fallback treats the tab as the leader. It does not coordinate multiple tabs.
 
@@ -188,6 +188,8 @@ console.log(executor.mode)
 console.log(executor.storageDiagnostic)
 console.log(executor.isOfflineEnabled)
 ```
+
+Set `followerWrites: 'durable'` to keep a follower's writes when it goes offline or closes. The follower saves each write to the shared outbox, and the current or next leader sends it. A write whose tab closes before it can tell the current leader about the save waits for the next leader's replay. The follower's transaction settles with the leader's result. This requires BroadcastChannel: a follower without it uses the online path, while a tab that leads still saves its own writes to the outbox. Every tab that shares the outbox must set the same `followerWrites` mode: a default-mode tab opens no channel, so as leader it never hears a follower's saved write, and it records no outcome for a write it rejects or removes. A follower's write made before `waitForInit()` resolves also uses the online path, while a tab that already leads, for example in `onLeadershipChange(true)` during startup, waits for initialization instead; await `waitForInit()` before writing. A reloaded follower does not show another tab's pending writes optimistically until they sync. The leader records a rejection before it removes the row, so a follower that misses the report still fails with the server's error; a write with no record completed. A rejection record stays until its tab reads it; a leader's replay prunes records older than seven days, and a write saved longer ago than that keeps waiting instead of reading a missing record as success. Every tab must register its collections under the same keys, which also name the channel the tabs share; collection ids may differ. Every tab must also use the same outbox store: the channel does not include the store, and a removal reaches only the leader's store, so a write saved to another store stays pending there even after its removal resolves. Without `storage`, each tab probes on its own and falls back to localStorage when IndexedDB is unavailable; pass the same `storage`, such as `new IndexedDBAdapter()`, in every tab to rule that out. A leader that cannot read a follower's saved write reports it and keeps the write pending, and a leader whose outbox replay failed replays again when connectivity changes. Removing a saved write with `removeFromOutbox()` or `clearOutbox()` before it is sent fails its writer's transaction. A follower asks the leader to make the removal, because only the leader knows whether the server call started; a call that already started keeps the server's outcome, while a write waiting to retry after a retryable failure fails with the removal error. A removal waits for a call that is already running, so it can take as long as that call; if the call fails retryably, the removal then removes the retry and fails the write with the removal error. The row stays while the call runs, so a leader that closes meanwhile leaves the write to the next leader, which can send it again, as it would without the removal. An executor that replaces a disposed one over the same Collection objects also settles the writes its predecessor saved when another tab settled them meanwhile. Without BroadcastChannel, and in the default mode, a tab that saved a write as leader and lost leadership before it was sent learns no outcome from the outbox, so its transaction keeps waiting.
 
 Use `onStorageFailure` when the built-in web stores are unavailable. Use `onLeadershipChange` when the UI needs to show which tab owns the outbox. A follower can become the leader after the current leader leaves.
 
@@ -231,10 +233,12 @@ The counts describe local work. An outbox entry can include a retry count, next 
 `beforeRetry` can remove entries during replay. `onUnknownMutationFn` reports an entry whose registered function is missing. Keep mutation function names stable across releases, or define a migration for stored entries.
 
 The executor also exposes `removeFromOutbox(id)` and `clearOutbox()`. Use these
-only when the application decides to discard pending writes. An acknowledged
-removal does not cancel a running named mutation function. If that call later
-fails, its waiting promises reject with the named mutation function error and
-the removed row is not retried. Call `dispose()` when the executor's owner ends.
+only when the application decides to discard pending writes. A removal does
+not cancel a named mutation function that is already running in the same
+runtime; it waits for that call to end. If the call succeeds or fails
+terminally, its outcome stands. If it fails with a retryable error, its waiting
+promises reject with the removal error and the row is not retried. Call
+`dispose()` when the executor's owner ends.
 
 You can replace an executor to change its configuration while keeping the same
 Collections and durable outbox. Disposal stops new processing and releases

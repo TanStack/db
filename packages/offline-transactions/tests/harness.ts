@@ -101,16 +101,21 @@ interface TestOfflineEnvironmentOptions {
   mutationFn?: TestMutationFn
   storage?: FakeStorageAdapter
   config?: Partial<OfflineConfig>
+  // The collection's id, and the key the executor registers it under.
+  collectionId?: string
+  // An existing collection to register, as a replacement executor does.
+  collection?: Collection<TestItem, string, {}>
+  registryKey?: string
 }
 
-function createDefaultCollection(): {
+function createDefaultCollection(id = `test-items`): {
   collection: Collection<TestItem, string, {}>
   controller: SyncController
 } {
   let controller!: SyncController
 
   const collection = createCollection<TestItem, string, {}>({
-    id: `test-items`,
+    id,
     getKey: (item) => item.id,
     startSync: true,
     sync: {
@@ -147,10 +152,16 @@ export function createTestOfflineEnvironment(
   const mutationCalls: Array<OfflineMutationFnParams & { attempt: number }> = []
   const attemptCounter = new Map<string, number>()
 
-  const { collection, controller } = createDefaultCollection()
+  const created = options.collection
+    ? undefined
+    : createDefaultCollection(options.collectionId)
+  const collection = options.collection ?? created!.collection
+  const controller = created?.controller
   const serverState = new Map<string, TestItem>()
 
   const applyMutations = (mutations: ReadonlyArray<PendingMutation>) => {
+    // A reused collection keeps the sync of the environment that made it.
+    if (!controller) return
     controller.begin()
 
     for (const mutation of mutations) {
@@ -208,6 +219,9 @@ export function createTestOfflineEnvironment(
     return { ok: true, mutations }
   }
 
+  // The default provider syncs only a Collection this environment made.
+  if (options.collection && !options.mutationFn)
+    throw new Error(`A reused collection needs its own mutationFn`)
   const mutationFn: TestMutationFn = options.mutationFn ?? defaultMutation
 
   const leader = new FakeLeaderElection()
@@ -226,7 +240,7 @@ export function createTestOfflineEnvironment(
     ...options.config,
     collections: {
       ...(options.config?.collections ?? {}),
-      [collection.id]: collection,
+      [options.registryKey ?? collection.id]: collection,
     },
     mutationFns: {
       ...(options.config?.mutationFns ?? {}),

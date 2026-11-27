@@ -109,7 +109,7 @@ An optimistic change does not prove that the outbox write succeeded. Handle tran
 Only one tab acts as the "leader" to safely manage the outbox:
 
 - **Leader tab**: Full offline support with outbox persistence
-- **Non-leader tabs**: Online-only mode for safety
+- **Non-leader tabs**: Online-only mode by default, or a shared durable outbox with `followerWrites: 'durable'`
 - **Leadership transfer**: Automatic failover when leader tab closes
 
 ### FIFO Sequential Processing
@@ -138,6 +138,7 @@ interface OfflineConfig {
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
   onlineDetector?: OnlineDetector
+  followerWrites?: 'online' | 'durable'
 }
 ```
 
@@ -217,21 +218,26 @@ mutation function after restart; an unmarked row may replay.
 
 #### Properties
 
-- `isOfflineEnabled: boolean` - Whether this tab can persist offline transactions
+- `isOfflineEnabled: boolean` - Whether this tab leads and processes the outbox. With `followerWrites: 'durable'`, an initialized follower can also save writes while this is `false`
 
 #### Methods
 
 - `createOfflineTransaction(options)` - Create a manual offline transaction
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete. Call it before the transaction settles: a waiter for a transaction that this executor recently settled (one of its last 1,000) rejects. A waiter for an older settled id keeps waiting. A waiter for an id the executor does not know yet keeps waiting, because another tab can still queue that transaction.
-- `removeFromOutbox(id)` - Manually remove transaction from outbox
-- `clearOutbox()` - Manually remove all outbox transactions
+- `removeFromOutbox(id)` - Manually remove transaction from outbox. A removed transaction that has not started does not run, and its writer's transaction fails, also in another tab with `followerWrites: 'durable'`
+- `clearOutbox()` - Manually remove all outbox transactions, with the same effect on each
 - `peekOutbox()` - View all pending transactions
 - `dispose()` - Stop new processing and release executor resources. Pending durable transactions and optimistic state on surviving Collections remain live.
 
-An acknowledged `removeFromOutbox(id)` or `clearOutbox()` while a named
-mutation function is running does not cancel that call. If the call later
-fails, its waiting promises reject with the named mutation function error; the
-removed row is not retried.
+A `removeFromOutbox(id)` or `clearOutbox()` made while a named mutation
+function is running in the same runtime does not cancel that call: it waits for
+the call to return. With `followerWrites: 'durable'`, a follower's removal is
+made by the leader, so it also waits for the leader's call. A call that
+succeeds or fails permanently keeps that outcome. If the call fails with a
+retryable error, the removal then removes the row, its waiting promises reject
+with the removal error, and the row is not retried. In the default mode, a
+follower removes the row itself and does not wait for a call running in
+another tab.
 
 ### Error Handling
 

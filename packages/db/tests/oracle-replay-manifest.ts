@@ -1797,6 +1797,11 @@ const ownerGroups: ReadonlyArray<
     `offline-transactions/tests/executor-environment-oracle.ts`,
   ],
   [
+    `offline-transactions/tests/durable-follower-oracle.property.test.ts`,
+    `offline`,
+    `durable-follower-writes`,
+  ],
+  [
     `offline-transactions/tests/fifo-retry-oracle.property.test.ts`,
     `offline`,
     `fifo-retry`,

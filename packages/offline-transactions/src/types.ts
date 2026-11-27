@@ -130,6 +130,15 @@ export interface OfflineConfig {
   onStorageFailure?: (diagnostic: StorageDiagnostic) => void
   leaderElection?: LeaderElection
   /**
+   * How a follower tab sends a write. `'online'` (default) calls the mutation
+   * function directly, with no outbox entry. `'durable'` saves the write to the
+   * shared outbox, and the current or next leader sends it. Every tab must
+   * register its collections under the same keys. Requires
+   * BroadcastChannel, and falls back to `'online'` without it. A write made
+   * before the executor initializes uses the online path.
+   */
+  followerWrites?: `online` | `durable`
+  /**
    * Custom online detector implementation.
    * Defaults to WebOnlineDetector for browser environments.
    * The '@tanstack/offline-transactions/react-native' entry point uses ReactNativeOnlineDetector automatically.
@@ -159,8 +168,29 @@ export interface LeaderElection {
 
 export interface TransactionSignaler {
   readonly isOfflineEnabled: boolean
+  /** Counts leadership gains; absent for a signaler that never changes. */
+  readonly leadershipTerm?: number
+  /** Rejections are recorded for writers in other tabs. */
+  readonly recordsOutcomes?: boolean
+  /**
+   * Whether this tab made the transaction and waits for it. Another tab's
+   * writer needs a recorded rejection; this tab's own does not.
+   */
+  ownsWrite?: (transactionId: string) => boolean
+  /** A call for this transaction starts or ends in this executor. */
+  trackIssued?: (transactionId: string, active: boolean) => void
+  /** A removal in this runtime is deciding this write. */
+  isRemoving?: (transactionId: string) => boolean
+  /** Resolves once no removal in this runtime decides this write. */
+  afterRemoval?: (transactionId: string) => Promise<void>
+  /** Admits a saved write; a failed read is retried on connectivity. */
+  admitFollowerWrite?: (transactionId: string) => void
   resolveTransaction: (transactionId: string, result: any) => void
-  rejectTransaction: (transactionId: string, error: Error) => void
+  rejectTransaction: (
+    transactionId: string,
+    error: Error,
+    announce?: boolean,
+  ) => void
   registerRestorationTransaction: (
     offlineTransactionId: string,
     restorationTransaction: Transaction,

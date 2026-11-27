@@ -78,6 +78,10 @@ export class KeyScheduler {
     return this.pendingTransactions.length
   }
 
+  isRunning(transactionId: string): boolean {
+    return this.activeTransactionId === transactionId
+  }
+
   getRunningCount(): number {
     return this.activeTransactionId === undefined ? 0 : 1
   }
