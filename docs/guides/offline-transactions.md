@@ -233,10 +233,12 @@ The counts describe local work. An outbox entry can include a retry count, next 
 `beforeRetry` can remove entries during replay. `onUnknownMutationFn` reports an entry whose registered function is missing. Keep mutation function names stable across releases, or define a migration for stored entries.
 
 The executor also exposes `removeFromOutbox(id)` and `clearOutbox()`. Use these
-only when the application decides to discard pending writes. An acknowledged
-removal does not cancel a running named mutation function. If that call later
-fails, its waiting promises reject with the named mutation function error and
-the removed row is not retried. Call `dispose()` when the executor's owner ends.
+only when the application decides to discard pending writes. A removal does
+not cancel a named mutation function that is already running in the same
+runtime; it waits for that call to end. If the call succeeds or fails
+terminally, its outcome stands. If it fails with a retryable error, its waiting
+promises reject with the removal error and the row is not retried. Call
+`dispose()` when the executor's owner ends.
 
 You can replace an executor to change its configuration while keeping the same
 Collections and durable outbox. Disposal stops new processing and releases
