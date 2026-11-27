@@ -270,23 +270,41 @@ oracleProperty<
 
 // Input rows whose own digests collide share a support bucket. The family's
 // four members are whole [key, row] inputs with one digest, found with the
-// real hash, under one selection. Generated worlds add and remove them; the
-// model is the multiset of live inputs. The output must hold one unit row
-// whose payload a live input holds, and keep that payload while every input
-// that held it stays live.
+// real hash, under one selection, and their keys collide too. Generated worlds
+// add and remove them; a world may first send members with weight zero, and
+// the payloads may be cyclic, outside the selection. The model is the multiset
+// of live inputs. The output must hold one unit row whose payload a live input
+// holds, and keep that payload while every input that held it stays live.
 type CollisionWorlds = Array<Array<number>>
-type CollisionPlan = { worlds: CollisionWorlds; split: boolean }
+type CollisionPlan = {
+  worlds: CollisionWorlds
+  // Members sent with weight zero at the start of each world's batch.
+  zeros: CollisionWorlds
+  split: boolean
+  cyclic: boolean
+}
 const COLLISION_STATES = [
   `colliding inputs live`,
   `shown input retired beside a live one`,
   `emptied`,
+  // A zero-weight input opened a selection that a live input then supported.
+  `zero weight opened a selection`,
+  // The live payloads were cyclic.
+  `cyclic payloads`,
 ] as const
 
 function driveSupportCollisions(
-  { worlds, split }: CollisionPlan,
+  { worlds, zeros, split, cyclic }: CollisionPlan,
   observe: (checkpoint: string, value: unknown) => void,
 ) {
-  const members = family.slice(0, 4) as Array<[unknown, unknown]>
+  const members = (family.slice(0, 4) as Array<[unknown, unknown]>).map(
+    ([key, row]): [unknown, unknown] => {
+      if (!cyclic) return [key, row]
+      const payload: Record<string, unknown> = { row }
+      payload.self = payload
+      return [key, payload]
+    },
+  )
   const graph = new D2()
   const input = graph.newInput<[unknown, unknown]>()
   const net = new Map<unknown, number>()
@@ -349,7 +367,14 @@ function driveSupportCollisions(
     held = now
   }
   for (const [checkpoint, world] of worlds.entries()) {
+    const zero = zeros[checkpoint] ?? []
+    if (live.length === 0 && zero.length > 0 && world.length > 0)
+      observe(`reach`, `zero weight opened a selection`)
+    if (cyclic && world.length > 0) observe(`reach`, `cyclic payloads`)
     const changes: Array<[[unknown, unknown], number]> = [
+      ...zero.map(
+        (index) => [members[index]!, 0] as [[unknown, unknown], number],
+      ),
       ...live.map(
         (index) => [members[index]!, -1] as [[unknown, unknown], number],
       ),
@@ -364,7 +389,7 @@ function driveSupportCollisions(
         graph.run()
         const index = members.indexOf(change)
         if (weight < 0) partial.splice(partial.indexOf(index), 1)
-        else partial.push(index)
+        else if (weight > 0) partial.push(index)
         check(`${checkpoint}/${index}/${weight}`, partial)
       }
     } else {
@@ -389,11 +414,21 @@ oracleProperty<CollisionPlan, ReadonlyArray<string>>({
   id: `ivm.distinct-support-collisions`,
   law: {
     ...cell0.law,
-    limits: `The four inputs of one verified digest family under one selection; up to ten worlds of up to four inputs, delivered at once or one change at a time.`,
+    statement: `${cell0.law.statement} An input of weight zero supports nothing, and a payload outside the selection may be cyclic.`,
+    authority: `${cell0.law.authority} PR #2460 review: zero-weight inputs and payloads outside the selected key.`,
+    limits: `The four inputs of one verified digest family under one selection; up to ten worlds of up to four inputs, each optionally preceded by up to two zero-weight inputs, with plain or self-referencing payloads, delivered at once or one change at a time.`,
   },
   owns: [`src/operators/distinct.ts#distinct`],
   histories: {
-    arbitrary: fc.record({ worlds: collisionWorlds, split: fc.boolean() }),
+    arbitrary: fc.record({
+      worlds: collisionWorlds,
+      zeros: fc.array(
+        fc.array(fc.integer({ min: 0, max: 3 }), { maxLength: 2 }),
+        { maxLength: 10 },
+      ),
+      split: fc.boolean(),
+      cyclic: fc.boolean(),
+    }),
     runs: 100,
     fixedSeeds: [2309],
     states: COLLISION_STATES,
@@ -403,8 +438,10 @@ oracleProperty<CollisionPlan, ReadonlyArray<string>>({
         enters: COLLISION_STATES,
         build: (generated) => {
           const plan: CollisionPlan = {
-            worlds: [[0, 1], [1], [], ...generated.worlds].slice(0, 10),
+            worlds: [[0, 1], [1], [], [3], ...generated.worlds].slice(0, 10),
+            zeros: [[], [], [], [2], ...generated.zeros.slice(4)],
             split: generated.split,
+            cyclic: true,
           }
           collisionConstructions.set(plan, COLLISION_STATES)
           return plan
