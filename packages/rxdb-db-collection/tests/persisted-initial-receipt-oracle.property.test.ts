@@ -5,7 +5,7 @@
  * The baseline read stays held until the actual source receipt exists. A child
  * process records native detached rejections after cleanup settles.
  */
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import { observeNodeRxdbPersistedInitialReceipt } from './persisted-initial-receipt-node-driver'
 
 for (const { host, property } of [

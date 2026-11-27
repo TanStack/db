@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import type {
   InitialReceiptHistory,
   InitialReceiptObservation,
-} from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+} from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 export async function observeNodeRxdbPersistedInitialReceipt(
   history: InitialReceiptHistory,

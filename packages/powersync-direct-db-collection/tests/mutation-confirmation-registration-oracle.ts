@@ -50,7 +50,7 @@ export function registerMutationConfirmation(
     id,
     law: {
       statement: `Backend commit precedes explicit checkpoint confirmation. Accepted source writes remain optimistic until the actual handler settles, then publish confirmed rows without an old-row flicker; the handler's own outcome decides its transaction.`,
-      authority: `docs/collections/powersync-direct-collection.md#writing-data; packages/db/tests/mutation-confirmation-oracle.ts and optimistic-history-oracle.ts acceptance/settlement law.`,
+      authority: `docs/collections/powersync-direct-db-collection.md#writing-data; packages/db/tests/mutation-confirmation-oracle.ts and optimistic-history-oracle.ts acceptance/settlement law.`,
       limits: `Eager and on-demand modes, one handler, real standalone SDK over controlled NDJSON; direct CRUD and explicit transactions, both checkpoint/response orders. On-demand retains a real live query and its acquisition. No concurrent writers, persistence wrapper or live-service claim. Chromium receives the same production driver separately.`,
     },
     owns: options.owns,

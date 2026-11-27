@@ -7,7 +7,7 @@
  * applied histories allow that admitted write to finish after cleanup instead.
  * This checks receipt handling, not a real Electric server or saved durability.
  */
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import { observeNodePersistedInitialReceipt } from './cross-adapter-receipt-node-driver'
 
 for (const { host, property, heldReceiptOutcome } of [

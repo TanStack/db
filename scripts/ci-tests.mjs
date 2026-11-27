@@ -129,8 +129,8 @@ const packageJobs = {
   // Direct is a new package on this branch. Keep its eager campaigns in
   // separate processes, as the other costly collection receivers do.
   'collections-5': [
-    ...parts(`@tanstack/powersync-direct-collection`, liveSource),
-    pkg(`@tanstack/powersync-direct-collection`),
+    ...parts(`@tanstack/powersync-direct-db-collection`, liveSource),
+    pkg(`@tanstack/powersync-direct-db-collection`),
   ],
   // The repository scripts' oracles, which the lint job ran before. Their
   // histories run ESLint and Node in child processes. lint-scope runs whole

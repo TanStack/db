@@ -3,10 +3,10 @@ import process from 'node:process'
 import { readFileSync } from 'node:fs'
 import { describeOracleCleanupError } from '../../db/tests/oracle-cleanup'
 import { createStartupHost } from '../../db-adapter-conformance/tests/persisted-startup-host'
-import { retainInitialReceiptCleanup } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'
+import { retainInitialReceiptCleanup } from '../../powersync-direct-db-collection/tests/persisted-initial-receipt-driver'
 import { powerSyncEagerReloadAdapter } from './eager-reload-driver'
 import { observePowerSyncInitialReceipt } from './initial-receipt-common'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 const input = JSON.parse(readFileSync(0, `utf8`)) as {
   history: InitialReceiptHistory

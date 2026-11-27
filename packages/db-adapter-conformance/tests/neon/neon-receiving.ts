@@ -9,7 +9,7 @@ import { observeNeonSharedClient } from './neon-shared-client-driver'
 import { observeNeonIdempotentRemoval } from './neon-idempotent-removal-driver'
 import type { EagerLiveSourceHistory } from '../../src'
 import type { EagerReloadHistory } from '../eager-reload-oracle'
-import type { InitialReceiptHistory } from '../../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 export const runNeonEager = (
   history: EagerLiveSourceHistory,

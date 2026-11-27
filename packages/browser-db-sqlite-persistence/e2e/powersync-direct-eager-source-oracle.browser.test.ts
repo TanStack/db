@@ -5,7 +5,7 @@
  * SDK/transport path and raw observations, including changed/unchanged recovery.
  */
 import { afterAll, beforeAll } from 'vitest'
-import { registerDirectEagerSource } from '../../powersync-direct-collection/tests/eager-live-source-oracle'
+import { registerDirectEagerSource } from '../../powersync-direct-db-collection/tests/eager-live-source-oracle'
 import {
   captureBrowserHistory,
   startAdapterChromium,
@@ -34,7 +34,7 @@ registerDirectEagerSource(
   `adapter-conformance.eager-live-source.powersync-direct.chromium`,
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
     ],
     receive: async (history, corruption, states) => {
       const active = browser

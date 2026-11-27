@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** Real Chromium receives the same genuine-core receipt cleanup judgment. */
 import { afterAll, beforeAll } from 'vitest'
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import {
   captureBrowserHistory,
   startAdapterChromium,

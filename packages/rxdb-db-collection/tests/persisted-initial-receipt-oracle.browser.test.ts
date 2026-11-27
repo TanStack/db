@@ -5,7 +5,7 @@
  * the existing receipt owner alone supplies expected outcomes and calibrations.
  */
 import { afterAll, beforeAll } from 'vitest'
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import {
   captureBrowserHistory,
   startAdapterChromium,

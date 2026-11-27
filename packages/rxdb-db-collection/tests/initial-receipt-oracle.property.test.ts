@@ -1,6 +1,6 @@
 // @vitest-environment node
 /** Actual RxDB storage and Node events receive the shared receipt cleanup law. */
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import { observeRxdbInitialReceiptNode } from './initial-receipt-node-driver'
 
 registerInitialReceiptConformance(

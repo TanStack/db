@@ -11,7 +11,7 @@ import {
   retainOracleCleanupObservation,
 } from '../../db/tests/oracle-cleanup'
 import { observeRxdbPersistedInitialReceipt } from './persisted-initial-receipt-driver'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 let sequence = 0
 async function runRxdbPersistedInitialReceipt(

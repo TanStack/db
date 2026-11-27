@@ -26,7 +26,7 @@ import {
 } from './cross-adapter-receipt-driver'
 import type { EagerLiveSourceHistory } from '../../db-adapter-conformance/src'
 import type { MutationConfirmationHistory } from '../../db/tests/mutation-confirmation-oracle'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 import type {
   EagerGateHistory,
   EagerReloadHistory,

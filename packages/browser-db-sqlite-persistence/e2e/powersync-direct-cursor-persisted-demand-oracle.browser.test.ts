@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** Actual Chromium receives the same model, cursor grammar and comparison. */
 import { afterAll, beforeAll } from 'vitest'
-import { registerCursorPersistedDemand } from '../../powersync-direct-collection/tests/cursor-persisted-demand-oracle-suite'
+import { registerCursorPersistedDemand } from '../../powersync-direct-db-collection/tests/cursor-persisted-demand-oracle-suite'
 import {
   captureBrowserHistory,
   startAdapterChromium,
@@ -32,8 +32,8 @@ registerCursorPersistedDemand(
   },
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
-      `../powersync-direct-collection/src/subsets.ts#createSubsetHandlers`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/subsets.ts#createSubsetHandlers`,
       `../db-sqlite-persistence-core/src/persisted.ts`,
     ],
     receivingPath: `Installed SDK in actual Chromium over controlled HTTP with closed/reopened real worker/OPFS storage.`,

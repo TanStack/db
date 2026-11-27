@@ -119,6 +119,20 @@ The successful release does not close the counterexamples in
 [#2296](https://github.com/TanStack/db/issues/2296), or the reach gap in
 [#2287](https://github.com/TanStack/db/issues/2287).
 
+Package naming is owned by
+[`scripts/package-names-oracle.property.test.js`](../../scripts/package-names-oracle.property.test.js).
+It checks `scripts/check-package-names.mjs` through its real CLI, over generated
+workspaces with one to four targets, combined faults, and private/nested
+discovery boundaries. Native probes inside validation branches supply reach;
+independent predictions and forced controls check their entries in both
+directions. Its edit-based model does not parse names with the linter's rules.
+The existing PowerSync name is a
+fixed regression of the same comparison. See the
+[naming evidence](oracle-reviews/2026-11-27-package-naming.md) for RED/GREEN,
+reach, replay, mutants, and limits. PowerSync Direct's package moved to
+`powersync-direct-db-collection`; historical review records retain their
+original paths and package names.
+
 Use [Oracle Testing Rubric](oracle-rubric.md) when adding or reviewing a
 law. This map identifies existing owners, their judgment, and their limits. It
 is not a claim that every state or every test has been audited.
@@ -9259,7 +9273,7 @@ these commands do not imply that the current portfolio is entirely GREEN.
 | Contract and oracle owner | Added receiving paths and observations |
 | --- | --- |
 | Complete eager replacement and initial gate: `db-adapter-conformance/tests/eager-reload-oracle.ts` | Query, Convex, Electric, RxDB, native and Direct PowerSync, TrailBase and actual Neon SDK; complete empty/change/omission results, applied receipts, optimistic settlement, terminal first loads where applicable. Provider-consumption barriers precede the comparison; missing readiness is an observed mismatch. LocalStorage receives complete replacement; local-only retains its user-owned rows under its existing owner. |
-| Initial receipt cleanup: `powersync-direct-collection/tests/initial-receipt-oracle.ts` | Actual provider and persistence boundaries for Electric, RxDB, native PowerSync and Neon, including Node SQLite and Chromium worker/OPFS where recorded. Rejected deferred receipts and application of already-admitted receipts are explicit alternative premises. Detached host failures and teardown diagnostics remain observable. |
+| Initial receipt cleanup: `powersync-direct-db-collection/tests/initial-receipt-oracle.ts` | Actual provider and persistence boundaries for Electric, RxDB, native PowerSync and Neon, including Node SQLite and Chromium worker/OPFS where recorded. Rejected deferred receipts and application of already-admitted receipts are explicit alternative premises. Detached host failures and teardown diagnostics remain observable. |
 | Native PowerSync hooks: `powersync-db-collection/tests/hook-lifecycle-oracle.ts` | Real Node/browser SQLite; returned cleanup ownership, pending-hook retirement, subset release, and successful load settlement behind an actual held applied receipt. |
 | Native PowerSync decoding: `powersync-db-collection/tests/batch-decode-oracle.ts` | Real Node/browser SQLite pages; valid transformed keys and values, refused initial/live pages, terminal health and watcher release, corrected source data and new demand, cleanup/restart. Native CRUD also crosses refusal and cleanup: each confirmation belongs to its captured sync run, including a healthy same-table peer and a healthy-first two-Collection transaction. Two active observers release in either order; a peer cannot retire the writing Collection's optimism before its own source commit. Complete own/peer rows and publication cuts distinguish premature confirmation from waiting for every observer. Held SDK returns expose detached rejections without erasing already committed SQL effects. Earlier accepted initial pages remain legal; SQL cancellation is not promised. |
 | RxDB mutation settlement: `rxdb-db-collection/tests/mutation-source-batch-oracle.ts`, receiving `db/tests/optimistic-history-oracle.ts` | Built-in CRUD handlers and real SDK change events before/after handler settlement; whole application rows, settlement publications and detached failure observations. No invented explicit confirmation API. |
@@ -9353,10 +9367,10 @@ shares its owner's model and comparison.
 | --- | --- | --- |
 | Eager lifecycle/health: `db-adapter-conformance/src/eager-live-source-oracle.ts` | Real standalone SDK in Node and Chromium; transport interruptions, changed/unchanged successor checkpoints, table/status/lease release at failure and cleanup | [Eager review](oracle-reviews/2026-11-17-powersync-direct-eager.md) and [request-fixture correction](oracle-reviews/2026-11-23-powersync-request-fixtures.md) |
 | Complete replacement and initial gate: `db-adapter-conformance/tests/eager-reload-oracle.ts` | Node and Chromium; fresh/reload/shared-failed provider, explicit/default streams, empty/nonempty rows, retry in a new run, optimistic settlement and applied receipts | [Reload review](oracle-reviews/2026-11-17-powersync-direct-reload.md) |
-| Initial receipt cleanup: `powersync-direct-collection/tests/initial-receipt-oracle.ts` | Controlled receipt, actual controlled persistence, Node SQLite and worker/OPFS; receipt created/pending/rejected, public cleanup and detached failure, with late teardown diagnostics preserved | [Reload review](oracle-reviews/2026-11-17-powersync-direct-reload.md) and [persistence review](oracle-reviews/2026-11-17-powersync-direct-persistence.md) |
+| Initial receipt cleanup: `powersync-direct-db-collection/tests/initial-receipt-oracle.ts` | Controlled receipt, actual controlled persistence, Node SQLite and worker/OPFS; receipt created/pending/rejected, public cleanup and detached failure, with late teardown diagnostics preserved | [Reload review](oracle-reviews/2026-11-17-powersync-direct-reload.md) and [persistence review](oracle-reviews/2026-11-17-powersync-direct-persistence.md) |
 | On-demand stream ownership: `db-adapter-conformance/tests/on-demand-streams-oracle.ts` | Real source/live-query Collections across five Node/browser/persisted paths; shared/partial/disjoint incidence, parameter and priority forwarding, failure timing, independent retirement and recovery, empty/throwing mappers, mapper-triggered cleanup and public snapshot-request cancellation before/during/after mapping beside a ready peer. Cold histories remain beside a confirmed-empty distinct-donor prelude; actual SDK callbacks and held receipts establish before-application reach. | [On-demand review](oracle-reviews/2026-11-17-powersync-direct-on-demand.md), [mapper cancellation review](oracle-reviews/2026-11-18-powersync-direct-mapper-abort.md) |
 | Decode admission/refusal: `db-adapter-conformance/tests/decode-refusal-oracle.ts` | Eager and on-demand, actual SDK Node and Chromium; cold initial/live and idle cached startup; valid boolean/Date conversion, ordinary Error and three unprintable thrown-value shapes, changed id at first/middle/last row; ordered coherent source/query readiness, terminal health, every publication, valid startup handler admission, pending-query retirement and owned resource cleanup. Final 334 Node/327 Chromium GREEN; isolated cause/handler mutants rejected and actual early-readiness variant permitted; 72 declared states reached in each campaign. No persistence/reload/mutation or arbitrary remote schedule claim | [Decode review](oracle-reviews/2026-11-17-powersync-direct-decode.md) |
-| Mutation confirmation: `db/tests/mutation-confirmation-oracle.ts`; cancellation: `powersync-direct-collection/tests/mutation-confirmation-cancellation-oracle.ts` | Node and Chromium, eager and retained on-demand queries; CRUD through handlers/manual transactions, response-first/checkpoint-first pending cuts, accepted rows and settlement publications, signal/Collection cleanup cancellation | [Mutation review](oracle-reviews/2026-11-17-powersync-direct-mutation.md) |
+| Mutation confirmation: `db/tests/mutation-confirmation-oracle.ts`; cancellation: `powersync-direct-db-collection/tests/mutation-confirmation-cancellation-oracle.ts` | Node and Chromium, eager and retained on-demand queries; CRUD through handlers/manual transactions, response-first/checkpoint-first pending cuts, accepted rows and settlement publications, signal/Collection cleanup cancellation | [Mutation review](oracle-reviews/2026-11-17-powersync-direct-mutation.md) |
 | Persisted startup: `db-adapter-conformance/tests/persisted-startup-oracle.ts` | Controlled persistence, Node SQLite and Chromium worker/OPFS; source/restore order, fallback, immediate public/durable rows, refresh fulfillment, local reopen and source read count | [Persistence review](oracle-reviews/2026-11-17-powersync-direct-persistence.md) |
 | Shared client: `db-adapter-conformance/tests/shared-client-oracle.ts` | Node and Chromium; two source Collections on one table/client, passive cached startup, equal/partial/disjoint row support, scoped rejection and changed errors across requests, healthy-peer update/deletion, pre-checkpoint and changed/unchanged recovery, either peer cleanup and final resource release | [Shared-client review](oracle-reviews/2026-11-17-powersync-direct-shared-client.md) and [request-fixture correction](oracle-reviews/2026-11-23-powersync-request-fixtures.md) |
 
@@ -9457,7 +9471,7 @@ histories, no claim about arbitrary SDK or hosted-runner resource behavior.
 
 The [review evaluation](oracle-reviews/2026-11-24-pr2446-c366-review.md)
 records each finding, its oracle gap, actual receiving evidence and limits.
-`powersync-direct-collection/tests/startup-ownership-oracle.property.test.ts`
+`powersync-direct-db-collection/tests/startup-ownership-oracle.property.test.ts`
 receives the shared construction judgment from `shared-client-oracle.ts` on
 Node and Chromium. Generated startup steps fail before or after table/status
 registration, acquisition and sync waiting. Actual SDK normalization refusals

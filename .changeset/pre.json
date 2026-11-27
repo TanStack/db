@@ -42,7 +42,7 @@
     "@tanstack/trailbase-db-collection": "1.0.0-rc.0",
     "@tanstack/vue-db": "1.0.0-rc.0",
     "@tanstack/db-adapter-conformance": "0.0.0",
-    "@tanstack/powersync-direct-collection": "1.0.0-rc.0"
+    "@tanstack/powersync-direct-db-collection": "1.0.0-rc.0"
   },
   "changesets": [
     "bright-cups-infer",

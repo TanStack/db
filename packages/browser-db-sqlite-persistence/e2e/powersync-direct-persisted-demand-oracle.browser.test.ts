@@ -1,7 +1,7 @@
 // @vitest-environment node
 /** OPFS receives the primary demand-coverage judgment through real Direct SDK loads. */
 import { afterAll, beforeAll } from 'vitest'
-import { registerDirectPersistedDemand } from '../../powersync-direct-collection/tests/persisted-demand-oracle-suite'
+import { registerDirectPersistedDemand } from '../../powersync-direct-db-collection/tests/persisted-demand-oracle-suite'
 import {
   captureBrowserHistory,
   startAdapterChromium,
@@ -32,8 +32,8 @@ registerDirectPersistedDemand(
   },
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
-      `../powersync-direct-collection/src/subsets.ts#createSubsetHandlers`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/subsets.ts#createSubsetHandlers`,
       `../db-sqlite-persistence-core/src/persisted.ts`,
     ],
     receivingPath: `Real installed SDK in actual Chromium over controlled HTTP with public persistedCollectionOptions and closed/reopened real worker/OPFS storage.`,

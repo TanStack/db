@@ -20,7 +20,7 @@ import type { StartupRow } from '../persisted-startup-oracle'
 import type {
   InitialReceiptHistory,
   InitialReceiptObservation,
-} from '../../../powersync-direct-collection/tests/initial-receipt-oracle'
+} from '../../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 export const neonReceiptTurn = () =>
   new Promise<void>((resolve) => setTimeout(resolve, 0))

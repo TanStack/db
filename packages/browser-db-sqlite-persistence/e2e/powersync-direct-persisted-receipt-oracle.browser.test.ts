@@ -6,7 +6,7 @@
  * native unhandled-rejection events, and the host also preserves page errors.
  */
 import { afterAll, beforeAll } from 'vitest'
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import {
   captureBrowserHistory,
   startAdapterChromium,
@@ -43,7 +43,7 @@ registerInitialReceiptConformance(
   },
   {
     owns: [
-      `../powersync-direct-collection/src/index.ts#powerSyncCollectionOptions`,
+      `../powersync-direct-db-collection/src/index.ts#powerSyncCollectionOptions`,
     ],
     limits: `Three numeric source keys, one initial transaction and cleanup, actual Chromium worker/OPFS persistence receipt and native detached errors. No deployed PowerSync service, concurrent tabs or saved-row durability claim.`,
   },

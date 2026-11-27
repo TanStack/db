@@ -3,7 +3,7 @@
  * cleanup law through actual persisted acceptance on each Node storage host.
  * The imported grammar, model and comparison judge both cleanup schedules.
  */
-import { registerInitialReceiptConformance } from '../../powersync-direct-collection/tests/initial-receipt-oracle-suite'
+import { registerInitialReceiptConformance } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle-suite'
 import { observeNodePowerSyncInitialReceipt } from './initial-receipt-driver'
 
 for (const { host, property } of [

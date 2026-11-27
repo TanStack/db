@@ -282,6 +282,7 @@ const staticOracleProperties = [
   `preact.window-render.on-demand-keyed-limit`,
   `preact.window-render.on-demand-keyed-both`,
   `scripts.lint-scope`,
+  `scripts.package-names`,
   `scripts.run-budget`,
   `scripts.run-budget-reexported`,
   `scripts.run-budget-every-source`,

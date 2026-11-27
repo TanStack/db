@@ -293,12 +293,12 @@ const ownerGroups: ReadonlyArray<
     `shared-client`,
   ],
   [
-    `powersync-direct-collection/tests/request-boundary-conformance-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/request-boundary-conformance-oracle.property.test.ts`,
     `adapter.powersync-direct`,
     `request-boundary`,
   ],
   [
-    `powersync-direct-collection/tests/startup-ownership-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/startup-ownership-oracle.property.test.ts`,
     `adapter.powersync-direct`,
     `construction`,
   ],
@@ -383,7 +383,7 @@ const ownerGroups: ReadonlyArray<
     `trailbase-sdk`,
   ],
   [
-    `powersync-direct-collection/tests/persisted-demand-conformance-oracle.test.ts`,
+    `powersync-direct-db-collection/tests/persisted-demand-conformance-oracle.test.ts`,
     `adapter.powersync-direct.persisted-demand`,
     `node-sqlite`,
   ],
@@ -393,7 +393,7 @@ const ownerGroups: ReadonlyArray<
     `chromium-opfs`,
   ],
   [
-    `powersync-direct-collection/tests/cursor-persisted-demand-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/cursor-persisted-demand-oracle.property.test.ts`,
     `adapter.powersync-direct.persisted-cursor`,
     `node-sqlite`,
   ],
@@ -403,7 +403,7 @@ const ownerGroups: ReadonlyArray<
     `chromium-opfs`,
   ],
   [
-    `powersync-direct-collection/tests/shared-client-conformance-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/shared-client-conformance-oracle.property.test.ts`,
     `adapter.powersync-direct`,
     `shared-client`,
   ],
@@ -413,7 +413,7 @@ const ownerGroups: ReadonlyArray<
     `chromium`,
   ],
   [
-    `powersync-direct-collection/tests/eager-reload-conformance-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/eager-reload-conformance-oracle.property.test.ts`,
     `adapter.powersync-direct`,
     `eager-reload eager-gate-failure`,
   ],
@@ -423,12 +423,12 @@ const ownerGroups: ReadonlyArray<
     `eager-reload.chromium eager-gate-failure.chromium`,
   ],
   [
-    `powersync-direct-collection/tests/initial-receipt-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/initial-receipt-oracle.property.test.ts`,
     `adapter.powersync-direct`,
     `initial-receipt-cleanup`,
   ],
   [
-    `powersync-direct-collection/tests/persisted-initial-receipt-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/persisted-initial-receipt-oracle.property.test.ts`,
     `adapter.powersync-direct.initial-receipt-cleanup`,
     `persisted-controlled persisted-node-sqlite`,
   ],
@@ -438,7 +438,7 @@ const ownerGroups: ReadonlyArray<
     `chromium-opfs`,
   ],
   [
-    `powersync-direct-collection/tests/on-demand-streams-conformance-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/on-demand-streams-conformance-oracle.property.test.ts`,
     `adapter.powersync-direct`,
     `on-demand-streams`,
   ],
@@ -448,7 +448,7 @@ const ownerGroups: ReadonlyArray<
     `chromium`,
   ],
   [
-    `powersync-direct-collection/tests/on-demand-streams-persisted-conformance-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/on-demand-streams-persisted-conformance-oracle.property.test.ts`,
     `adapter.powersync-direct.on-demand-streams`,
     `persisted-controlled persisted-node-sqlite`,
   ],
@@ -458,7 +458,7 @@ const ownerGroups: ReadonlyArray<
     `persisted-chromium-opfs`,
   ],
   [
-    `powersync-direct-collection/tests/persisted-startup-conformance-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/persisted-startup-conformance-oracle.property.test.ts`,
     `adapter.powersync-direct`,
     `persisted-startup`,
   ],
@@ -468,7 +468,7 @@ const ownerGroups: ReadonlyArray<
     `chromium-opfs`,
   ],
   [
-    `powersync-direct-collection/tests/decode-refusal-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/decode-refusal-oracle.property.test.ts`,
     `adapter-conformance.decode-refusal`,
     `powersync-direct`,
   ],
@@ -478,12 +478,12 @@ const ownerGroups: ReadonlyArray<
     `chromium`,
   ],
   [
-    `powersync-direct-collection/tests/mutation-confirmation-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/mutation-confirmation-oracle.property.test.ts`,
     `powersync-direct`,
     `mutation-confirmation`,
   ],
   [
-    `powersync-direct-collection/tests/mutation-confirmation-cancellation-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/mutation-confirmation-cancellation-oracle.property.test.ts`,
     `powersync-direct`,
     `mutation-confirmation-cancellation`,
   ],
@@ -1004,6 +1004,11 @@ const ownerGroups: ReadonlyArray<
     `run-budget run-budget-reexported run-budget-every-source run-budget-support-only`,
   ],
   [`../scripts/lint-scope-oracle.property.test.js`, `scripts`, `lint-scope`],
+  [
+    `../scripts/package-names-oracle.property.test.js`,
+    `scripts`,
+    `package-names`,
+  ],
   [
     `../scripts/publish-history-oracle.property.test.js`,
     `scripts`,
@@ -1958,7 +1963,7 @@ const ownerGroups: ReadonlyArray<
     `powersync`,
   ],
   [
-    `powersync-direct-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
+    `powersync-direct-db-collection/tests/eager-live-source-conformance-oracle.property.test.ts`,
     `adapter-conformance.eager-live-source`,
     `powersync-direct`,
   ],

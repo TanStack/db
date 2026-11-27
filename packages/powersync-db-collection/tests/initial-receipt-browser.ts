@@ -3,7 +3,7 @@ import { powerSyncBrowserEagerReloadAdapter } from './eager-reload-browser'
 import { observePowerSyncInitialReceipt } from './initial-receipt-common'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
 import type { HeldCall } from '../../db-sqlite-persistence-core/tests/reload-class-oracle'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 export function observeBrowserPowerSyncInitialReceipt(
   history: InitialReceiptHistory,

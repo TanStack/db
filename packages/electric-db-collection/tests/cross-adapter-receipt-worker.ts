@@ -7,7 +7,7 @@ import {
   observePersistedInitialReceipt,
   retainInitialReceiptCleanup,
 } from './cross-adapter-receipt-driver'
-import type { InitialReceiptHistory } from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+import type { InitialReceiptHistory } from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 const input = JSON.parse(readFileSync(0, `utf8`)) as {
   history: InitialReceiptHistory

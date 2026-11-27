@@ -72,7 +72,7 @@ export function registerCursorPersistedDemand(
     owns,
     law: {
       statement: `An applied and durably saved exact cursor demand can settle offline after storage reopen; a changed cursor cannot use that coverage merely because rows match. A first confirmed source checkpoint may replace the cache, which ends older coverage. Reopening the old demand after eviction must then follow its failed upstream. A fresh SDK's initial empty listener cannot authorize eviction.`,
-      authority: `docs/guides/sqlite-persistence.md#on-demand-collections-offline; docs/collections/powersync-direct-collection.md#on-demand-sync; primary packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts and glossary persisted demand coverage.`,
+      authority: `docs/guides/sqlite-persistence.md#on-demand-collections-offline; docs/collections/powersync-direct-db-collection.md#on-demand-sync; primary packages/db-sqlite-persistence-core/tests/persisted-demand-coverage-model-oracle.ts and glossary persisted demand coverage.`,
       limits: `${receivingPath} Genuine public requestLimitedSnapshot uses minValues, finite limit and offset zero; actual sent whereFrom/whereCurrent supplies cursor identity. Page-shaped provider tables contain only 1-2 saved cursor rows, with finite translated ranks. No cursor selectivity, rows before the boundary or beyond the limit, ties, live-query cursor materialization, multi-tab, claim expiry, or deployed service claim.`,
     },
     histories: {

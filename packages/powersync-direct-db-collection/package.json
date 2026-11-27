@@ -1,5 +1,5 @@
 {
-  "name": "@tanstack/powersync-direct-collection",
+  "name": "@tanstack/powersync-direct-db-collection",
   "version": "1.0.0-rc.1",
   "description": "Sync from PowerSync directly to TanStack DB collections",
   "author": "POWERSYNC",
@@ -7,7 +7,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/TanStack/db.git",
-    "directory": "packages/powersync-direct-collection"
+    "directory": "packages/powersync-direct-db-collection"
   },
   "homepage": "https://tanstack.com/db",
   "keywords": [

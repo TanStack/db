@@ -14,7 +14,7 @@ import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '../../db-sqlite-persistence-core/src'
 import { startupRows } from '../../db-adapter-conformance/tests/persisted-startup-oracle'
 import { untilStartup } from '../../db-adapter-conformance/tests/persisted-startup-driver'
-import { retainInitialReceiptCleanup } from '../../powersync-direct-collection/tests/persisted-initial-receipt-driver'
+import { retainInitialReceiptCleanup } from '../../powersync-direct-db-collection/tests/persisted-initial-receipt-driver'
 import type { SyncAppliedReceipt } from '@tanstack/db'
 import type { EagerReloadAdapter } from '../../db-adapter-conformance/tests/eager-reload-driver'
 import type { PersistedCollectionPersistence } from '../../db-sqlite-persistence-core/src'
@@ -22,7 +22,7 @@ import type { HeldCall } from '../../db-sqlite-persistence-core/tests/reload-cla
 import type {
   InitialReceiptHistory,
   InitialReceiptObservation,
-} from '../../powersync-direct-collection/tests/initial-receipt-oracle'
+} from '../../powersync-direct-db-collection/tests/initial-receipt-oracle'
 
 export async function observePowerSyncInitialReceipt(
   adapter: EagerReloadAdapter,

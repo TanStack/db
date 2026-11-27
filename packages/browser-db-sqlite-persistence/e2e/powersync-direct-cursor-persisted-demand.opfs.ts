@@ -2,13 +2,13 @@
 import {
   observeCursorPersistedDemand,
   retainCursorDemandCleanup,
-} from '../../powersync-direct-collection/tests/cursor-persisted-demand-driver'
+} from '../../powersync-direct-db-collection/tests/cursor-persisted-demand-driver'
 import {
   createBrowserWASQLitePersistence,
   openBrowserWASQLiteOPFSDatabase,
 } from '../src'
 import { removeStartupOPFSArtifacts } from './persisted-startup-opfs-cleanup'
-import type { CursorDemandHistory } from '../../powersync-direct-collection/tests/cursor-persisted-demand-history-oracle'
+import type { CursorDemandHistory } from '../../powersync-direct-db-collection/tests/cursor-persisted-demand-history-oracle'
 
 let sequence = 0
 async function runDirectCursorDemand(history: CursorDemandHistory, id: string) {
