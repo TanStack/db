@@ -2737,14 +2737,25 @@ describe(`an Effect publishes a joined load with its replacements`, () => {
   })
 })
 
-// A pooled view with a residual reference filter rechecks which rows pass
-// when it is read. Batches move rows between the probe instance and deep-equal
-// copies and really update them. Model: after each batch, attached and
-// detached readers show the rows that hold the probe, with their values.
+// A pooled view, with or without a residual reference filter and optionally
+// ordered by a Map field, rechecks which rows pass when it is read. Batches move
+// rows between the probe instance and deep-equal copies, replace the sort field
+// or a tag with a deep-equal instance, give the tag a new serialization behind
+// the same enumerable fields, and really update rows. Model: after each batch,
+// attached and detached readers show the rows that pass, in the group's order,
+// with their values and their tag's serialization. A batch of deep-equal
+// replacements that leaves the group's order and what the readers show as it
+// was keeps the attached reader's snapshot and tells its subscriber nothing; a
+// batch that changes what they show gives a new snapshot.
 type PooledRef = `probe` | `copy`
-type PooledOp = { row: number; op: `to-probe` | `to-copy` | `bump` }
+type PooledOp = {
+  row: number
+  op: `to-probe` | `to-copy` | `bump` | `touch-at` | `same-tag` | `retag`
+}
 type PooledHistory = {
   initial: Array<PooledRef>
+  residual: boolean
+  ordered: boolean
   batches: Array<Array<PooledOp>>
 }
 const pooledStates = [
@@ -2756,25 +2767,66 @@ const pooledStates = [
   `replacement-entered`,
   // A deep-equal replacement took a row out of the view.
   `replacement-left`,
+  // A shown tag took a new serialization behind the same enumerable fields.
+  `serialization-changed`,
+  // Deep-equal replacements left an ordered group's order and the shown rows
+  // as they were.
+  `ordered-replacement-kept-order`,
+  // A deep-equal replacement moved a shown row in an ordered view.
+  `ordered-replacement-moved`,
 ] as const
 type PooledState = (typeof pooledStates)[number]
 
+// Moves between the probe and copies are weighted, so swaps stay common.
+const pooledOp = fc.oneof(
+  {
+    weight: 3,
+    arbitrary: fc.constantFrom<PooledOp[`op`]>(`to-probe`, `to-copy`),
+  },
+  {
+    weight: 2,
+    arbitrary: fc.constantFrom<PooledOp[`op`]>(
+      `bump`,
+      `touch-at`,
+      `same-tag`,
+      `retag`,
+    ),
+  },
+)
 const pooledHistoryArbitrary: fc.Arbitrary<PooledHistory> = fc.record({
   initial: fc.array(fc.constantFrom<PooledRef>(`probe`, `copy`), {
     minLength: 2,
     maxLength: 3,
   }),
+  // Swaps need the residual filter.
+  residual: fc.oneof(
+    { weight: 3, arbitrary: fc.constant(true) },
+    fc.constant(false),
+  ),
+  ordered: fc.boolean(),
   batches: fc.array(
     fc.array(
       fc.record({
         row: fc.nat({ max: 2 }),
-        op: fc.constantFrom<PooledOp[`op`]>(`to-probe`, `to-copy`, `bump`),
+        op: pooledOp,
       }),
       { minLength: 1, maxLength: 3 },
     ),
     { minLength: 1, maxLength: 4 },
   ),
 })
+
+/** A value class whose serialization its enumerable fields do not show. */
+class PrivateTag {
+  readonly kind = `tag`
+  #json: string
+  constructor(json: string) {
+    this.#json = json
+  }
+  toJSON(): string {
+    return this.#json
+  }
+}
 
 let pooledRuns = 0
 
@@ -2787,48 +2839,80 @@ async function runPooledHistory(
     team: string
     n: number
     ref: Map<string, number>
+    at: Map<string, number>
+    tag: PrivateTag
+  }
+  // Each sort field gets its runtime identity when made, so the group orders
+  // rows by when their sort field was made.
+  let atCount = 0
+  const newAt = () => {
+    const at = new Map<string, number>()
+    getRuntimeReferenceIdentity(at)
+    return { at, seq: atCount++ }
   }
   const probe = new Map([[`k`, 1]])
   const model = history.initial.map((ref, index) => ({
     id: `p${index}`,
     ref,
     n: 0,
+    atSeq: 0,
+    tag: 0,
   }))
-  const stored = model.map((row) =>
-    row.ref === `probe` ? probe : new Map([[`k`, 1]]),
-  )
+  const stored = model.map((row) => {
+    const { at, seq } = newAt()
+    row.atSeq = seq
+    return {
+      id: row.id,
+      team: `t`,
+      n: 0,
+      ref: row.ref === `probe` ? probe : new Map([[`k`, 1]]),
+      at,
+      tag: new PrivateTag(`tag-0`),
+    }
+  })
   const source = createCollection(
     mockSyncCollectionOptions<SwapRow>({
       id: `serialized-value-pooled-${pooledRuns++}`,
       getKey: (row) => row.id,
-      initialData: model.map((row, index) => ({
-        id: row.id,
-        team: `t`,
-        n: 0,
-        ref: stored[index]!,
-      })),
+      initialData: stored.map((row) => ({ ...row })),
       autoIndex: `off`,
     }),
   )
   await source.stateWhenReady()
+  const base = new Query()
+    .from({ item: source })
+    .where(({ item }) =>
+      history.residual
+        ? and(eq(item.team, `t`), eq(item.ref, probe as never))
+        : eq(item.team, `t`),
+    )
   const view = poolQuery(
-    new Query()
-      .from({ item: source })
-      .where(({ item }) =>
-        and(eq(item.team, `t`), eq(item.ref, probe as never)),
-      ),
+    history.ordered ? base.orderBy(({ item }) => item.at as never) : base,
   )!
   const attached = createLiveQueryObserver<SwapRow, string>(view as never)
-  const stop = attached.subscribe(() => {})
+  let told = 0
+  const stop = attached.subscribe(() => void told++)
   const detached = createLiveQueryObserver<SwapRow, string>(view as never)
   const rows = (observer: typeof attached) =>
     (observer.getSnapshot().data as Array<SwapRow>).map(
-      (row) => `${row.id}:${row.n}`,
+      (row) => `${row.id}:${row.n}:${row.tag.toJSON()}`,
     )
+  // The group's order: by sort field when ordered, then by key.
+  const groupOrder = () =>
+    [...model]
+      .sort((a, b) =>
+        history.ordered && a.atSeq !== b.atSeq
+          ? a.atSeq - b.atSeq
+          : a.id < b.id
+            ? -1
+            : 1,
+      )
+      .map((row) => row.id)
   const expected = () =>
-    model
-      .filter((row) => row.ref === `probe`)
-      .map((row) => `${row.id}:${row.n}`)
+    groupOrder()
+      .map((id) => model.find((row) => row.id === id)!)
+      .filter((row) => !history.residual || row.ref === `probe`)
+      .map((row) => `${row.id}:${row.n}:tag-${row.tag}`)
   try {
     expect(rows(attached), `initial: attached`).toEqual(expected())
     expect(rows(detached), `initial: detached`).toEqual(expected())
@@ -2836,33 +2920,79 @@ async function runPooledHistory(
       // The last operation on a row in a batch is the one that counts.
       const last = new Map<number, PooledOp[`op`]>()
       for (const { row, op } of batch) if (row < model.length) last.set(row, op)
-      const before = new Set(expected().map((entry) => entry.split(`:`)[0]))
+      const shownBefore = expected()
+      const orderBefore = groupOrder().join()
+      const before = new Set(shownBefore.map((entry) => entry.split(`:`)[0]))
+      const shown = (index: number) =>
+        before.has(model[index]!.id) || !history.residual
+      let replacementsOnly = true
+      await flushPromises()
+      const snapshot = attached.getSnapshot()
+      told = 0
       source.utils.begin()
       for (const [index, op] of last) {
         const row = model[index]!
-        if (op === `bump`) row.n += 1
-        else {
+        const next = { ...stored[index]! }
+        if (op === `bump` || op === `retag`) replacementsOnly = false
+        if (op === `bump`) {
+          row.n += 1
+          next.n = row.n
+          if (shown(index)) reach(`real-update-kept`)
+        } else if (op === `retag`) {
+          row.tag += 1
+          next.tag = new PrivateTag(`tag-${row.tag}`)
+          if (shown(index)) reach(`serialization-changed`)
+        } else if (op === `same-tag`) {
+          next.tag = new PrivateTag(`tag-${row.tag}`)
+        } else if (op === `touch-at`) {
+          const { at, seq } = newAt()
+          next.at = at
+          row.atSeq = seq
+        } else {
           if (op === `to-probe` && row.ref === `copy`)
             reach(`replacement-entered`)
           if (op === `to-copy` && row.ref === `probe`) reach(`replacement-left`)
           row.ref = op === `to-probe` ? `probe` : `copy`
-          stored[index] = op === `to-probe` ? probe : new Map([[`k`, 1]])
+          next.ref = op === `to-probe` ? probe : new Map([[`k`, 1]])
         }
-        if (op === `bump` && row.ref === `probe`) reach(`real-update-kept`)
-        source.utils.write({
-          type: `update`,
-          value: { id: row.id, team: `t`, n: row.n, ref: stored[index]! },
-        })
+        stored[index] = next
+        source.utils.write({ type: `update`, value: { ...next } })
       }
       source.utils.commit()
-      const after = new Set(expected().map((entry) => entry.split(`:`)[0]))
+      const shownAfter = expected()
+      const after = new Set(shownAfter.map((entry) => entry.split(`:`)[0]))
       if (
         [...before].some((id) => !after.has(id)) &&
         [...after].some((id) => !before.has(id))
       )
         reach(`swap-in-one-batch`)
-      expect(rows(attached), `batch ${step}: attached`).toEqual(expected())
-      expect(rows(detached), `batch ${step}: detached`).toEqual(expected())
+      expect(rows(attached), `batch ${step}: attached`).toEqual(shownAfter)
+      expect(rows(detached), `batch ${step}: detached`).toEqual(shownAfter)
+      await flushPromises()
+      const same = shownAfter.join() === shownBefore.join()
+      if (!same)
+        expect(attached.getSnapshot(), `batch ${step}: new snapshot`).not.toBe(
+          snapshot,
+        )
+      if (replacementsOnly && same && groupOrder().join() === orderBefore) {
+        if (history.ordered && shownAfter.length > 0)
+          reach(`ordered-replacement-kept-order`)
+        expect(attached.getSnapshot(), `batch ${step}: kept snapshot`).toBe(
+          snapshot,
+        )
+        expect(told, `batch ${step}: subscriber told`).toBe(0)
+      }
+      const ids = (shownRows: Array<string>, present: Set<string>) =>
+        shownRows
+          .map((entry) => entry.split(`:`)[0]!)
+          .filter((id) => present.has(id))
+          .join()
+      if (
+        history.ordered &&
+        replacementsOnly &&
+        ids(shownAfter, before) !== ids(shownBefore, after)
+      )
+        reach(`ordered-replacement-moved`)
     }
   } finally {
     stop()
@@ -2879,9 +3009,9 @@ describe(`a residual pooled view rechecks its rows when read`, () => {
   oracleProperty({
     id: pooledSwapProperty,
     law: {
-      statement: `A pooled view with a residual reference filter shows, to attached and detached readers alike, the rows that hold the filtered instance, with their current values, by the time each commit returns, whether deep-equal replacements move rows in or out, swap them in one batch, or real updates change them.`,
-      authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
-      limits: `One pooled group of two or three rows with a Map reference filter; up to four batches of up to three row operations.`,
+      statement: `A pooled view, with or without a residual reference filter and in key or sort-field order, shows attached and detached readers alike the rows that pass, in order, with their current values, by the time each commit returns, whether deep-equal replacements move rows in or out, swap them in one batch or move them in the order, real updates change them, or a value class takes a new serialization behind the same enumerable fields. A batch of deep-equal replacements that leaves the group's order and the shown rows as they were keeps the attached reader's snapshot and tells its subscriber nothing; a batch that changes the shown rows gives a new snapshot.`,
+      authority: `Issue #2459, the "Value classes" section of docs/guides/live-queries.md (a value class compares by its serialized value; a row it keeps is not republished), and the PR #2460 review (a changed serialization is a row change; an unchanged order publishes nothing).`,
+      limits: `One pooled group of two or three rows with a Map reference filter or none, ordered by a Map field or by key; up to four batches of up to three row operations. In a residual view, a deep-equal replacement that moves a row only past rows the view filters out is outside the silence claim.`,
     },
     owns: [
       'src/query/pooled-live-query.ts#PooledLiveQuery._stateRevision',
@@ -2889,22 +3019,64 @@ describe(`a residual pooled view rechecks its rows when read`, () => {
     ],
     histories: {
       arbitrary: pooledHistoryArbitrary,
-      runs: 40,
+      runs: 80,
       fixedSeeds: [2459],
       states: pooledStates,
       constructed: [
         {
           name: `a swap in one batch, then a real update`,
-          enters: [...pooledStates],
-          build: (): PooledHistory => ({
+          enters: [
+            `swap-in-one-batch`,
+            `real-update-kept`,
+            `replacement-entered`,
+            `replacement-left`,
+          ],
+          build: (generated): PooledHistory => ({
             initial: [`probe`, `copy`],
+            residual: true,
+            ordered: generated.ordered,
             batches: [
               [
                 { row: 0, op: `to-copy` },
                 { row: 1, op: `to-probe` },
               ],
               [{ row: 1, op: `bump` }],
-            ],
+              ...generated.batches,
+            ].slice(0, 4),
+          }),
+        },
+        {
+          name: `a tag takes a new serialization behind the same fields`,
+          enters: [`serialization-changed`],
+          build: (generated): PooledHistory => ({
+            initial: [`probe`, ...generated.initial.slice(1)],
+            residual: generated.residual,
+            ordered: generated.ordered,
+            batches: [[{ row: 0, op: `retag` }], ...generated.batches].slice(
+              0,
+              4,
+            ),
+          }),
+        },
+        {
+          name: `an ordered view keeps its order through deep-equal replacements`,
+          enters: [
+            `ordered-replacement-kept-order`,
+            `ordered-replacement-moved`,
+          ],
+          build: (generated): PooledHistory => ({
+            initial: [`probe`, `probe`],
+            residual: generated.residual,
+            ordered: true,
+            batches: [
+              [{ row: 1, op: `touch-at` }],
+              [
+                { row: 0, op: `same-tag` },
+                { row: 1, op: `to-probe` },
+              ],
+              [{ row: 0, op: `touch-at` }],
+              ...generated.batches,
+            ].slice(0, 4),
           }),
         },
       ],

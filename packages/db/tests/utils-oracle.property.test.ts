@@ -1232,3 +1232,62 @@ describe(`paired object Set matching work`, () => {
     pairedReachStates,
   )
 })
+
+// A value class is a class with toJSON() that no built-in rule covers; queries
+// compare it by its serialized value (the "Value classes" section of
+// docs/guides/live-queries.md). Its serialization can live outside its
+// enumerable fields, so a row that keeps those fields but changes the
+// serialization changed (PR #2460 review). Model: two instances are the same
+// row value when both their enumerable field and their serialization agree.
+const valueClassRowStates = [
+  `same-value`,
+  `serialization-differs`,
+  `field-differs`,
+] as const
+
+describe(`row equality and value classes`, () => {
+  utilsProperty([
+    fc.constantFrom(1, 2),
+    fc.constantFrom(`a`, `b`),
+    fc.constantFrom(`bare`, `record`, `array`),
+  ])(
+    `row equality compares a value class by its fields and its serialization`,
+    (field, json, carrier, enter) => {
+      const reach = caseStates(
+        `utils.value-class-row`,
+        valueClassRowStates,
+        enter,
+      )
+      class Tagged {
+        #json: string
+        constructor(
+          public field: number,
+          json: string,
+        ) {
+          this.#json = json
+        }
+        toJSON(): string {
+          return this.#json
+        }
+      }
+      const wrap = (value: Tagged) =>
+        carrier === `bare` ? value : carrier === `record` ? { value } : [value]
+      const other = { field: 3 - field, json: json === `a` ? `b` : `a` }
+      for (const [state, nextField, nextJson] of [
+        [`same-value`, field, json],
+        [`serialization-differs`, field, other.json],
+        [`field-differs`, other.field, json],
+      ] as const) {
+        const a = wrap(new Tagged(field, json))
+        const b = wrap(new Tagged(nextField, nextJson))
+        const equal = state === `same-value`
+        expect(sameRowValue(a, b), state).toBe(equal)
+        expect(sameRowValue(b, a), state).toBe(equal)
+        reach.reach(state)
+      }
+      reach.assertReached()
+    },
+    campaignRuns,
+    valueClassRowStates,
+  )
+})
