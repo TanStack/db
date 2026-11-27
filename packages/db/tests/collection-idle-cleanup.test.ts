@@ -54,10 +54,13 @@ function runIdlePeriods() {
 }
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+// Import at file scope, after the idle scheduler is installed, so the cold
+// load of the Collection module graph does not count against the test timeout.
+const { createCollection } = await import('../src/collection/index.js')
+const { safeRequestIdleCallback, safeCancelIdleCallback } =
+  await import('../src/utils/browser-polyfills.js')
+
 it(`cancels a rescheduled idle cleanup when a subscriber returns`, async () => {
-  const { createCollection } = await import('../src/collection/index.js')
-  const { safeRequestIdleCallback, safeCancelIdleCallback } =
-    await import('../src/utils/browser-polyfills.js')
   // The polyfill module chooses its scheduler once, when it loads.
   const probe = safeRequestIdleCallback(() => {})
   if (!pending.has(probe))
