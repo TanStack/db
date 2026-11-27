@@ -122,6 +122,7 @@ const otherProperties: ReadonlyArray<string> = [
   `pooled-live-query.publication-fixed`,
   `pooled-live-query.release-timing`,
   `ordered-source-loader.staged-window`,
+  `joined-filter-subquery.window`,
   `mixed-index-order.public-order`,
   `mixed-index-order.on-demand-window`,
   `derived-publication.queued-batches`,
@@ -189,6 +190,11 @@ const otherOwners: ReadonlyArray<ConvertedOwnerGroup> = [
     `db/tests/query/ordered-source-loader-oracle.test.ts`,
     `ordered-source-loader`,
     `staged-window`,
+  ],
+  [
+    `db/tests/query/joined-filter-subquery-oracle.test.ts`,
+    `joined-filter-subquery`,
+    `window`,
   ],
   [
     `db/tests/query/mixed-index-order-oracle.test.ts`,
