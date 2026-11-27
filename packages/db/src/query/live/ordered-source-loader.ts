@@ -127,6 +127,8 @@ export class OrderedSourceLoader {
   private ownPrefixCount: number | undefined
   private lastBoundary: unknown
   private needsOptimisticRefill = false
+  // Settled rows that a prefix read without the relation hint covers again.
+  private prefixReread: number | undefined
   private retiringSupersededAcquisitions = false
   private repairRetries = 0
   private repairTimer: ReturnType<typeof setTimeout> | undefined
@@ -159,6 +161,7 @@ export class OrderedSourceLoader {
     private readonly canRetryRepair: () => boolean = () => false,
     private readonly getGraphInputRevision?: () => number,
     private readonly hasPendingJoinedWork: () => boolean = () => false,
+    private readonly relationHintIsStale: () => boolean = () => false,
   ) {
     this.info.isRequesting = () => this.requesting
     // A joined filter drops rows after the source's limit, so a full window
@@ -309,6 +312,24 @@ export class OrderedSourceLoader {
       this.graphCheckedDuringRequest = this.getGraphInputRevision?.()
     }
     if (!this.active || this.info.limit === 0 || this.requesting) return
+    // A relation hint can have left out a root row that a local joined write
+    // now makes pass, so the window's prefix is read again without it, once
+    // a pending request settles.
+    if (
+      this.hasSettledSourceRequest &&
+      !this.pending &&
+      this.relationHintIsStale()
+    ) {
+      // Read again as many rows as the hinted reads settled, so an adapter
+      // that ignored the hint answers with the same boundary.
+      this.prefixReread =
+        this.settledSourceBoundary === undefined
+          ? 0
+          : this.countAcquiredRows(Infinity)
+      this.invalidateCursor()
+      // A hinted tie read can have left out tied rows too.
+      this.lastBoundary = undefined
+    }
     windowOperationGeneration ??=
       this.blockedLoadMore?.windowOperationGeneration
     continuesOrderedPrefixRepair ||=
@@ -403,16 +424,18 @@ export class OrderedSourceLoader {
       const shouldLoad =
         windowOperationGeneration !== undefined ||
         this.needsOptimisticRefill ||
+        this.prefixReread !== undefined ||
         (this.info.dataNeeded?.(this.settledSourceBoundary) ?? 0) > 0 ||
         (this.lastPrefixCount !== undefined &&
           this.lastPrefixCount < this.info.offset + this.info.limit)
       if (shouldLoad) {
         this.needsOptimisticRefill = false
         this.loadPrefix(
-          this.info.offset + this.info.limit,
+          this.info.offset + this.info.limit + (this.prefixReread ?? 0),
           windowOperationGeneration,
           continuesOrderedPrefixRepair,
         )
+        this.prefixReread = undefined
       } else if (continuesOrderedPrefixRepair) {
         this.finishOrderedPrefixRepair(windowOperationGeneration)
       }
@@ -435,9 +458,10 @@ export class OrderedSourceLoader {
     // A recorded failure always carries repair debt, so it cannot reach this
     // finite path; only the first request needs the whole prefix here.
     let count = Math.max(
-      this.info.dataNeeded(this.settledSourceBoundary),
+      this.info.dataNeeded(this.settledSourceBoundary) +
+        (this.prefixReread ?? 0),
       this.hasSettledSourceRequest ? 0 : this.info.offset + this.info.limit,
-      this.needsOptimisticRefill ? 1 : 0,
+      this.needsOptimisticRefill || this.prefixReread !== undefined ? 1 : 0,
     )
     if (
       windowOperationGeneration !== undefined &&
@@ -448,6 +472,10 @@ export class OrderedSourceLoader {
     }
     if (count > 0) {
       this.needsOptimisticRefill = false
+      // The reread starts at the source's first row.
+      if (this.prefixReread !== undefined)
+        this.settledSourceBoundary = undefined
+      this.prefixReread = undefined
       this.loadPage(
         count,
         windowOperationGeneration,
@@ -844,11 +872,13 @@ export class OrderedSourceLoader {
     this.settledFiniteAcquisitions.clear()
   }
 
-  private countAcquiredRows(): number {
+  private countAcquiredRows(
+    limit = this.info.offset + this.info.limit,
+  ): number {
     return this.subscription
       .readOrderedSnapshot({
         orderBy: normalizeOrderByPaths(this.info.orderBy, this.alias),
-        limit: this.info.offset + this.info.limit,
+        limit: Number.isFinite(limit) ? limit : undefined,
       })
       .filter(
         ({ value }) =>

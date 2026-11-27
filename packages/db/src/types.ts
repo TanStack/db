@@ -376,6 +376,33 @@ export type LoadSubsetOptions = {
    * @optional Available when called from CollectionSubscription, may be undefined for direct calls
    */
   subscription?: Subscription
+  /**
+   * Semi/anti-join filters on the returned rows (see LoadSubsetRelation).
+   * All must pass. Optional to apply: ignoring them returns a superset.
+   */
+  relations?: Array<LoadSubsetRelation>
+}
+
+/**
+ * A semi/anti-join filter on the rows a load returns: keep a row only if
+ * `some` (or `none`) of the rows of `collectionId` related to it
+ * (`row[on.parent] = related[on.child]`, paths relative to each row) match
+ * `where`. `every(p)` is `none(not p)`.
+ *
+ * A hint: live-query evaluation stays authoritative. A sync layer may apply it
+ * (return only the rows that pass) or ignore it (return a superset); it must
+ * never drop a row that passes. A relation-filtered request is exact for
+ * `limit`/`cursor` only when applied, so a sync layer that ignores it pages
+ * more. A sync layer that applies it keeps its answer current as related rows
+ * change: it delivers a row that comes to pass, as for rows entering `where`.
+ */
+export type LoadSubsetRelation = {
+  quantifier: `some` | `none`
+  /** The related collection's id. */
+  collectionId: string
+  on: { parent: Array<string>; child: Array<string> }
+  /** Filter on the related rows, paths relative to the related row. */
+  where?: BasicExpression<boolean>
 }
 
 /** @internal Result returned by the collection's normalized subset boundary. */
@@ -1258,6 +1285,11 @@ export interface SubscribeChangesOptions<
   where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>, TKey, true>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
+  /**
+   * Semi/anti-join filters for a loadSubset request, read per request.
+   * @internal
+   */
+  relations?: () => Array<LoadSubsetRelation> | undefined
   /**
    * Whether this subscription defers provider work. It keeps the Collection
    * alive and reads its local rows, but starts no idle source sync run and no

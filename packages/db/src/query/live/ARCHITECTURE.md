@@ -1297,6 +1297,25 @@ row, so the joined source becoming ready schedules that run itself. Joined-side 
 so a removed match can refill a short window. An empty joined replay still
 releases held Effect callbacks.
 
+Such a window also forwards its joined filter on every `loadSubset` as
+`relations`, a semi/anti-join hint, when every cross-alias conjunct maps to one.
+An existence check is `some` or `none`. A conjunct that fails on a missing joined
+row is `some(where)`. One that passes on a missing row is `none(not where)`, only
+when the join is on the joined collection's key. A subquery root sends no hint,
+since its projection can rename the paths a hint names. An adapter may apply the hint
+or ignore it and return a superset, and it must not drop a row that passes. Local
+evaluation stays authoritative. The hint is part of the demand key. Windows that
+share a source send it only when they ask for the same joined filter.
+An adapter that applies the hint keeps its answer current as related rows
+change, as it does for rows that enter its `where`: it delivers a root row that
+comes to pass. A local write on a joined row is not the provider's to see, so
+no request sends the hint while a joined collection has one. A window that sent
+it then reads its prefix again from the first row without the hint, once any
+pending request settles, as many rows as its hinted reads settled plus what the
+window still needs, and reads its boundary tie again. That is a finite
+read, so it does not hold the optimistic publication. A full-source read stands
+for every row, so it never sends the hint.
+
 A finite indexed window is proven only up to the loader's settled boundary.
 Live root rows past the bounded prefix still enter the graph, so a window row
 after that boundary does not count toward a full window: an earlier eligible
