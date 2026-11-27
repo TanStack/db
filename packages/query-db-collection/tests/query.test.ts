@@ -5141,79 +5141,57 @@ describe(`QueryCollection`, () => {
     })
   })
 
-  it(`should use exact targeting when refetching to avoid unintended cascading of related queries`, async () => {
-    // Create multiple collections with related but distinct query keys
-    const queryKey = [`todos`]
-    const queryKey1 = [`todos`, `project-1`]
-    const queryKey2 = [`todos`, `project-2`]
+  it(`refetches the tracked query without fetching related untracked queries`, async () => {
+    const trackedQueryKey = [`todos`, `project-1`]
+    const initialRow = { id: `1`, name: `Initial` }
+    const updatedRow = { id: `1`, name: `Updated` }
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce([initialRow])
+      .mockResolvedValue([updatedRow])
+    const collection = createCollection(
+      queryCollectionOptions<TestItem>({
+        id: `project-1-todos`,
+        queryClient,
+        queryKey: trackedQueryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }),
+    )
 
-    const mockItems = [{ id: `1`, name: `Item 1` }]
-    const queryFn = vi.fn().mockResolvedValue(mockItems)
-    const queryFn1 = vi.fn().mockResolvedValue(mockItems)
-    const queryFn2 = vi.fn().mockResolvedValue(mockItems)
+    const untrackedQueryKeys = [
+      [`todos`],
+      [`todos`, `project-2`],
+      [...trackedQueryKey, `summary`],
+    ]
+    const fetchUntracked = vi.fn().mockResolvedValue([updatedRow])
+    // Keep these queries active so a prefix refetch could reach them, but
+    // seed fresh data so subscribing does not trigger a fetch of its own.
+    const unsubscribes = untrackedQueryKeys.map((untrackedQueryKey) =>
+      new QueryObserver(queryClient, {
+        queryKey: untrackedQueryKey,
+        queryFn: fetchUntracked,
+        initialData: [initialRow],
+        staleTime: Infinity,
+      }).subscribe(() => {}),
+    )
 
-    const config: QueryCollectionConfig<TestItem> = {
-      id: `all-todos`,
-      queryClient,
-      queryKey: queryKey,
-      queryFn: queryFn,
-      getKey,
-      startSync: true,
-    }
-    const config1: QueryCollectionConfig<TestItem> = {
-      id: `project-1-todos`,
-      queryClient,
-      queryKey: queryKey1,
-      queryFn: queryFn1,
-      getKey,
-      startSync: true,
-    }
-    const config2: QueryCollectionConfig<TestItem> = {
-      id: `project-2-todos`,
-      queryClient,
-      queryKey: queryKey2,
-      queryFn: queryFn2,
-      getKey,
-      startSync: true,
-    }
-
-    const options = queryCollectionOptions(config)
-    const options1 = queryCollectionOptions(config1)
-    const options2 = queryCollectionOptions(config2)
-
-    const collection = createCollection(options)
-    const collection1 = createCollection(options1)
-    const collection2 = createCollection(options2)
-
-    // Wait for initial queries to complete
-    await vi.waitFor(() => {
+    try {
+      await collection.stateWhenReady()
+      expect(collection.get(initialRow.id)?.name).toBe(initialRow.name)
       expect(queryFn).toHaveBeenCalledTimes(1)
-      expect(queryFn1).toHaveBeenCalledTimes(1)
-      expect(queryFn2).toHaveBeenCalledTimes(1)
-      expect(collection.status).toBe(`ready`)
-    })
+      expect(fetchUntracked).not.toHaveBeenCalled()
 
-    // Reset call counts to test refetch behavior
-    queryFn.mockClear()
-    queryFn1.mockClear()
-    queryFn2.mockClear()
+      await collection.utils.refetch()
 
-    // Refetch the target collection with key ['todos', 'project-1']
-    await collection1.utils.refetch()
-
-    // Verify that only the target query was refetched
-    await vi.waitFor(() => {
-      expect(queryFn1).toHaveBeenCalledTimes(1)
-      expect(queryFn).not.toHaveBeenCalled()
-      expect(queryFn2).not.toHaveBeenCalled()
-    })
-
-    // Cleanup
-    await Promise.all([
-      collection.cleanup(),
-      collection1.cleanup(),
-      collection2.cleanup(),
-    ])
+      expect(queryFn).toHaveBeenCalledTimes(2)
+      expect(collection.get(updatedRow.id)?.name).toBe(updatedRow.name)
+      expect(fetchUntracked).not.toHaveBeenCalled()
+    } finally {
+      for (const unsubscribe of unsubscribes) unsubscribe()
+      await collection.cleanup()
+    }
   })
 
   it(`should use exact targeting when a throwing refetch avoids unintended cascading`, async () => {
