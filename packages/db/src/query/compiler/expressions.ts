@@ -82,7 +82,7 @@ export function normalizeExpressionPaths(
       )
       args.push(convertedArg)
     }
-    return new Func(whereClause.name, args)
+    return new Func(whereClause.name, args, whereClause.collation)
   }
 }
 

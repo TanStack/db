@@ -729,7 +729,14 @@ function canonicalizeExpression(
         scope,
       ),
     )
-    return canonicalizeFunction(expression.name, args)
+    const collation = expression.collation
+      ? canonicalizeRuntimeValue(
+          getStringCollationIdentity(expression.collation),
+          `${path}.collation`,
+          seen,
+        )
+      : undefined
+    return canonicalizeFunction(expression.name, args, collation)
   }
 
   if (expression.type === `agg`) {
@@ -839,7 +846,12 @@ function canonicalizeExpression(
 function canonicalizeFunction(
   name: string,
   args: Array<StableIdentityValue>,
+  collation?: StableIdentityValue,
 ): StableIdentityValue {
+  if (collation !== undefined) {
+    const canonical = canonicalizeFunction(name, args)
+    return { ...(canonical as Record<string, StableIdentityValue>), collation }
+  }
   if ((name === `and` || name === `or`) && args.length > 0) {
     const flattened = args.flatMap((arg) =>
       isCanonicalFunction(arg, name) ? arg.args : [arg],

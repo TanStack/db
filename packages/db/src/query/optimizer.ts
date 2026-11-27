@@ -1071,7 +1071,11 @@ function remapWhereForSubquery(
     }
 
     if (expression instanceof Func) {
-      return new Func(expression.name, expression.args.map(remapExpression))
+      return new Func(
+        expression.name,
+        expression.args.map(remapExpression),
+        expression.collation,
+      )
     }
 
     return expression

@@ -2098,6 +2098,14 @@ const timeline = createLiveQueryCollection((q) =>
 )
 ```
 
+A custom string collation (`stringSort: 'custom'` with a `compare` function)
+makes an on-demand query load its whole filtered source and sort locally,
+because the backend's order is unknown. If your backend orders and compares
+strings with exactly that comparator, set `trustProviderOrder: true` on the
+collation. Ordered queries then pass `orderBy`, `limit` and string cursors to
+`loadSubset` and page through the backend. TanStack DB does not verify this, and
+a backend with a different order returns the wrong pages.
+
 ### Ordering by SELECT Fields
 
 When you use `select()` with aggregates or computed values, you can order by those fields using the `$selected` namespace:

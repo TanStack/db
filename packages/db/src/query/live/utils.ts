@@ -9,6 +9,7 @@ import {
 } from '../ir.js'
 import { isRefProxy } from '../builder/ref-proxy-identity.js'
 import { codedMessage, devBuild } from '../../error-message.js'
+import { isUntrustedCustomOrder } from '../../utils/comparison.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage, StringCollationConfig } from '../../types.js'
@@ -214,10 +215,12 @@ export function computeSubscriptionOrderByHints(
     : undefined
 
   const usesCustomLocalOrder =
-    normalizedOrderBy?.some(
-      (clause) =>
-        (clause.compareOptions.stringSort ?? queryCompareOptions.stringSort) ===
-        `custom`,
+    normalizedOrderBy?.some((clause) =>
+      isUntrustedCustomOrder(
+        clause.compareOptions.stringSort === undefined
+          ? queryCompareOptions
+          : clause.compareOptions,
+      ),
     ) ?? false
 
   // Only pass orderBy when it is scoped to this alias and uses simple refs,

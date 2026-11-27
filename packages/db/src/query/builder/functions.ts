@@ -6,6 +6,7 @@ import { registerWrapper } from './wrapper-identity.js'
 import type { BasicExpression } from '../ir'
 import type { IncludesRuntime } from '../live/includes-runtime.js'
 import type { RefProxy } from './ref-proxy.js'
+import type { CustomStringCollation } from '../../types.js'
 import type {
   ContainsAggregate,
   Context,
@@ -207,14 +208,24 @@ export function gt<L extends ExpressionLike, R extends ExpressionLike>(
 export function gt<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
+  collation?: CustomStringCollation,
 ): BasicExpression<boolean>
 export function gt<T extends string | number>(
   left: ComparisonOperandPrimitive<T>,
   right: ComparisonOperandPrimitive<T>,
+  collation?: CustomStringCollation,
 ): BasicExpression<boolean>
-export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
-export function gt(left: any, right: any): BasicExpression<boolean> {
-  return new Func(`gt`, [toExpression(left), toExpression(right)])
+export function gt<T>(
+  left: Aggregate<T>,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean>
+export function gt(
+  left: any,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean> {
+  return new Func(`gt`, [toExpression(left), toExpression(right)], collation)
 }
 
 export function gte<L extends ExpressionLike, R extends ExpressionLike>(
@@ -224,14 +235,24 @@ export function gte<L extends ExpressionLike, R extends ExpressionLike>(
 export function gte<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
+  collation?: CustomStringCollation,
 ): BasicExpression<boolean>
 export function gte<T extends string | number>(
   left: ComparisonOperandPrimitive<T>,
   right: ComparisonOperandPrimitive<T>,
+  collation?: CustomStringCollation,
 ): BasicExpression<boolean>
-export function gte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
-export function gte(left: any, right: any): BasicExpression<boolean> {
-  return new Func(`gte`, [toExpression(left), toExpression(right)])
+export function gte<T>(
+  left: Aggregate<T>,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean>
+export function gte(
+  left: any,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean> {
+  return new Func(`gte`, [toExpression(left), toExpression(right)], collation)
 }
 
 export function lt<L extends ExpressionLike, R extends ExpressionLike>(
@@ -241,14 +262,24 @@ export function lt<L extends ExpressionLike, R extends ExpressionLike>(
 export function lt<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
+  collation?: CustomStringCollation,
 ): BasicExpression<boolean>
 export function lt<T extends string | number>(
   left: ComparisonOperandPrimitive<T>,
   right: ComparisonOperandPrimitive<T>,
+  collation?: CustomStringCollation,
 ): BasicExpression<boolean>
-export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
-export function lt(left: any, right: any): BasicExpression<boolean> {
-  return new Func(`lt`, [toExpression(left), toExpression(right)])
+export function lt<T>(
+  left: Aggregate<T>,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean>
+export function lt(
+  left: any,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean> {
+  return new Func(`lt`, [toExpression(left), toExpression(right)], collation)
 }
 
 export function lte<L extends ExpressionLike, R extends ExpressionLike>(
@@ -258,14 +289,24 @@ export function lte<L extends ExpressionLike, R extends ExpressionLike>(
 export function lte<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
+  collation?: CustomStringCollation,
 ): BasicExpression<boolean>
 export function lte<T extends string | number>(
   left: ComparisonOperandPrimitive<T>,
   right: ComparisonOperandPrimitive<T>,
+  collation?: CustomStringCollation,
 ): BasicExpression<boolean>
-export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
-export function lte(left: any, right: any): BasicExpression<boolean> {
-  return new Func(`lte`, [toExpression(left), toExpression(right)])
+export function lte<T>(
+  left: Aggregate<T>,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean>
+export function lte(
+  left: any,
+  right: any,
+  collation?: CustomStringCollation,
+): BasicExpression<boolean> {
+  return new Func(`lte`, [toExpression(left), toExpression(right)], collation)
 }
 
 // Overloads for and() - support 2 or more arguments

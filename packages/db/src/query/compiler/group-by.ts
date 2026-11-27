@@ -608,6 +608,9 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
     case `func`:
       return (
         expr1.name === expr2.name &&
+        expr1.collation?.compare === expr2.collation?.compare &&
+        expr1.collation?.trustProviderOrder ===
+          expr2.collation?.trustProviderOrder &&
         expr1.args?.length === expr2.args?.length &&
         (expr1.args || []).every((arg: any, i: number) =>
           expressionsEqual(arg, expr2.args[i]),
@@ -730,7 +733,7 @@ export function replaceAggregatesByRefs(
         (arg: BasicExpression | Aggregate) =>
           replaceAggregatesByRefs(arg, selectClause),
       )
-      return new Func(funcExpr.name, transformedArgs)
+      return new Func(funcExpr.name, transformedArgs, funcExpr.collation)
     }
 
     case `ref`:
@@ -819,7 +822,7 @@ function extractAndReplaceAggregates(
       return result.transformed as BasicExpression
     })
     return {
-      transformed: new Func(expr.name, newArgs),
+      transformed: new Func(expr.name, newArgs, expr.collation),
       extracted: allExtracted,
     }
   }
@@ -953,6 +956,7 @@ function replaceGroupByRefsInExpression(
       expr.args.map((arg) =>
         replaceGroupByRefsInExpression(arg, groupByClause, groupKeyRefs),
       ),
+      expr.collation,
     )
   }
 

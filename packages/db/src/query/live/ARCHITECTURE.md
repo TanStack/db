@@ -1321,7 +1321,22 @@ public-key order for comparator-equal rows, including when the primary term is
 descending. It never
 interprets the comparator function as a stable backend collation identity or
 as evidence that a provider can paginate that order. Custom cursor pagination
-therefore remains unsupported.
+therefore remains unsupported, unless the caller states otherwise.
+
+`trustProviderOrder: true` on a custom collation is that statement: the provider
+orders and compares strings with this exact comparator. An order term that
+carries it pages like a lexical term. `orderBy`, `limit` and cursors reach
+`loadSubset`, and a string cursor's `gt` or `lt` carries the collation, so a
+provider and the local evaluator read the same bound. Distinct strings can tie
+under the collation, so the rows equal to a page boundary are read by a
+separate request whose `where` is a collated `gte` and `lte` on the boundary
+value, joined with `and` to the subscription's source filter when it has one,
+with no `orderBy`, `limit` or cursor; a cursor's `whereCurrent` takes the same
+form. A provider must return every row that matches the source filter and that
+the comparator treats as equal to that value, not only exact matches. An index
+declines a
+collated comparison, because its range order is not the collation's. Core does
+not verify the statement.
 
 Implicit string collation is a query-level default inherited from the first
 source Collection. It applies even when an order term references a later source

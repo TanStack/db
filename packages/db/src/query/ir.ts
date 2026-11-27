@@ -8,7 +8,7 @@ This is the intermediate representation of the query.
 import type { CompareOptions } from './builder/types'
 import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { CollectionOptionsIdentity } from '../collection-options.js'
-import type { NamespacedRow } from '../types'
+import type { CustomStringCollation, NamespacedRow } from '../types'
 
 import type { Grouping } from './compiler/grouping.js'
 import type { IncludesRuntime } from './live/includes-runtime.js'
@@ -249,11 +249,15 @@ export class Value<T = any> extends BaseExpression<T> {
 
 export class Func<T = any> extends BaseExpression<T> {
   public type = `func` as const
+  // gt/gte/lt/lte only: orders two string operands by this collation
+  declare public collation?: CustomStringCollation
   constructor(
     public name: string, // such as eq, gt, lt, upper, lower, etc.
     public args: Array<BasicExpression>,
+    collation?: CustomStringCollation,
   ) {
     super()
+    if (collation) this.collation = collation
   }
 }
 

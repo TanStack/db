@@ -322,7 +322,11 @@ function optimizeCompoundRangeQuery<
 
   // Collect all range operations from AND arguments
   for (const [argIndex, arg] of expression.args.entries()) {
-    if (arg.type === `func` && [`gt`, `gte`, `lt`, `lte`].includes(arg.name)) {
+    if (
+      arg.type === `func` &&
+      !arg.collation &&
+      [`gt`, `gte`, `lt`, `lte`].includes(arg.name)
+    ) {
       const rangeOp = arg as any
       if (rangeOp.args.length === 2) {
         const leftArg = rangeOp.args[0]!
@@ -500,7 +504,12 @@ function optimizeSimpleComparison<
   expression: BasicExpression,
   collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
-  if (expression.type !== `func` || expression.args.length !== 2) {
+  // A collated comparison orders strings unlike any index range
+  if (
+    expression.type !== `func` ||
+    expression.args.length !== 2 ||
+    expression.collation
+  ) {
     return { canOptimize: false, matchingKeys: new Set(), isExact: false }
   }
 
@@ -600,7 +609,12 @@ function canOptimizeSimpleComparison<
   T extends object,
   TKey extends string | number,
 >(expression: BasicExpression, collection: CollectionLike<T, TKey>): boolean {
-  if (expression.type !== `func` || expression.args.length !== 2) {
+  // A collated comparison orders strings unlike any index range
+  if (
+    expression.type !== `func` ||
+    expression.args.length !== 2 ||
+    expression.collation
+  ) {
     return false
   }
 
