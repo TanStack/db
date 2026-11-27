@@ -276,6 +276,33 @@ export class OutboxManager {
     return `${this.decisionPrefix}${encodeURIComponent(id)}:`
   }
 
+  /**
+   * A saved row's phase and stored error, read without decoding its
+   * mutations; null when no row is stored. A failed read, or a phase this
+   * version does not know, throws. A row that is not JSON was never sent.
+   */
+  async getPhase(
+    id: string,
+  ): Promise<Pick<OfflineTransaction, `outboxPhase` | `lastError`> | null> {
+    const data = await this.storage.get(this.getStorageKey(id))
+    if (data === null) return null
+    let row: unknown
+    try {
+      row = JSON.parse(data)
+    } catch {
+      return {}
+    }
+    if (typeof row !== `object` || row === null) return {}
+    const { outboxPhase, lastError } = row as Record<string, unknown>
+    if (outboxPhase === undefined) return {}
+    if (
+      outboxPhase !== `deletion-pending` &&
+      outboxPhase !== `rejection-pending`
+    )
+      throw new Error(`Unsupported transaction outbox phase`)
+    return { outboxPhase, lastError: readError(lastError) }
+  }
+
   /** Whether a row is saved, without decoding it. */
   async has(id: string): Promise<boolean> {
     return (await this.storage.get(this.getStorageKey(id))) !== null
@@ -319,20 +346,21 @@ export class OutboxManager {
             this.storage.delete(key).catch(() => {})
             continue
           }
-          let error = {
-            name: `NonRetriableError`,
-            message: `Transaction rejected by a recorded decision`,
-          }
+          let error: { name: string; message: string } | undefined
           try {
             const data = await this.storage.get(key)
             if (data === null) continue
-            error =
-              readError((JSON.parse(data) as { error?: unknown }).error) ??
-              error
+            error = readError((JSON.parse(data) as { error?: unknown }).error)
           } catch {
             // The unread decision still rejects its row.
           }
-          decisions.set(id, error)
+          // Another decision's readable error wins over the fallback.
+          if (error) decisions.set(id, error)
+          else if (!decisions.has(id))
+            decisions.set(id, {
+              name: `NonRetriableError`,
+              message: `Transaction rejected by a recorded decision`,
+            })
         }
       }
       const transactionKeys = keys.filter((key) =>

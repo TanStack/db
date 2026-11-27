@@ -127,6 +127,7 @@ export class OfflineExecutor {
   private reconcileFailed = false
   // Only the newest outbox check sets or clears reconcileFailed.
   private sweeps = 0
+  private sweepsRunning = 0
   private outboxChannelName: string | null = null
   private initialized = false
   private term = 0
@@ -324,7 +325,11 @@ export class OfflineExecutor {
     }
 
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
-      if (this.reconcileFailed) this.reconcileFollowerWrites()
+      // A check still running may yet fail; a new one reads after this change.
+      if (this.reconcileFailed || this.sweepsRunning > 0)
+        this.reconcileFollowerWrites()
+      // Outcomes of removed calls are recorded whichever tab leads.
+      this.executor?.retryPublications()
       if (this.isOfflineEnabled && this.executor) {
         this.executor.resetRetryDelays()
         // A failed replay of this term runs again; admissions wait for it.
@@ -638,35 +643,40 @@ export class OfflineExecutor {
     if (!this.recordsOutcomes) return
     const sweep = ++this.sweeps
     let failed = false
-    // A predecessor this executor settles may have left saved writes; each is
-    // checked against the outbox its executor saved it to.
-    const waiters = this.relatedExecutors().flatMap((owner) =>
-      [...owner.pendingTransactionPromises].map(
-        ([id, waiter]) => [owner, id, waiter] as const,
-      ),
-    )
-    for (const [owner, id, waiter] of waiters) {
-      try {
-        if (!(await waiter.saved)) continue
-        // Absence means success only where rejections are recorded, and not
-        // while this runtime still runs the write's call.
-        if (!owner.recordsOutcomes || this.callRunning(id, owner)) continue
-        const outbox = owner.outbox!
-        // A row that cannot be decoded is still there.
-        if (await outbox.has(id)) continue
-        const outcome = await outbox.getOutcome(id)
-        // Its call is still running after a removal.
-        if (outcome?.pending) continue
-        const error = outcome?.error
-        // A record older than the retention window may have been pruned, so
-        // no record cannot mean success.
-        if (!error && Date.now() - waiter.savedAt! > OUTCOME_RETENTION_MS)
-          continue
-        owner.settleFollowerWrite(id, error && outboxMessageError(error))
-      } catch (error) {
-        failed = true
-        console.warn(`Failed to reconcile follower writes:`, error)
+    this.sweepsRunning++
+    try {
+      // A predecessor this executor settles may have left saved writes; each is
+      // checked against the outbox its executor saved it to.
+      const waiters = this.relatedExecutors().flatMap((owner) =>
+        [...owner.pendingTransactionPromises].map(
+          ([id, waiter]) => [owner, id, waiter] as const,
+        ),
+      )
+      for (const [owner, id, waiter] of waiters) {
+        try {
+          if (!(await waiter.saved)) continue
+          // Absence means success only where rejections are recorded, and not
+          // while this runtime still runs the write's call.
+          if (!owner.recordsOutcomes || this.callRunning(id, owner)) continue
+          const outbox = owner.outbox!
+          // A row that cannot be decoded is still there.
+          if (await outbox.has(id)) continue
+          const outcome = await outbox.getOutcome(id)
+          // Its call is still running after a removal.
+          if (outcome?.pending) continue
+          const error = outcome?.error
+          // A record older than the retention window may have been pruned, so
+          // no record cannot mean success.
+          if (!error && Date.now() - waiter.savedAt! > OUTCOME_RETENTION_MS)
+            continue
+          owner.settleFollowerWrite(id, error && outboxMessageError(error))
+        } catch (error) {
+          failed = true
+          console.warn(`Failed to reconcile follower writes:`, error)
+        }
       }
+    } finally {
+      this.sweepsRunning--
     }
     if (sweep === this.sweeps) this.reconcileFailed = failed
   }
@@ -1101,18 +1111,19 @@ export class OfflineExecutor {
   /**
    * Removes saved transactions. A write that has not started fails with a
    * removal error, which a writer in another tab also reads from its record;
-   * a started call keeps the provider's outcome.
-   */
-  /**
-   * Removes saved transactions; returns those it left to the next leader
-   * because it stopped leading before deciding them.
+   * a started call keeps the provider's outcome. Returns those it left to the
+   * next leader because it stopped leading before deciding them.
    */
   private async removeSaved(ids: Array<string>): Promise<Array<string>> {
     const outbox = this.outbox!
+    const executor = this.executor!
     const error = removedError()
     // Off the queue before any await, so this tab cannot start them
     // meanwhile; the one already running keeps the provider's outcome.
     const unstarted = new Set(this.scheduler.removePendingTransactions(ids))
+    // Until its removal is decided, no admission or replay schedules an
+    // unstarted write again.
+    for (const id of unstarted) executor.fence(id)
     // A leader's removal yields if it stops leading before its decision is
     // recorded; the term only counts gains.
     const term = this.term
@@ -1129,6 +1140,9 @@ export class OfflineExecutor {
     await Promise.all(
       ids.map(async (id) => {
         let committed = false
+        // A write whose removal did not commit is eligible again; the row is
+        // read again, so one another leader settled meanwhile is not queued.
+        let readmit = false
         try {
           if (!(await outbox.has(id))) {
             if (this.saving.has(id)) this.saving.set(id, true)
@@ -1152,9 +1166,14 @@ export class OfflineExecutor {
             if (this.saving.has(id)) this.saving.set(id, true)
             return
           }
-          // A row whose call already settled keeps that outcome.
-          const row = await outbox.get(id).catch(() => null)
-          if (row?.outboxPhase) {
+          // A row whose call already settled keeps that outcome. A phase
+          // that cannot be read leaves the row and reports the failure.
+          const row = await outbox.getPhase(id)
+          if (!row) {
+            if (this.saving.has(id)) this.saving.set(id, true)
+            return
+          }
+          if (row.outboxPhase) {
             const outcome =
               row.outboxPhase === `rejection-pending` && row.lastError
                 ? outboxMessageError(row.lastError)
@@ -1178,13 +1197,12 @@ export class OfflineExecutor {
             if (decision !== undefined)
               await outbox.removeDecision(id, decision).catch(() => {})
             yielded.push(id)
+            readmit = true
             return
           }
           // Only a persisted decision commits a removal; without one, a failed
           // deletion is reported and the write stays eligible.
           committed = decision !== undefined
-          // No admission runs it while its deletion is pending.
-          if (committed) this.executor!.exclude(id)
           if (records(id)) await outbox.recordRejection(id, error)
           await outbox.remove(id)
           if (decision !== undefined)
@@ -1192,13 +1210,15 @@ export class OfflineExecutor {
         } catch (removalError) {
           if (!committed) {
             failures.push(removalError)
-            // The row is read again, so a write another leader settled
-            // meanwhile is not queued again.
-            this.executor!.admitTransaction(id).catch(() => {})
+            readmit = true
             return
           }
-          // A committed removal stands; its deletion is retried.
-          this.executor!.retryDecided(id, error)
+          // A committed removal stands; its deletion is retried, excluded
+          // from admission until it lands.
+          executor.retryDecided(id, error)
+        } finally {
+          if (unstarted.has(id)) executor.release(id)
+          if (readmit) executor.admitTransaction(id).catch(() => {})
         }
         if (this.saving.has(id)) this.saving.set(id, true)
         this.rejectTransaction(id, error)
