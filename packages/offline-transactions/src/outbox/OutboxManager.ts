@@ -169,19 +169,28 @@ export class OutboxManager {
   }
 
   /**
-   * A rejection if any recording holds one. A record that cannot be read
-   * leaves the outcome unknown, so it reads as pending.
+   * A rejection if any recording holds one. A record that cannot be decoded
+   * leaves the outcome unknown, so it reads as pending; a failed read is
+   * thrown unless a later record holds a rejection.
    */
   async getOutcome(id: string): Promise<OutboxOutcome | null> {
     let found: OutboxOutcome | null = null
+    let failure: { error: unknown } | undefined
     for (const key of await this.outcomeKeys(id)) {
-      const data = await this.storage.get(key)
+      let data: string | null
+      try {
+        data = await this.storage.get(key)
+      } catch (error) {
+        failure ??= { error }
+        continue
+      }
       // Its writer or a prune removed it meanwhile.
       if (data === null) continue
       const outcome = readOutcome(data) ?? { pending: true, at: 0 }
       if (outcome.error) return outcome
       found = outcome
     }
+    if (failure) throw failure.error
     return found
   }
 

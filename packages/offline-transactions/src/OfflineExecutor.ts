@@ -93,8 +93,18 @@ const removers = new WeakMap<
   Set<OfflineExecutor>
 >()
 
-// Removals waiting for a running call to end, by transaction id.
-const callEndWaiters = new Map<string, Array<() => void>>()
+// Waiters for a write's running call or removal to end, by transaction id;
+// each checks again when woken.
+const endWaiters = new Map<string, Array<() => void>>()
+const untilEnd = (id: string) =>
+  new Promise<void>((wake) => {
+    endWaiters.set(id, [...(endWaiters.get(id) ?? []), wake])
+  })
+const wakeEnd = (id: string) => {
+  const waiters = endWaiters.get(id)
+  endWaiters.delete(id)
+  for (const wake of waiters ?? []) wake()
+}
 
 /** A replacement may add Collections while retaining every prior registry entry. */
 function retainsCollections(
@@ -600,7 +610,7 @@ export class OfflineExecutor {
     })
   }
 
-  private admitFollowerWrite(id: string): void {
+  admitFollowerWrite(id: string): void {
     this.unadmitted.delete(id)
     // Only the leader sends; a later leader loads the row from the outbox.
     if (!this.isOfflineEnabled) return
@@ -865,7 +875,9 @@ export class OfflineExecutor {
       }
       // Leadership changed while the row was saved: another leader may have
       // sent and removed it, so admit it only if it is still there.
-      if (term !== this.term) {
+      // A removal deciding the write admits it once decided, if its row
+      // remains.
+      if (term !== this.term || this.isRemoving(transaction.id)) {
         this.admitFollowerWrite(transaction.id)
         return
       }
@@ -1014,9 +1026,7 @@ export class OfflineExecutor {
     if (active) this.issued.add(id)
     else {
       this.issued.delete(id)
-      const waiters = callEndWaiters.get(id)
-      callEndWaiters.delete(id)
-      for (const wake of waiters ?? []) wake()
+      wakeEnd(id)
     }
     this.register(callIssuers, this.issued.size > 0)
   }
@@ -1033,6 +1043,12 @@ export class OfflineExecutor {
     if (holds > 0) this.removing.set(id, holds)
     else this.removing.delete(id)
     this.register(removers, this.removing.size > 0)
+    if (holds === 0) wakeEnd(id)
+  }
+
+  /** Resolves once no removal in this runtime decides the write. */
+  async afterRemoval(id: string): Promise<void> {
+    while (this.isRemoving(id)) await untilEnd(id)
   }
 
   /** Whether a removal in this runtime over a shared Collection decides it. */
@@ -1200,10 +1216,7 @@ export class OfflineExecutor {
       // read again, so one another leader settled meanwhile is not queued.
       let readmit = false
       try {
-        while (this.callRunning(id, this))
-          await new Promise<void>((wake) => {
-            callEndWaiters.set(id, [...(callEndWaiters.get(id) ?? []), wake])
-          })
+        while (this.callRunning(id, this)) await untilEnd(id)
         // A retry the call left, taken with no await since the check.
         this.scheduler.removePendingTransactions([id])
         // A row whose call already settled keeps that outcome. A phase
@@ -1257,7 +1270,9 @@ export class OfflineExecutor {
         executor.retryDecided(id, error)
       } finally {
         this.release(id)
-        if (readmit) executor.admitTransaction(id).catch(() => {})
+        // The leading executor admits it; a replacement that skipped it
+        // during replay waits for this release.
+        if (readmit) this.admitFollowerWrite(id)
       }
       if (this.saving.has(id)) this.saving.set(id, true)
       this.rejectTransaction(id, error)

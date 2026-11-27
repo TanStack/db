@@ -181,6 +181,10 @@ export interface TransactionSignaler {
   trackIssued?: (transactionId: string, active: boolean) => void
   /** A removal in this runtime is deciding this write. */
   isRemoving?: (transactionId: string) => boolean
+  /** Resolves once no removal in this runtime decides this write. */
+  afterRemoval?: (transactionId: string) => Promise<void>
+  /** Admits a saved write; a failed read is retried on connectivity. */
+  admitFollowerWrite?: (transactionId: string) => void
   resolveTransaction: (transactionId: string, result: any) => void
   rejectTransaction: (
     transactionId: string,

@@ -46,10 +46,14 @@
  * fail the rejection record of a removed running write's retry before its
  * leader stops leading, change connectivity during an outbox check that then
  * fails, fail a removal's read of a sent row's phase, store a readable
- * decision beside an unreadable one, hold each outcome record of a removed
+ * decision beside an unreadable one, hold the rejection record of a removed
  * running write's retry while its writer checks, and fail a removed running
  * write's call with a retryable error between the failure's read and rewrite
- * of the row, then fail the removal's deletion.
+ * of the row, then fail the removal's deletion. The last acknowledge a
+ * leader's own save while its removal is decided, replace the executor of a
+ * removal that then yields, fail the readmission read after a failed
+ * removal, and fail the read of an outcome record before a rejection or of
+ * the rejection itself.
  *
  * Production driver: real executors over one shared storage adapter, with a
  * controlled leader election, online detector and BroadcastChannel.
@@ -310,6 +314,22 @@ const reachStates = [
   `removed-retry-not-requeued`,
   // A readable decision beside an unreadable one kept its error.
   `readable-decision-kept`,
+  // A leader's own write whose save acknowledged while its removal was
+  // being decided was not sent before that decision, then followed it.
+  `ack-during-removal-followed-decision`,
+  `ack-during-failed-removal-sent`,
+  // A replacement that skipped a write a retired executor's removal held
+  // sent it once that removal yielded.
+  `replacement-admitted-yielded-removal`,
+  // A failed removal whose readmission read failed was retried on
+  // connectivity.
+  `failed-readmission-retried`,
+  // A failing read of an outcome record before an intact rejection still
+  // failed the writer.
+  `rejection-read-past-failing-record`,
+  // A failing read of the only rejection kept its writer waiting, and the
+  // check ran again on connectivity.
+  `failing-rejection-read-retried`,
 ] as const
 type ReachState = (typeof reachStates)[number]
 
@@ -394,6 +414,12 @@ type SharedActionType =
   | `remove-phase-read-fails`
   | `readable-decision-before-unreadable`
   | `remove-running-retry-race`
+  | `remove-own-during-ack`
+  | `failed-removal-own-during-ack`
+  | `replaced-during-removal-decision`
+  | `failed-readmission`
+  | `failing-outcome-read-before-rejection`
+  | `failing-rejection-read`
 type Action = { type: TabActionType; tab: number } | { type: SharedActionType }
 type Mode = `durable` | `online`
 type History = { mode: Mode; actions: Array<Action> }
@@ -495,6 +521,15 @@ const actionArbitrary: fc.Arbitrary<Action> = fc.oneof(
     arbitrary: sharedAction(`readable-decision-before-unreadable`),
   },
   { weight: 1, arbitrary: sharedAction(`remove-running-retry-race`) },
+  { weight: 1, arbitrary: sharedAction(`remove-own-during-ack`) },
+  { weight: 1, arbitrary: sharedAction(`failed-removal-own-during-ack`) },
+  { weight: 1, arbitrary: sharedAction(`replaced-during-removal-decision`) },
+  { weight: 1, arbitrary: sharedAction(`failed-readmission`) },
+  {
+    weight: 1,
+    arbitrary: sharedAction(`failing-outcome-read-before-rejection`),
+  },
+  { weight: 1, arbitrary: sharedAction(`failing-rejection-read`) },
   { weight: 1, arbitrary: sharedAction(`replace-writer`) },
   { weight: 1, arbitrary: sharedAction(`replace-rejected-writer`) },
   { weight: 1, arbitrary: tabAction(`remove-running`) },
@@ -593,6 +628,12 @@ const spliced = (
           action.type !== `remove-phase-read-fails` &&
           action.type !== `readable-decision-before-unreadable` &&
           action.type !== `remove-running-retry-race` &&
+          action.type !== `remove-own-during-ack` &&
+          action.type !== `failed-removal-own-during-ack` &&
+          action.type !== `replaced-during-removal-decision` &&
+          action.type !== `failed-readmission` &&
+          action.type !== `failing-outcome-read-before-rejection` &&
+          action.type !== `failing-rejection-read` &&
           action.type !== `remove-running`,
       )
       .slice(0, MAX_ACTIONS - prefix.length),
@@ -710,6 +751,10 @@ class ReadFailingStorage extends FakeStorageAdapter {
   releaseOutcomeWrite(fail = false): void {
     this.heldOutcome?.release(fail)
     this.heldOutcome = undefined
+  }
+  // Whether a held outcome write reached its gate.
+  outcomeHeld(): boolean {
+    return this.heldOutcome !== null && this.heldOutcome !== undefined
   }
   // Whether a write of any of this transaction's outcome records failed.
   outcomeFailed(transactionId: string): boolean {
@@ -2853,18 +2898,20 @@ async function runHistory(
           channels.state.loseSettlement = true
           release()
           await settle()
-          // Whichever record is held, a check reads the write as pending.
-          for (let round = 0; round < 2; round++) {
-            channels.inject({ type: `leader` })
-            await settle()
-            expect(
-              write.outcome,
-              `${write.id} is not read as sent (${round})`,
-            ).not.toBe(`completed`)
-            storage.releaseOutcomeWrite()
-            if (round === 0) storage.holdOutcomeWrite()
-            await settle()
-          }
+          // While the removal's rejection record is held, the row stays and
+          // a check reads the write as pending.
+          expect(
+            storage.outcomeHeld(),
+            `${write.id}'s rejection record is held`,
+          ).toBe(true)
+          expect(
+            await storage.get(`tx:${write.transactionId}`),
+            `${write.id}'s row stays while its record is held`,
+          ).not.toBe(null)
+          channels.inject({ type: `leader` })
+          await settle()
+          expect(write.outcome, `${write.id} stays pending`).toBe(undefined)
+          storage.releaseOutcomeWrite()
           await removal
           await settle()
           channels.state.loseSettlement = false
@@ -2882,6 +2929,190 @@ async function runHistory(
             `${write.id} sent once`,
           ).toHaveLength(1)
           reach(`retry-removal-recorded-before-row-went`)
+          break
+        }
+        case `remove-own-during-ack`:
+        case `failed-removal-own-during-ack`: {
+          // The leader's own row lands and its save acknowledges while its
+          // removal's decision is held; the decision then lands, or fails.
+          const fails = action.type === `failed-removal-own-during-ack`
+          const leader = leaderIndex()
+          if (!durable || !online.online || leader < 0 || !(await quiet()))
+            break
+          storage.holdNextAck()
+          const write = await doWrite(leader, `write`)
+          if (!write) {
+            storage.releaseAck()
+            break
+          }
+          storage.holdNextDecision()
+          const removal = tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          )
+          await settle()
+          expect(storage.decisionHeld(), `the removal's decision stalls`).toBe(
+            true,
+          )
+          storage.releaseAck()
+          await settle()
+          expect(calls, `${write.id} waits for its removal`).not.toContain(
+            write.id,
+          )
+          storage.releaseDecision(fails)
+          if (fails) {
+            await expect(
+              removal,
+              `the failed removal is reported`,
+            ).rejects.toThrow(`storage write failed`)
+          } else {
+            write.removed = true
+            write.deliverable = false
+            await removal
+          }
+          await settle()
+          if (fails) {
+            expect(
+              calls,
+              `${write.id} sent after the failed removal`,
+            ).toContain(write.id)
+            expect(write.outcome, `${write.id} completes`).toBe(`completed`)
+          } else {
+            expect(write.outcome, `${write.id} fails on its removal`).toBe(
+              `failed`,
+            )
+          }
+          reach(
+            fails
+              ? `ack-during-failed-removal-sent`
+              : `ack-during-removal-followed-decision`,
+          )
+          break
+        }
+        case `replaced-during-removal-decision`: {
+          // The only tab removes its own unsent write; while the decision is
+          // held its executor is replaced, so the replacement leads and
+          // replays, then the decision lands and the removal yields.
+          const leader = leaderIndex()
+          if (!durable || leader < 0 || !(await quiet())) break
+          for (let index = 0; index < TABS; index++)
+            if (index !== leader) await closeTab(index)
+          online.set(false)
+          const write = await doWrite(leader, `write`)
+          if (!write) break
+          storage.holdNextDecision()
+          const removal = tabs[leader]!.env.executor.removeFromOutbox(
+            write.transactionId!,
+          ).then(
+            () => undefined,
+            (error: unknown) => error,
+          )
+          await settle()
+          expect(storage.decisionHeld(), `the removal's decision stalls`).toBe(
+            true,
+          )
+          const collection = tabs[leader]!.env.collection
+          await closeTab(leader)
+          await openTab(
+            leader,
+            undefined,
+            undefined,
+            false,
+            collection,
+            storage,
+            durable,
+          )
+          expect(leaderIndex(), `the replacement leads`).toBe(leader)
+          storage.releaseDecision()
+          expect(
+            ((await removal) as Error | undefined)?.message,
+            `the removal yields`,
+          ).toBe(`Leadership moved before the removal was decided`)
+          online.set(true)
+          await settle()
+          expect(calls, `${write.id} sent by the replacement`).toContain(
+            write.id,
+          )
+          expect(write.outcome, `${write.id} completes`).toBe(`completed`)
+          reach(`replacement-admitted-yielded-removal`)
+          break
+        }
+        case `failed-readmission`: {
+          // The leader's removal of a queued follower write fails, and so
+          // does its read when the leader admits the write again.
+          const leader = leaderIndex()
+          const follower = tabs.findIndex(
+            (tab, index) => tab && index !== leader,
+          )
+          if (!durable || leader < 0 || follower < 0 || !(await quiet())) break
+          online.set(false)
+          const write = await doWrite(follower, `write`)
+          if (!write) break
+          storage.failDecisionWrites = 1
+          // The removal reads the row's phase, then the readmission fails.
+          storage.failReadKey = `tx:${write.transactionId}`
+          storage.failReadKeyAfter = 1
+          await expect(
+            tabs[leader]!.env.executor.removeFromOutbox(write.transactionId!),
+            `the failed removal is reported`,
+          ).rejects.toThrow(`storage write failed`)
+          await settle()
+          storage.failDecisionWrites = 0
+          expect(storage.failReadKey, `the readmission read failed`).toBe(
+            undefined,
+          )
+          write.retried = true
+          expectedWarnings.admission += 1
+          online.set(true)
+          await settle()
+          expect(calls, `${write.id} sent on connectivity`).toContain(write.id)
+          expect(write.outcome, `${write.id} completes`).toBe(`completed`)
+          reach(`failed-readmission-retried`)
+          break
+        }
+        case `failing-outcome-read-before-rejection`:
+        case `failing-rejection-read`: {
+          // A follower's write is rejected and its settlement message lost;
+          // the writer's check then fails to read an outcome record: one
+          // before the rejection, or the rejection itself.
+          const first = action.type === `failing-outcome-read-before-rejection`
+          const leader = leaderIndex()
+          const follower = tabs.findIndex(
+            (tab, index) => tab && index !== leader,
+          )
+          if (!durable || leader < 0 || follower < 0 || !(await quiet())) break
+          online.set(false)
+          const write = await doWrite(follower, `write-rejected`)
+          if (!write) break
+          const prefix = `outcome:${encodeURIComponent(write.transactionId!)}:`
+          if (first) await storage.set(`${prefix}0`, `{not json`)
+          channels.state.loseSettlement = true
+          online.set(true)
+          await settle()
+          channels.state.loseSettlement = false
+          expect(calls, `${write.id} sent`).toContain(write.id)
+          const rejection = (await storage.keys()).find(
+            (key) => key.startsWith(prefix) && key !== `${prefix}0`,
+          )
+          expect(rejection, `${write.id}'s rejection is recorded`).not.toBe(
+            undefined,
+          )
+          storage.failReadKey = first ? `${prefix}0` : rejection
+          if (!first) {
+            write.checkFailed = true
+            expectedWarnings.check += 1
+          }
+          channels.inject({ type: `leader` })
+          await settle()
+          expect(storage.failReadKey, `the record read failed`).toBe(undefined)
+          if (first) {
+            expect(write.outcome, `${write.id} takes the rejection`).toBe(
+              `failed`,
+            )
+            reach(`rejection-read-past-failing-record`)
+          } else {
+            expect(write.outcome, `${write.id} stays pending`).toBe(undefined)
+            reach(`failing-rejection-read-retried`)
+          }
           break
         }
         case `decision-row-undecodable`: {
@@ -4160,7 +4391,7 @@ const loseSettlement: Action = { type: `lose-settlement` }
 oracleProperty({
   id: property,
   law: {
-    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost; if its rejection record fails, the leader retries the cleanup and nothing sends it meanwhile. Removing or clearing an unsent write fails its writer at once, a write removed while it is saved never runs, an outbox load from an earlier leadership term schedules nothing, and a tab that only observes a write leaves its writer's record. A follower's removal goes to the leader, which alone knows whether the call started; an exclusion cleanup stops when its leadership ends; and a replacement executor over the same collections settles its predecessor's saved writes against the outbox they were saved to. A removal or exclusion is recorded as a decision beside its row before anything else, so a later leader settles the row as decided rather than send it, a decision that lands late never recreates a row, and a writer reads a rejection only once its decision committed. A row whose call already settled keeps that outcome when removed, and a removal that yields at a handover is made by the next leader. A successor's adopted decision outlives the first recorder withdrawing its own, a committed removal keeps the write out of direct admission, and a call issued by an intermediate replacement keeps its write pending. A removal of a write whose call is running waits for that call, which keeps the server's outcome, also when it is the leader's own or two removals overlap, and the row stays until then; a durable replacement does not read a default-mode predecessor's missing record as success; an unreadable saved row keeps its writer waiting, each removal settles by its own deletion, and a cleanup that failed after its term ended is not retried. A failed replay runs again on connectivity before a refused admission, a replay that outlives its term leaves admission to the newer one, an unreadable record or decision never hides or blocks a rejection, and a removed running write whose call fails retryably fails its writer with the removal error, recorded before its row goes, also when that record fails and its leader then stops leading. No admission sends an unsent write while its removal is being decided, a removal that cannot read a row's phase reports that and keeps the row, a failed outbox check that a connectivity change overlapped runs again, and an unreadable decision never replaces a readable decision's error. A removed running write whose call fails retryably is never sent again, also when the removal's deletion fails, and no check reads it as sent while the removal's records land. In the default mode, a write another leader settled stays pending in its former leader, which cannot tell the outcome. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
+    statement: `With followerWrites 'durable', a write from an initialized tab stays pending until the leading tab sends it to the server exactly once while online, whether or not its tab stayed open, and its open tab's transaction settles with the server's outcome, also when the settlement message is lost. A leader that could not read a saved write sends it once connectivity changes, a row it cannot decode is reported, a failed row removal after a successful send is not reported as the outcome, and a follower's failed outbox check runs again on connectivity. An admission read across a change of leadership schedules nothing, and a write excluded by beforeRetry fails its writer even when the message is lost; if its rejection record fails, the leader retries the cleanup and nothing sends it meanwhile. Removing or clearing an unsent write fails its writer at once, a write removed while it is saved never runs, an outbox load from an earlier leadership term schedules nothing, and a tab that only observes a write leaves its writer's record. A follower's removal goes to the leader, which alone knows whether the call started; an exclusion cleanup stops when its leadership ends; and a replacement executor over the same collections settles its predecessor's saved writes against the outbox they were saved to. A removal or exclusion is recorded as a decision beside its row before anything else, so a later leader settles the row as decided rather than send it, a decision that lands late never recreates a row, and a writer reads a rejection only once its decision committed. A row whose call already settled keeps that outcome when removed, and a removal that yields at a handover is made by the next leader. A successor's adopted decision outlives the first recorder withdrawing its own, a committed removal keeps the write out of direct admission, and a call issued by an intermediate replacement keeps its write pending. A removal of a write whose call is running waits for that call, which keeps the server's outcome, also when it is the leader's own or two removals overlap, and the row stays until then; a durable replacement does not read a default-mode predecessor's missing record as success; an unreadable saved row keeps its writer waiting, each removal settles by its own deletion, and a cleanup that failed after its term ended is not retried. A failed replay runs again on connectivity before a refused admission, a replay that outlives its term leaves admission to the newer one, an unreadable record or decision never hides or blocks a rejection, and a removed running write whose call fails retryably fails its writer with the removal error, recorded before its row goes, also when that record fails and its leader then stops leading. No admission sends an unsent write while its removal is being decided, a removal that cannot read a row's phase reports that and keeps the row, a failed outbox check that a connectivity change overlapped runs again, and an unreadable decision never replaces a readable decision's error. A removed running write whose call fails retryably is never sent again, also when the removal's deletion fails, and no check reads it as sent while the removal's records land. A save that acknowledges while its removal is decided follows that decision, a replacement sends a write whose retired executor's removal yielded, a failed readmission is retried on connectivity, and a failed outcome read neither hides a later rejection nor reads as success. In the default mode, a write another leader settled stays pending in its former leader, which cannot tell the outcome. Stale and duplicate messages change nothing. A write made before its tab initializes, and the default mode, keep the online path.`,
     authority: `Issue #2464 and the followerWrites option in docs/guides/offline-transactions.md.`,
     limits: `Three tabs over one storage adapter with controlled election, connectivity and BroadcastChannel; up to twelve actions; no real browser contexts; rejection records of writers that never return are kept, and none is ever expired.`,
   },
@@ -4660,6 +4891,44 @@ oracleProperty({
         enters: [`retry-removal-recorded-before-row-went`],
         build: (generated: History): History =>
           spliced(generated, [{ type: `remove-running-retry-records-held` }]),
+      },
+      {
+        name: `a save that acknowledges during its removal follows the decision`,
+        enters: [`ack-during-removal-followed-decision`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `remove-own-during-ack` }]),
+      },
+      {
+        name: `a save that acknowledges during a failed removal is sent`,
+        enters: [`ack-during-failed-removal-sent`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `failed-removal-own-during-ack` }]),
+      },
+      {
+        name: `a replacement sends a write whose retired removal yielded`,
+        enters: [`replacement-admitted-yielded-removal`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `replaced-during-removal-decision` }]),
+      },
+      {
+        name: `a failed readmission is retried on connectivity`,
+        enters: [`failed-readmission-retried`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `failed-readmission` }]),
+      },
+      {
+        name: `a failing outcome read does not hide a later rejection`,
+        enters: [`rejection-read-past-failing-record`],
+        build: (generated: History): History =>
+          spliced(generated, [
+            { type: `failing-outcome-read-before-rejection` },
+          ]),
+      },
+      {
+        name: `a failing rejection read is checked again on connectivity`,
+        enters: [`failing-rejection-read-retried`],
+        build: (generated: History): History =>
+          spliced(generated, [{ type: `failing-rejection-read` }]),
       },
       {
         name: `a decision outlives a leader that cannot decode its row`,

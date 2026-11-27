@@ -505,12 +505,14 @@ export class TransactionExecutor {
         // The retry hook is user code and may synchronously revoke replay rights.
         if (!this.offlineExecutor.isOfflineEnabled) return
 
-        // A removal deciding a row admits it again if it does not commit.
-        const newlyLoaded = filteredTransactions.filter(
-          (transaction) =>
-            !this.offlineExecutor.isRemoving?.(transaction.id) &&
-            this.scheduler.schedule(transaction),
-        )
+        // A row a removal is deciding is admitted once decided, if it
+        // remains.
+        const newlyLoaded = filteredTransactions.filter((transaction) => {
+          if (!this.offlineExecutor.isRemoving?.(transaction.id))
+            return this.scheduler.schedule(transaction)
+          this.offlineExecutor.admitFollowerWrite?.(transaction.id)
+          return false
+        })
 
         removedIds = providerPending
           .filter(({ id }) => !selectedById.has(id))
@@ -690,16 +692,20 @@ export class TransactionExecutor {
     // admission is retried after a failed one.
     if (this.offlineExecutor.isOfflineEnabled && this.replayedTerm !== term)
       throw new Error(`The outbox replay for this leadership has not completed`)
-    const transaction = await this.outbox.getCurrent(id)
+    // A removal deciding the write finishes first; one that commits leaves
+    // no row.
+    let transaction: OfflineTransaction | null
+    do {
+      await this.offlineExecutor.afterRemoval?.(id)
+      transaction = await this.outbox.getCurrent(id)
+    } while (this.offlineExecutor.isRemoving?.(id))
     // A row this leader decided to reject, or loaded with a decision, is in
-    // `excluding` and is settled, never sent; one a removal is deciding waits
-    // for that removal.
+    // `excluding` and is settled, never sent.
     if (
       !transaction ||
       !this.offlineExecutor.isOfflineEnabled ||
       term !== this.offlineExecutor.leadershipTerm ||
-      this.excluding.has(id) ||
-      this.offlineExecutor.isRemoving?.(id)
+      this.excluding.has(id)
     )
       return
     // A duplicate message is harmless: both steps ignore a known transaction.
