@@ -1689,7 +1689,9 @@ settle, by atomic window publication; an unordered query publishes the rows its
 source Collections hold as a partial result. A sync adapter's optional
 `isSubsetLoaded` hook is a local statement that the Collection already holds a
 subset: a deferred demand it answers `true` for settles at once, so its window
-publishes those rows, and its acquisition still starts on resume. Without a
+publishes those rows, and its acquisition still starts on resume. A demand
+that becomes held later, by a status change, a peer's load or rows the source
+pushes, settles the same way without starting acquisition. Without a
 subscriber or preload,
 the live-query Collection is ready only when it needs no provider work: every
 source Collection is eager and already started, or is a live-query Collection

@@ -22,7 +22,9 @@
  * a held root whose joined source has not answered, and, on the loader alone,
  * a first request answered synchronously or not while joined work is pending
  * or idle. The source-ready cells cover a source that becomes ready after the
- * hook answered. An open truncate replay is not exercised here.
+ * hook answered. The peer-load cells cover a ready source whose
+ * window a peer's snapshot load, or rows the source pushes itself, make held.
+ * An open truncate replay is not exercised here.
  *
  * ## Model
  *
@@ -32,7 +34,8 @@
  * deferred joined window returns and reaches the filtered window after its
  * subscriber. A first request waits while joined work is pending and runs at
  * the pass after it settles. A source-ready demand is loading exactly while
- * the hook does not vouch for its rows.
+ * the hook does not vouch for its rows, and a peer-load window publishes
+ * exactly when the hook comes to vouch for it.
  *
  * ## Production path and observation
  *
@@ -570,6 +573,137 @@ async function runSourceReadyCell(
   }
 }
 
+// ## A peer load that establishes a deferred window's coverage
+
+const peerCases = [
+  { peer: `covers` },
+  { peer: `does-not-cover` },
+  { peer: `pushes` },
+] as const
+type PeerCase = (typeof peerCases)[number]
+
+// The source stays ready throughout. A peer's load, or rows the source pushes
+// itself, that make the hook vouch for the window publish it with no provider
+// request from the deferred query, which still acquires once it has a
+// subscriber.
+function peerModel({ peer }: PeerCase): Array<Observation> {
+  const publishes = peer !== `does-not-cover`
+  return [
+    {
+      checkpoint: `deferred window after the peer load`,
+      value: {
+        ready: publishes,
+        rows: publishes ? expectedIds : [],
+        deferredRequests: 0,
+      },
+    },
+    {
+      checkpoint: `after a subscriber`,
+      value: { acquires: true, rows: expectedIds },
+    },
+  ]
+}
+
+async function runPeerCell(
+  { peer }: PeerCase,
+  observe: (checkpoint: string, value: unknown) => void,
+): Promise<void> {
+  const loads: Array<LoadSubsetOptions> = []
+  let deferredRequests = 0
+  let holds = false
+  let push = () => {}
+  const source = createCollection<Row>({
+    id: `deferred-loaded-subset-peer-${peer}`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    gcTime: 0,
+    sync: {
+      sync: ({ begin, write, commit, markReady }) => {
+        const written = new Set<number>()
+        markReady()
+        // No load: the hook vouches first, then the rows arrive.
+        push = () => {
+          holds = true
+          begin()
+          for (const row of rows) {
+            written.add(row.id)
+            write({ type: `insert`, value: { ...row } })
+          }
+          commit()
+        }
+        return {
+          loadSubset: (options: LoadSubsetOptions) => {
+            loads.push(options)
+            const subscription = options.subscription as
+              CollectionSubscription | undefined
+            if (subscription?.isDeferringAcquisition()) deferredRequests++
+            const where = options.where
+              ? compileSingleRowExpression(options.where)
+              : undefined
+            const answer = rows.filter((row) => !where || where(row) === true)
+            return new Promise<void>((resolve) =>
+              setTimeout(() => {
+                begin()
+                for (const row of answer) {
+                  if (written.has(row.id)) continue
+                  written.add(row.id)
+                  write({ type: `insert`, value: { ...row } })
+                }
+                const receipt = commit()
+                // Only a load of the window's rows makes the hook vouch.
+                if (peer === `covers`) holds = true
+                void (receipt === true ? resolve() : receipt.then(resolve))
+              }, 1),
+            )
+          },
+          isSubsetLoaded: () => holds,
+        }
+      },
+    },
+  })
+  const live = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ row: source })
+        .where(({ row }) => eq(row.group, `even`))
+        .orderBy(({ row }) => row.rank, `desc`)
+        .limit(3)
+        .select(({ row }) => ({ id: row.id })),
+  })
+  const peerSubscription = source.subscribeChanges(() => {})
+  try {
+    await settle(2)
+    if (peer === `pushes`) push()
+    else
+      peerSubscription.requestSnapshot({
+        where: eq(new PropRef([`group`]), peer === `covers` ? `even` : `odd`),
+      })
+    await settle(10)
+    observe(`deferred window after the peer load`, {
+      ready: live.status === `ready`,
+      rows: ids(live),
+      deferredRequests,
+    })
+    const before = loads.length
+    const subscription = live.subscribeChanges(() => {})
+    await settle(10)
+    await quiescent(live)
+    observe(`after a subscriber`, {
+      acquires: loads.length > before,
+      rows: ids(live),
+    })
+    subscription.unsubscribe()
+  } finally {
+    peerSubscription.unsubscribe()
+    await live.cleanup()
+    await source.cleanup()
+  }
+}
+
 describe(`deferred window over a held subset`, () => {
   oracleProperty({
     id: `deferred-loaded-subset.window`,
@@ -635,5 +769,20 @@ describe(`deferred window over a held subset`, () => {
     model: sourceReadyModel,
     driver: runSourceReadyCell,
     check: compareOwed(`deferred source ready`),
+  })
+
+  oracleProperty({
+    id: `deferred-loaded-subset.peer-load`,
+    law: {
+      statement: `A deferred window whose subset a peer's load or the source's own rows make held, while its source stays ready, publishes with no provider request from the deferred query, and still acquires after its first subscriber.`,
+      authority: `query/live/ARCHITECTURE.md: Deferred acquisition.`,
+      limits: `One ordered window on a ready source, and one peer snapshot load that does or does not make the hook vouch for the window, or rows the source pushes after its hook vouches.`,
+    },
+    owns: ['src/collection/subscription.ts'],
+    histories: peerCases,
+    label: ({ peer }) => `peer load that ${peer}`,
+    model: peerModel,
+    driver: runPeerCell,
+    check: compareOwed(`deferred peer load`),
   })
 })

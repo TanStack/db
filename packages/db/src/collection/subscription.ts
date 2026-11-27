@@ -321,7 +321,25 @@ export class CollectionSubscription
           }
         })
       }),
+      // A peer's load can make a deferred demand held while the source stays ready.
+      this.collection.on(`loadingSubset:change`, ({ isLoadingSubset }) => {
+        if (!isLoadingSubset) this.reconcileHeldDeferredDemands()
+      }),
     ]
+  }
+
+  /** Recheck deferred demands after rows arrived outside a status change. */
+  private reconcileHeldDeferredDemands(): void {
+    if (
+      this.defersAcquisition &&
+      !this.unsubscribed &&
+      !this.truncateReplayState &&
+      this.subsetDemands.some(
+        (demand) => demand.acquisitionState === `detached`,
+      )
+    ) {
+      this.reconcileDeferredDemands(undefined)
+    }
   }
 
   /**
@@ -1371,6 +1389,14 @@ export class CollectionSubscription
 
   emitEvents(changes: Array<ChangeMessage<any, any>>): boolean {
     if (this.unsubscribed) return false
+    try {
+      return this.emitChanges(changes)
+    } finally {
+      this.reconcileHeldDeferredDemands()
+    }
+  }
+
+  private emitChanges(changes: Array<ChangeMessage<any, any>>): boolean {
     const newChanges = this.filterAndFlipChanges(changes)
 
     // Reconciliation can reduce a source delta to no visible change. Do not
