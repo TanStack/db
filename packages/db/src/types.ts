@@ -393,7 +393,8 @@ export type LoadSubsetOptions = {
  * (return only the rows that pass) or ignore it (return a superset); it must
  * never drop a row that passes. A relation-filtered request is exact for
  * `limit`/`cursor` only when applied, so a sync layer that ignores it pages
- * more.
+ * more. A sync layer that applies it keeps its answer current as related rows
+ * change: it delivers a row that comes to pass, as for rows entering `where`.
  */
 export type LoadSubsetRelation = {
   quantifier: `some` | `none`
@@ -1285,10 +1286,10 @@ export interface SubscribeChangesOptions<
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /**
-   * Semi/anti-join filters forwarded with every loadSubset request.
+   * Semi/anti-join filters for a loadSubset request, read per request.
    * @internal
    */
-  relations?: Array<LoadSubsetRelation>
+  relations?: () => Array<LoadSubsetRelation> | undefined
   /**
    * Whether this subscription defers provider work. It keeps the Collection
    * alive and reads its local rows, but starts no idle source sync run and no

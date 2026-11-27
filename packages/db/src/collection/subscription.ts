@@ -77,8 +77,8 @@ type CollectionSubscriptionOptions = {
   includeInitialState?: boolean
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
-  /** Semi/anti-join filters forwarded with every loadSubset request */
-  relations?: Array<LoadSubsetRelation>
+  /** Semi/anti-join filters for a loadSubset request, read per request */
+  relations?: () => Array<LoadSubsetRelation> | undefined
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
   /** Callback for subset-load failures scoped to this subscription. */
@@ -1378,12 +1378,17 @@ export class CollectionSubscription
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
+    // A full-source read stands for every row, so it sends no hint.
+    const relations =
+      opts?.limit !== undefined || opts?.where !== undefined
+        ? this.options.relations?.()
+        : undefined
     const loadOptions: LoadSubsetOptions = {
       ...(opts?.refetch ? { refetch: true } : {}),
       where: stateOpts.where,
       signal: opts?.signal,
       subscription: this,
-      ...(this.options.relations && { relations: this.options.relations }),
+      ...(relations && { relations }),
       // Include orderBy and limit if provided so sync layer can optimize the query
       orderBy: opts?.orderBy,
       // A local optimistic row can hide one source row from a bounded prefix.
@@ -1801,6 +1806,7 @@ export class CollectionSubscription
     // don't await it, we will load the data into the collection when it comes in
     // Note: `where` does NOT include cursor expressions - they are passed separately
     // The sync layer can choose to use cursor-based or offset-based pagination
+    const relations = this.options.relations?.()
     const loadOptions: LoadSubsetOptions = {
       ...(refetch ? { refetch: true } : {}),
       where, // Main filter only, no cursor
@@ -1809,7 +1815,7 @@ export class CollectionSubscription
       cursor: cursorExpressions, // Cursor expressions passed separately
       offset: offset ?? 0,
       subscription: this,
-      ...(this.options.relations && { relations: this.options.relations }),
+      ...(relations && { relations }),
     }
 
     const {

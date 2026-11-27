@@ -16,10 +16,16 @@
  * `none(not where)`, and only when the join is on the joined collection's key,
  * because with several related rows `none(not p)` is not the same filter.
  *
+ * An applying adapter keeps its answer current as related rows change. A local
+ * write on a joined row is not the provider's, so no load carries the hint
+ * while one is pending, and the window reads its prefix again without it.
+ *
  * ## Limits
  *
  * The cells cross nine filter kinds with an adapter that applies or ignores the
- * hint, over one window on direct LEFT joins to a collection. Joins through
+ * hint, over one window on direct LEFT joins to a collection. One changed
+ * owner moves a root row into or out of a window, by a local write before or
+ * after the load or a synced change. Joins through
  * subqueries, `or` under a relation and unlimited queries are not hinted.
  *
  * ## Model
@@ -62,7 +68,7 @@ import type { Collection } from '../../src/collection/index.js'
 import type { InitialQueryBuilder } from '../../src/query/builder/index.js'
 import type { OrderByOptimizationInfo } from '../../src/query/compiler/order-by.js'
 import type { BasicExpression, QueryIR } from '../../src/query/ir.js'
-import type { LoadSubsetOptions } from '../../src/types.js'
+import type { LoadSubsetOptions, SyncConfig } from '../../src/types.js'
 
 type Seek = { id: number; rank: number; ownerId: number }
 type Owner = { id: number; ref: number; active: boolean; note?: string }
@@ -146,11 +152,15 @@ function expectedHint(kind: RelationCase[`kind`]) {
 
 // The adapter's own semi-join: keeps a root row when the hint's related rows
 // satisfy its quantifier.
-function satisfies(seek: Seek, relation: Relation): boolean {
+function satisfies(
+  seek: Seek,
+  relation: Relation,
+  ownerRows: ReadonlyArray<Owner> = owners,
+): boolean {
   const where = relation.where
     ? compileSingleRowExpression(relation.where)
     : undefined
-  const related = owners.filter(
+  const related = ownerRows.filter(
     (owner) =>
       owner[relation.on.child[0] as keyof Owner] ===
         seek[relation.on.parent[0] as keyof Seek] &&
@@ -319,6 +329,165 @@ async function runRelationCell(cell: RelationCase): Promise<void> {
         `an applied hint delivers only passing rows`,
       ).toBe(true)
     }
+  } finally {
+    await live.cleanup()
+    await root.cleanup()
+    await joined.cleanup()
+  }
+}
+
+// A joined row changes after, or before, the window loads: a local write the
+// provider has not seen, or a synced change that an applying adapter keeps its
+// answer current with. The change moves a root row into or out of the window.
+const joinedChangeCases = (
+  [`local write`, `local write before load`, `synced change`] as const
+).flatMap((write) =>
+  ([`enters`, `leaves`] as const).flatMap((move) =>
+    [true, false].map((applied) => ({ write, move, applied })),
+  ),
+)
+type JoinedChangeCase = (typeof joinedChangeCases)[number]
+
+async function runJoinedChangeCell(cell: JoinedChangeCase): Promise<void> {
+  const name = `load-subset-relations-change-${cell.write}-${cell.move}-${cell.applied}`
+  // Owner 1 is inactive and owner 0 active, so the change moves seek 1 into
+  // the window or seek 0 out of it.
+  const changed =
+    cell.move === `enters` ? { id: 1, active: true } : { id: 0, active: false }
+  const after = owners.map((owner) =>
+    owner.id === changed.id ? { ...owner, active: changed.active } : owner,
+  )
+  let provided: ReadonlyArray<Owner> = owners
+  let pendingWrite = false
+  const hintedDuringWrite: Array<OptionsWithRelations> = []
+  const served: Array<OptionsWithRelations> = []
+  const delivered = new Set<number>()
+  let rootSync!: Parameters<SyncConfig<Seek>[`sync`]>[0]
+  let ownerSync!: Parameters<SyncConfig<Owner>[`sync`]>[0]
+  const serve = (options: OptionsWithRelations) => {
+    const where = options.where
+      ? compileSingleRowExpression(options.where)
+      : undefined
+    const from = options.cursor
+      ? compileSingleRowExpression(options.cursor.whereFrom)
+      : undefined
+    const hints = cell.applied ? (options.relations ?? []) : []
+    const offset = from ? 0 : (options.offset ?? 0)
+    const answer = [...seeks]
+      .sort((a, b) => b.rank - a.rank)
+      .filter(
+        (row) =>
+          (!where || where(row) === true) &&
+          (!from || from(row) === true) &&
+          hints.every((hint) => satisfies(row, hint, provided)),
+      )
+      .slice(
+        offset,
+        options.limit === undefined ? undefined : offset + options.limit,
+      )
+    for (const row of answer) {
+      if (delivered.has(row.id)) continue
+      delivered.add(row.id)
+      rootSync.write({ type: `insert`, value: { ...row } })
+    }
+  }
+  const root = createCollection<Seek>({
+    id: `${name}-root`,
+    getKey: (row) => row.id,
+    syncMode: `on-demand`,
+    startSync: true,
+    autoIndex: `eager`,
+    defaultIndexType: BTreeIndex,
+    sync: {
+      sync: (params) => {
+        rootSync = params
+        params.markReady()
+        return {
+          loadSubset: (options: OptionsWithRelations) => {
+            if (pendingWrite && options.relations) {
+              hintedDuringWrite.push(options)
+            }
+            served.push(options)
+            params.begin()
+            serve(options)
+            const receipt = params.commit()
+            return receipt === true ? Promise.resolve() : receipt
+          },
+        }
+      },
+    },
+  })
+  const joined = createCollection<Owner>({
+    id: `${name}-owners`,
+    getKey: (row) => row.id,
+    startSync: true,
+    // The write stays pending, so the provider never sees it.
+    onUpdate: () => new Promise(() => {}),
+    sync: {
+      sync: (params) => {
+        ownerSync = params
+        params.begin()
+        for (const owner of owners) {
+          params.write({ type: `insert`, value: { ...owner } })
+        }
+        params.commit()
+        params.markReady()
+      },
+    },
+  })
+  const change = () => {
+    if (cell.write === `synced change`) {
+      provided = after
+      ownerSync.begin()
+      ownerSync.write({
+        type: `update`,
+        value: { ...after.find(({ id }) => id === changed.id)! },
+      })
+      ownerSync.commit()
+      // An applying adapter keeps its answer current with the related rows.
+      rootSync.begin()
+      for (const options of served) serve(options)
+      rootSync.commit()
+    } else {
+      pendingWrite = true
+      joined.update(changed.id, (draft) => {
+        draft.active = changed.active
+      })
+    }
+  }
+  const live = createLiveQueryCollection({
+    query: ((query: InitialQueryBuilder) =>
+      query
+        .from({ seek: root })
+        .leftJoin({ owner: joined }, ({ seek, owner }) =>
+          eq(seek.ownerId, owner.id),
+        )
+        .where(({ owner }) => eq(owner.active, true))
+        .orderBy(({ seek }) => seek.rank, `desc`)
+        .limit(4)
+        .select(({ seek }) => ({ id: seek.id }))) as never,
+  }) as unknown as Collection<{ id: number }>
+  try {
+    if (cell.write === `local write before load`) change()
+    await live.preload()
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    if (cell.write !== `local write before load`) change()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(
+      Array.from(live.values(), ({ id }) => id),
+      `published window`,
+    ).toEqual(
+      seeks
+        .filter((seek) =>
+          after.some((owner) => owner.id === seek.ownerId && owner.active),
+        )
+        .slice(0, 4)
+        .map(({ id }) => id),
+    )
+    expect(
+      hintedDuringWrite,
+      `no hint while a joined row has a local write`,
+    ).toEqual([])
   } finally {
     await live.cleanup()
     await root.cleanup()
@@ -544,6 +713,29 @@ describe(`loadSubset relation hints`, () => {
     driver: (plan, observe) =>
       recordAssertionJudgment(`shared window hint`, plan, observe, () =>
         runSharedWindowCell(plan.cell),
+      ),
+    check: forwardAssertionJudgment,
+  })
+
+  oracleProperty({
+    id: `load-subset-relations.joined-change`,
+    law: {
+      statement: `After a joined row changes, a joined-filter window publishes the window local evaluation gives, and no load sent while a joined row has a local write carries a relation hint.`,
+      authority: `Issue #2124: an adapter must never drop a root row that passes; query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
+      limits: `One changed owner that moves a root row into or out of one window, by a local write before or after the load or a synced change, with an applying or ignoring adapter.`,
+    },
+    owns: [
+      'src/query/live/collection-subscriber.ts#subscribeToOrderedChanges',
+      'src/query/live/ordered-source-loader.ts#loadMore',
+    ],
+    histories: joinedChangeCases,
+    label: ({ write, move, applied }) =>
+      `a ${write} that a root row ${move} with the hint ${applied ? `applied` : `ignored`}`,
+    resolve: (cell) => ({ cell }),
+    model: recordedAssertionJudgment,
+    driver: (plan, observe) =>
+      recordAssertionJudgment(`joined change window`, plan, observe, () =>
+        runJoinedChangeCell(plan.cell),
       ),
     check: forwardAssertionJudgment,
   })

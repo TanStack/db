@@ -360,10 +360,30 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(splittedChanges)
     }
 
+    // A local write on a joined row is not the provider's, so a hint could
+    // leave out a root row that the write makes pass. Requests send no hint
+    // while one is pending, and a window loaded with one reads its prefix again.
+    const relations = orderByInfo.relations
+    const joinedIds = new Set(
+      relations?.map(({ collectionId }) => collectionId),
+    )
+    const joined = this.collectionConfigBuilder
+      .getSourceCollections()
+      .filter(({ id }) => joinedIds.has(id))
+    const hasJoinedWrite = () =>
+      joined.some((collection) => collection._optimisticOverlaySize() > 0)
+    let sentRelations = false
+
     // Subscribe to changes with onStatusChange - listener is registered before any snapshot
     // values bigger than what we've sent don't need to be sent because they can't affect the topK
     const subscription = this.collection.subscribeChanges(sendChangesInRange, {
-      ...(orderByInfo.relations && { relations: orderByInfo.relations }),
+      ...(relations && {
+        relations: () => {
+          if (hasJoinedWrite()) return undefined
+          sentRelations = true
+          return relations
+        },
+      }),
       whereExpression,
       onStatusChange,
       onLoadSubsetError,
@@ -461,6 +481,11 @@ export class CollectionSubscriber<
         orderByInfo.joinedFilterSourceIds?.some((sourceId) =>
           this.collectionConfigBuilder.hasPendingJoinedWork(sourceId),
         ) ?? false,
+      () => {
+        const stale = sentRelations && hasJoinedWrite()
+        if (stale) sentRelations = false
+        return stale
+      },
     )
     this.orderedLoader.start()
 
