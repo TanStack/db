@@ -3800,6 +3800,8 @@ async function checkOptimisticWindow(
                     offset: options.offset,
                     limit: options.limit,
                     refetch: options.refetch,
+                    // A relation hint is part of the demand.
+                    relations: options.relations,
                   }),
                   newRows: 0,
                   phase: settlementPhase,

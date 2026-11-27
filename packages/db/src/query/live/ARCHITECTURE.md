@@ -1310,8 +1310,9 @@ An adapter that applies the hint keeps its answer current as related rows
 change, as it does for rows that enter its `where`: it delivers a root row that
 comes to pass. A local write on a joined row is not the provider's to see, so
 no request sends the hint while a joined collection has one. A window that sent
-it then reads its prefix again from the first row without the hint, as many rows
-as its hinted reads settled plus what the window still needs. That is a finite
+it then reads its prefix again from the first row without the hint, once any
+pending request settles, as many rows as its hinted reads settled plus what the
+window still needs, and reads its boundary tie again. That is a finite
 read, so it does not hold the optimistic publication. A full-source read stands
 for every row, so it never sends the hint.
 

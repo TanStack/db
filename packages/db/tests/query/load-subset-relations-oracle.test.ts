@@ -339,29 +339,55 @@ async function runRelationCell(cell: RelationCase): Promise<void> {
 // A joined row changes after, or before, the window loads: a local write the
 // provider has not seen, or a synced change that an applying adapter keeps its
 // answer current with. The change moves a root row into or out of the window.
-const joinedChangeCases = (
-  [`local write`, `local write before load`, `synced change`] as const
-).flatMap((write) =>
-  ([`enters`, `leaves`] as const).flatMap((move) =>
-    [true, false].map((applied) => ({ write, move, applied })),
-  ),
+// A `tied` root ranks every row alike and has four sparse passing owners, so
+// the window ends on a tie. A `held` root is unindexed, and its second load is
+// still pending when the local write lands.
+type JoinedChangeShape = `ranked` | `tied` | `held`
+type JoinedWrite = `local write` | `local write before load` | `synced change`
+const joinedChangeCases = ([`ranked`, `tied`, `held`] as const).flatMap(
+  (shape) =>
+    (shape === `ranked`
+      ? ([`local write`, `local write before load`, `synced change`] as const)
+      : ([`local write`] as const)
+    ).flatMap((write: JoinedWrite) =>
+      ([`enters`, `leaves`] as const).flatMap((move) =>
+        [true, false].map((applied) => ({
+          write,
+          move,
+          applied,
+          shape: shape as JoinedChangeShape,
+        })),
+      ),
+    ),
 )
 type JoinedChangeCase = (typeof joinedChangeCases)[number]
+const tiedSeeks: Array<Seek> = seeks.map((seek) => ({ ...seek, rank: 1 }))
+const tiedOwners: Array<Owner> = seeks.map(({ id }) => ({
+  id,
+  ref: id,
+  active: id > 0 && id % 8 === 0,
+}))
 
 async function runJoinedChangeCell(cell: JoinedChangeCase): Promise<void> {
-  const name = `load-subset-relations-change-${cell.write}-${cell.move}-${cell.applied}`
-  // Owner 1 is inactive and owner 0 active, so the change moves seek 1 into
-  // the window or seek 0 out of it.
+  const name = `load-subset-relations-change-${cell.shape}-${cell.write}-${cell.move}-${cell.applied}`
+  const tied = cell.shape === `tied`
+  const rootRows = tied ? tiedSeeks : seeks
+  const ownerRows = tied ? tiedOwners : owners
+  // The change moves an inactive owner's seek into the window or an active
+  // owner's seek out of it.
   const changed =
-    cell.move === `enters` ? { id: 1, active: true } : { id: 0, active: false }
-  const after = owners.map((owner) =>
+    cell.move === `enters`
+      ? { id: tied ? 7 : 1, active: true }
+      : { id: tied ? 8 : 0, active: false }
+  const after = ownerRows.map((owner) =>
     owner.id === changed.id ? { ...owner, active: changed.active } : owner,
   )
-  let provided: ReadonlyArray<Owner> = owners
+  let provided: ReadonlyArray<Owner> = ownerRows
   let pendingWrite = false
   const hintedDuringWrite: Array<OptionsWithRelations> = []
   const served: Array<OptionsWithRelations> = []
   const delivered = new Set<number>()
+  let releaseHeld: (() => void) | undefined
   let rootSync!: Parameters<SyncConfig<Seek>[`sync`]>[0]
   let ownerSync!: Parameters<SyncConfig<Owner>[`sync`]>[0]
   const serve = (options: OptionsWithRelations) => {
@@ -373,7 +399,7 @@ async function runJoinedChangeCell(cell: JoinedChangeCase): Promise<void> {
       : undefined
     const hints = cell.applied ? (options.relations ?? []) : []
     const offset = from ? 0 : (options.offset ?? 0)
-    const answer = [...seeks]
+    const answer = [...rootRows]
       .sort((a, b) => b.rank - a.rank)
       .filter(
         (row) =>
@@ -396,7 +422,7 @@ async function runJoinedChangeCell(cell: JoinedChangeCase): Promise<void> {
     getKey: (row) => row.id,
     syncMode: `on-demand`,
     startSync: true,
-    autoIndex: `eager`,
+    autoIndex: cell.shape === `held` ? `off` : `eager`,
     defaultIndexType: BTreeIndex,
     sync: {
       sync: (params) => {
@@ -408,6 +434,16 @@ async function runJoinedChangeCell(cell: JoinedChangeCase): Promise<void> {
               hintedDuringWrite.push(options)
             }
             served.push(options)
+            if (cell.shape === `held` && served.length === 2) {
+              return new Promise<void>((resolve) => {
+                releaseHeld = () => {
+                  params.begin()
+                  serve(options)
+                  params.commit()
+                  resolve()
+                }
+              })
+            }
             params.begin()
             serve(options)
             const receipt = params.commit()
@@ -427,7 +463,7 @@ async function runJoinedChangeCell(cell: JoinedChangeCase): Promise<void> {
       sync: (params) => {
         ownerSync = params
         params.begin()
-        for (const owner of owners) {
+        for (const owner of ownerRows) {
           params.write({ type: `insert`, value: { ...owner } })
         }
         params.commit()
@@ -456,28 +492,33 @@ async function runJoinedChangeCell(cell: JoinedChangeCase): Promise<void> {
     }
   }
   const live = createLiveQueryCollection({
-    query: ((query: InitialQueryBuilder) =>
-      query
+    query: ((query: InitialQueryBuilder) => {
+      const ranked = query
         .from({ seek: root })
         .leftJoin({ owner: joined }, ({ seek, owner }) =>
           eq(seek.ownerId, owner.id),
         )
         .where(({ owner }) => eq(owner.active, true))
         .orderBy(({ seek }) => seek.rank, `desc`)
+      return (tied ? ranked.orderBy(({ seek }) => seek.id) : ranked)
         .limit(4)
-        .select(({ seek }) => ({ id: seek.id }))) as never,
+        .select(({ seek }) => ({ id: seek.id }))
+    }) as never,
   }) as unknown as Collection<{ id: number }>
   try {
     if (cell.write === `local write before load`) change()
-    await live.preload()
+    const loading = live.preload()
+    if (cell.shape !== `held`) await loading
     await new Promise((resolve) => setTimeout(resolve, 5))
     if (cell.write !== `local write before load`) change()
+    releaseHeld?.()
+    await loading
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(
       Array.from(live.values(), ({ id }) => id),
       `published window`,
     ).toEqual(
-      seeks
+      rootRows
         .filter((seek) =>
           after.some((owner) => owner.id === seek.ownerId && owner.active),
         )
@@ -722,15 +763,15 @@ describe(`loadSubset relation hints`, () => {
     law: {
       statement: `After a joined row changes, a joined-filter window publishes the window local evaluation gives, and no load sent while a joined row has a local write carries a relation hint.`,
       authority: `Issue #2124: an adapter must never drop a root row that passes; query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery.`,
-      limits: `One changed owner that moves a root row into or out of one window, by a local write before or after the load or a synced change, with an applying or ignoring adapter.`,
+      limits: `One changed owner that moves a root row into or out of one window, by a local write before or after the load or a synced change, with an applying or ignoring adapter. A local write also lands on a window that ends on a tie, and on an unindexed root while its second load is pending.`,
     },
     owns: [
       'src/query/live/collection-subscriber.ts#subscribeToOrderedChanges',
       'src/query/live/ordered-source-loader.ts#loadMore',
     ],
     histories: joinedChangeCases,
-    label: ({ write, move, applied }) =>
-      `a ${write} that a root row ${move} with the hint ${applied ? `applied` : `ignored`}`,
+    label: ({ shape, write, move, applied }) =>
+      `a ${write} that a root row ${move} on a ${shape} root with the hint ${applied ? `applied` : `ignored`}`,
     resolve: (cell) => ({ cell }),
     model: recordedAssertionJudgment,
     driver: (plan, observe) =>

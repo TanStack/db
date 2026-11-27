@@ -313,8 +313,13 @@ export class OrderedSourceLoader {
     }
     if (!this.active || this.info.limit === 0 || this.requesting) return
     // A relation hint can have left out a root row that a local joined write
-    // now makes pass, so the window's prefix is read again without it.
-    if (this.hasSettledSourceRequest && this.relationHintIsStale()) {
+    // now makes pass, so the window's prefix is read again without it, once
+    // a pending request settles.
+    if (
+      this.hasSettledSourceRequest &&
+      !this.pending &&
+      this.relationHintIsStale()
+    ) {
       // Read again as many rows as the hinted reads settled, so an adapter
       // that ignored the hint answers with the same boundary.
       this.prefixReread =
@@ -322,6 +327,8 @@ export class OrderedSourceLoader {
           ? 0
           : this.countAcquiredRows(Infinity)
       this.invalidateCursor()
+      // A hinted tie read can have left out tied rows too.
+      this.lastBoundary = undefined
     }
     windowOperationGeneration ??=
       this.blockedLoadMore?.windowOperationGeneration
