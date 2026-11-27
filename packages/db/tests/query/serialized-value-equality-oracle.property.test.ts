@@ -2261,7 +2261,8 @@ describe(`value classes order arrays by their serialized value`, () => {
 // diff when it completes. A row's reference may be the probe instance or a
 // deep-equal copy, before the truncate and at the end of the replay; a copy
 // may first arrive as the probe and then be replaced. Model: a filter on the
-// probe instance, and an Effect joining on it, show exactly the rows that hold
+// probe instance, an Effect joining on it and an Effect whose functional filter
+// compares it show exactly the rows that hold
 // it, and the replay publishes a delete (exit) for each row that stopped
 // matching and an insert (enter) for each that started, and nothing for a row
 // that still matches.
@@ -2277,6 +2278,8 @@ const replayStates = [
   `unchanged-redelivered`,
   // A row that matched was not delivered again.
   `removed`,
+  // The replay delivered a deep-equal copy where the probe had been.
+  `replay-delivered-copy`,
 ] as const
 type ReplayState = (typeof replayStates)[number]
 
@@ -2369,6 +2372,11 @@ async function runReplayHistory(
   const held = new Set<string>()
   const effectEvents: Array<string> = []
   let effect: ReturnType<typeof createEffect> | undefined
+  // A second Effect reads the reference in a functional filter, which runs
+  // after the subscription and sees only the rows it is sent.
+  const filterHeld = new Set<string>()
+  const filterEvents: Array<string> = []
+  let filterEffect: ReturnType<typeof createEffect> | undefined
   try {
     subscription.requestSnapshot({ optimizedOnly: false })
     expect([...visible].sort(), `before the truncate`).toEqual(
@@ -2389,8 +2397,26 @@ async function runReplayHistory(
         }
       },
     })
+    filterEffect = createEffect({
+      query: (q) =>
+        q
+          .from({ row: collection })
+          .fn.where(({ row }) => row.ref === probe)
+          .select(({ row }) => ({ id: row.id })),
+      onBatch: (batch) => {
+        for (const event of batch) {
+          const id = (event.value as { id: string }).id
+          filterEvents.push(`${event.type}:${id}`)
+          if (event.type === `exit`) filterHeld.delete(id)
+          else filterHeld.add(id)
+        }
+      },
+    })
     await flushPromises()
     expect([...held].sort(), `Effect before the truncate`).toEqual(
+      matching((row) => row.before),
+    )
+    expect([...filterHeld].sort(), `filter Effect before the truncate`).toEqual(
       matching((row) => row.before),
     )
     replaying = true
@@ -2417,6 +2443,7 @@ async function runReplayHistory(
     }
     events.length = 0
     effectEvents.length = 0
+    filterEvents.length = 0
     replay.resolve()
     await flushPromises()
 
@@ -2442,6 +2469,8 @@ async function runReplayHistory(
       if (!was && is) reach(`entered-filter`)
       if (was && is) reach(`unchanged-redelivered`)
       if (was && row.after === `absent`) reach(`removed`)
+      if (was && row.after === `copy` && !row.viaProbe)
+        reach(`replay-delivered-copy`)
     }
     expect([...visible].sort(), `after the replay`).toEqual(
       matching((row) => row.after),
@@ -2455,10 +2484,18 @@ async function runReplayHistory(
     expect([...effectEvents].sort(), `Effect replay publication`).toEqual(
       expectedEffectEvents.sort(),
     )
+    expect([...filterHeld].sort(), `filter Effect after the replay`).toEqual(
+      matching((row) => row.after),
+    )
+    expect(
+      [...filterEvents].sort(),
+      `filter Effect replay publication`,
+    ).toEqual(expectedEffectEvents.sort())
   } finally {
     replay.resolve()
     await flushPromises()
     await effect?.dispose()
+    await filterEffect?.dispose()
     subscription.unsubscribe()
     await collection.cleanup()
     await probeSide.cleanup()
@@ -2471,9 +2508,9 @@ describe(`a truncate replay follows reference replacements`, () => {
   oracleProperty({
     id: replayProperty,
     law: {
-      statement: `When a direct subscriber's truncate replay completes, a filter on a reference, and an Effect that joins on it, show exactly the rows that hold that instance, and the replay publishes a delete (an Effect exit) for each row that stopped matching, including by a deep-equal replacement, an insert (an Effect enter) for each that started, and nothing for a row that still matches.`,
+      statement: `When a direct subscriber's truncate replay completes, a filter on a reference, an Effect that joins on it and an Effect whose functional filter compares it show exactly the rows that hold that instance, and the replay publishes a delete (an Effect exit) for each row that stopped matching, including by a deep-equal replacement, an insert (an Effect enter) for each that started, and nothing for a row that still matches.`,
       authority: `Issue #2459 and the "Value classes" section of docs/guides/live-queries.md.`,
-      limits: `One on-demand Collection with a Map-valued reference filter, one Effect with an inner join on that reference, and one replay; up to three rows, each absent, holding the probe or holding a deep-equal copy before the truncate and after the replay.`,
+      limits: `One on-demand Collection with a Map-valued reference filter, one Effect with an inner join on that reference, one Effect with a functional filter on it, and one replay; up to three rows, each absent, holding the probe or holding a deep-equal copy before the truncate and after the replay.`,
     },
     owns: [
       'src/collection/subscription.ts#CollectionSubscription.createStateDiff',
@@ -2500,10 +2537,13 @@ describe(`a truncate replay follows reference replacements`, () => {
           }),
         },
         {
-          name: `a matching row is not delivered again`,
-          enters: [`removed`],
+          name: `a matching row is not delivered again or comes back as a copy`,
+          enters: [`removed`, `replay-delivered-copy`],
           build: (): ReplayHistory => ({
-            rows: [{ before: `probe`, after: `absent`, viaProbe: false }],
+            rows: [
+              { before: `probe`, after: `absent`, viaProbe: false },
+              { before: `probe`, after: `copy`, viaProbe: false },
+            ],
           }),
         },
       ],
