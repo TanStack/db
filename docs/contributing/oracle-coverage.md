@@ -8770,6 +8770,76 @@ client-cache behavior and is not generated, because the model starts a
 restarted run empty. A fixed-seed campaign runs the React client
 (`watchQuery`).
 
+### Ordered-loader replay completion, issue #2480
+
+Owner: `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+properties `ordered-loader.request-authority` and
+`ordered-loader.replay-settlement`. PR #2420's seed `1040058663`, path
+`5586:1:1:1:5:4:8:8:10:11:20:22`, reported a repair tie released before a
+covering read succeeded. The driver had reported replay success while a
+replacement prefix acquired inside that replay was still pending. This
+contradicts ARCHITECTURE.md, "Replay participants and failure": every
+acquisition started inside replay joins its publication barrier.
+
+The success command now answers those acquisitions and their continuations
+before completing replay. It checks the held law after each answer. A hung
+current acquisition keeps replay pending. Pre-truncate transports may remain
+in flight because replay reacquires their logical demand. The component
+driver retains explicit loader retries during replay to exercise those
+acquisitions; the public window API defers moves until replay completes.
+
+The original trace is a fixed regression through the shared request ledger.
+A directed grammar varies window deltas, offsets, cleanup faults, reentrant
+passes, and later work. Its declared state
+`current-acquisition-before-replay-success` is reached by a constructed
+history with a generated suffix. Each campaign reaches it in all five
+constructed histories and all 100 generated histories at seed `1040058663`.
+The shared check requires that state for every directed history, after the
+request-ledger comparison. A bound calibration removes every `replaySucceeds`
+command from the constructed history and runs the same production driver;
+the check rejects its missing state under `replay settlement reach`.
+The existing laws, comparisons, and run budgets remain unchanged. This is a
+driver correction and establishes no new production behavior or resource-leak
+claim. See [the evidence record](oracle-reviews/issue-2480-replay-settlement.md).
+
+### Ordered-loader retirement checkpoint, PR #2481 follow-up
+
+Owner: `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts`,
+properties `ordered-loader.request-authority` and
+`ordered-loader.replay-retirement`. CI seed `332327919`, path
+`9283:0:0:0:0:5:5:9:10:9`, kept a finite lease while an unanswered current
+acquisition blocked replay. The no-leak check judged that active replay as
+quiet after a full-source transport succeeded.
+
+ARCHITECTURE.md, "Ordered requests, continuation, and recovery", requires
+covering retirement to await replay completion. Both successful and
+superseded-failed no-leak comparisons now require that checkpoint. Decision
+`ordered-loader-replay-retirement-checkpoint-2026-11-26`: the maintainer
+approved this check correction in PR #2481's investigation and delegated
+model, history, and check repairs under unchanged laws. This decision
+changes no product law and grants no resource-leak allowance.
+
+The request ledger tracks finite leases acquired inside replay. Their
+release callbacks reject premature covering retirement while replay remains
+pending; explicit retry may still replace failed demand. Public `loadMore`
+arguments record that permission through asynchronous retry continuations.
+After covering replay or subsequent full-source recovery, the same ledger
+requires retirement, including across a superseding truncate. Disposal ends
+that obligation and retains the no-post-disposal-release comparison.
+
+A directed grammar constructs successful and superseded-failed finite
+histories with held finite and authoritative acquisitions. It varies unload
+errors, reentrant passes, completion versus disposal, and success-history
+window width and offset. The failed-history schedule starts at width one,
+offset zero so the repair produces the held tie. Both constructions have
+separate missing-retention and missing-completion controls. The original
+shrunk history remains a fixed regression through the shared comparison.
+The existing run budgets remain unchanged; the directed campaign adds 100
+histories per fixed and random campaign. Four authored mutants reject early
+and retained successful/failed leases. This is controlled loader evidence;
+no public window timing, provider behavior, or universal leak claim follows.
+See [the evidence record](oracle-reviews/issue-2481-replay-retirement.md).
+
 ### Ordered-loader authority CI counterexample, 2026-11-03
 
 Owner: `packages/db/tests/query/ordered-source-loader-state-oracle.test.ts`,
@@ -9431,3 +9501,26 @@ records exact counts, commands, the receiving replay and type-collector setup.
 This proves the observed-work premise on the stated paths. Unobserved work,
 unbounded chains and real browser-process completion remain outside this
 instrument claim; the multi-tab owner's existing peer-notice limits remain.
+
+### Persisted lifecycle source-event checkpoint, issue #2484
+
+Owner: `packages/db-adapter-conformance/tests/persisted-baseline-lifecycle-oracle.ts`
+retains the row and lifecycle judgment. The instrument receiver
+`packages/db-adapter-conformance/tests/persisted-baseline-checkpoint-oracle.test.ts`
+checks `observeBaselineLifecycle` itself: a legal empty source transaction cannot
+satisfy the wait for a later source event. Its controlled provider changes backend
+rows first, commits one to three empty transactions, and delivers the event after
+one to four tasks. Generated histories vary saved, old and replacement memberships across
+three keys. The real Collection and persistence wrapper still apply the writes.
+The state `source-event-held-after-empty-commit` is declared and constructed; both
+campaigns reach it in five constructed and 24 generated histories. Bound controls
+reject a missing premise and the observation before the event applies.
+
+The driver records the applied receipt of the transaction containing the event's
+unique row. It awaits that receipt before taking `afterEvent`. Existing PowerSync,
+RxDB, Node SQLite and Chromium OPFS receivers keep their laws, comparisons, states
+and run budgets. This is an instrument repair, with no new provider or product
+behavior claim. The original next-receipt guard fails the generated instrument;
+a targeted mutant accepting an unrelated receipt and a mutant losing the final
+observation both fail. This targeted evidence is not a complete mutation audit of
+the lifecycle driver. See [issue #2484 evidence](oracle-reviews/issue-2484-event-checkpoint.md).

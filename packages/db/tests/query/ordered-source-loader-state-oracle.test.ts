@@ -69,8 +69,9 @@ function tieValue(options: RequestOptions): unknown {
  *   holds nothing issued before its last successful authoritative read.
  *   Otherwise every later refetch would read that request again. A
  *   superseded request that failed is retired once a full-source read issued
- *   after it succeeds, or a replay that covers the source settles after it;
- *   it needs no explicit retry.
+ *   after it succeeds, or a replay that covers the source settles after it,
+ *   once active replay finishes. An explicit retry may replace failed demand
+ *   sooner; covering retirement needs no explicit retry.
  * - **Covering lease:** a full-source lease whose read succeeded, or whose
  *   demand a successful replay reacquired, is never released. A late failure
  *   of its own transport does not undo that coverage.
@@ -215,13 +216,13 @@ function tieValue(options: RequestOptions): unknown {
  * - `joinedBusy` and `joinedIdle` hold and finish LEFT-joined work, which
  *   defers ordinary loading, and the pass the subscriber runs after it;
  * - `truncate` resets the cursor and holds ordinary passes behind a pending
- *   replay; `replaySucceeds` settles the replay and `replayFails` leaves it
- *   pending;
+ *   replay; `replaySucceeds` answers acquisitions started during replay
+ *   before completing it, and `replayFails` leaves it pending;
  * - `optimisticDeparture` hides the window's row behind an optimistic
  *   overlay, and `sourceDelete` deletes it from the source;
  * - `timer` runs the bounded backoff retry when that scenario enables it;
- * - `hang` makes the provider never answer the oldest open request, like a
- *   lost TCP segment; the drain leaves it in flight;
+ * - `hang` makes the provider never answer the oldest open request, or the
+ *   newest when selected; the drain leaves it in flight;
  * - `startThrows` makes the next request throw while it starts, so it
  *   acquires nothing; `failOldestThrowingRecovery` fails a superseded
  *   request (the oldest, if none is) while the recovery read it starts
@@ -230,7 +231,9 @@ function tieValue(options: RequestOptions): unknown {
  *   releases no lease, even as earlier requests settle; the end laws then
  *   judge nothing more.
  * Passes are ordinary graph passes, which the subscriber skips while a
- * truncate replay is pending; a window move still runs. Scenarios cross an
+ * truncate replay is pending; an explicit loader retry still runs. Unlike
+ * this component call, the public window API waits for replay before moving
+ * (ARCHITECTURE.md, "Atomic window publication"). Scenarios cross an
  * indexed loader (pages and ties) with an unindexed one (prefix reads),
  * window limits 1 and 2, whether the first page settles before the history
  * (a bounded repair needs a settled request), whether the first release
@@ -257,13 +260,17 @@ function tieValue(options: RequestOptions): unknown {
  * that way exactly once, and no other error may escape a microtask.
  * The release law says each acquisition is released at most once, and that
  * nothing is released while a truncate replay owns it, unless an explicit
- * retry replaces it or a held successful full-source lease covers it. After
+ * retry replaces it or a held successful full-source lease covers it. The
+ * stronger retention check tracks finite leases acquired inside active replay.
+ * Full-source transport success does not permit their retirement. After
  * the history, a drain finishes joined work, settles each truncate replay,
  * including one a release starts during the drain, settles every in-flight
  * request that is not hung, and runs ordinary passes until the loader issues
  * nothing new. No strand is checked at that point. Then, if an own
  * failure still blocks the loader, one explicit window move retries it and
- * the drain runs again. No leak is checked next, then progress.
+ * the drain runs again. No leak is checked next only if replay completed,
+ * then progress. Leases observed held during a blocked replay must retire after
+ * a later successful replay, including when a newer truncate supersedes it.
  *
  * ## Limits
  *
@@ -341,7 +348,7 @@ type AuthorityCommand =
   | { type: `optimisticDeparture` }
   | { type: `sourceDelete`; react: boolean }
   | { type: `timer` }
-  | { type: `hang` }
+  | { type: `hang`; newest?: boolean }
   | { type: `dispose` }
   | { type: `startThrows` }
   | { type: `failOldestThrowingRecovery` }
@@ -1151,10 +1158,16 @@ async function checkAuthorityCase(
       | `reset-continuation`
       | `release-pass-continuation`
       | `release-pass-refill-resumed`
-      | `release-pass-refill-revalidation`,
+      | `release-pass-refill-revalidation`
+      | `current-acquisition-before-replay-success`
+      | `successful-finite-held-during-replay`
+      | `failed-finite-held-during-replay`
+      | `finite-retired-after-replay`,
   ) => void,
   observeRejection?: (reason: unknown) => unknown,
-  observeRelease: (released: boolean) => boolean = (released) => released,
+  observeRelease: (released: boolean, request: LedgerRequest) => boolean = (
+    released,
+  ) => released,
 ): Promise<AuthorityObservation> {
   const ledger: Array<LedgerRequest> = []
   const participants: Array<Promise<unknown>> = []
@@ -1545,14 +1558,21 @@ async function checkAuthorityCase(
       }
       // A pending truncate replay owns every demand the subscription holds.
       // A release is safe only when an explicit retry replaces the demand or
-      // a held successful full-source lease covers it.
+      // a held successful full-source lease covers it. The tracked current
+      // replay leases below retain the stronger pending-replay obligation.
       const coveredBySource = ledger.some(
         (other) =>
           other.fullSource &&
           (other.outcome === `ok` || other.replayed) &&
           !other.released,
       )
-      if (truncatePending && !explicitRetrying && !coveredBySource) {
+      if (
+        truncatePending &&
+        !explicitRetrying &&
+        (!coveredBySource ||
+          (request.index >= replayOwnedBefore &&
+            blockedReplayLeases.has(request)))
+      ) {
         releaseViolation ??= `request ${request.index} was released while a truncate replay was pending`
       }
       // Every release the loader makes runs inside a release pass, which
@@ -1750,6 +1770,23 @@ async function checkAuthorityCase(
     () => revision,
     () => joinedPending,
   )
+  // A window operation may resume through a public loadMore call from its
+  // asynchronous continuation. Its retry still owns failed-demand retirement;
+  // the permission is not confined to the initiating synchronous call stack.
+  const loadMore = loader.loadMore.bind(loader)
+  loader.loadMore = (
+    windowOperationGeneration,
+    continuesOrderedPrefixRepair = false,
+  ) => {
+    const previous = explicitRetrying
+    explicitRetrying ||=
+      windowOperationGeneration !== undefined && !continuesOrderedPrefixRepair
+    try {
+      return loadMore(windowOperationGeneration, continuesOrderedPrefixRepair)
+    } finally {
+      explicitRetrying = previous
+    }
+  }
   const invalidateSourceOrdering = loader.invalidateSourceOrdering.bind(loader)
   loader.invalidateSourceOrdering = () => {
     if (continuationOwed && currentChain !== undefined)
@@ -1776,7 +1813,18 @@ async function checkAuthorityCase(
   let clock = 0
   let replaySettledAt = -1
   let replayCoverage = new Set<LedgerRequest>()
+  // Requests begun inside replay join its barrier. Pre-truncate transports
+  // may remain in flight because replay reacquires their logical demands.
+  const currentReplayRequest = () =>
+    ledger.find(
+      (request) =>
+        request.index >= replayOwnedBefore &&
+        request.outcome === `inflight` &&
+        !request.released,
+    )
+  const blockedReplayLeases = new Set<LedgerRequest>()
   const settleReplay = () => {
+    if (currentReplayRequest()) return false
     if (continuationOwed) {
       replayContinuationHandoffs++
       reached?.(`deferred-refill`)
@@ -1803,6 +1851,7 @@ async function checkAuthorityCase(
     } finally {
       settlingReplay = false
     }
+    return true
   }
   let unexpressibleBoundaries = 0
   let joinedDeferrals = 0
@@ -2102,6 +2151,57 @@ async function checkAuthorityCase(
         ),
       )
     }
+    // ARCHITECTURE.md requires finite retirement to await active replay,
+    // even after a full-source transport succeeds. Remember those exact leases
+    // across a newer truncate so completion cannot erase the release obligation.
+    const authority = [...ledger]
+      .reverse()
+      .find((request) => request.authoritative && !request.released)
+    if (truncatePending && currentReplayRequest() && authority) {
+      for (const request of ledger) {
+        if (
+          request.index < replayOwnedBefore ||
+          request.index >= authority.index ||
+          request.fullSource ||
+          request.released ||
+          !(
+            request.outcome === `ok` ||
+            (request.outcome === `failed` && request.superseded)
+          )
+        )
+          continue
+        blockedReplayLeases.add(request)
+        reached?.(
+          request.outcome === `ok`
+            ? `successful-finite-held-during-replay`
+            : `failed-finite-held-during-replay`,
+        )
+      }
+    }
+    const coveredBlockedLeases = [...blockedReplayLeases].filter(
+      (request) =>
+        replayCoverage.size > 0 ||
+        ledger.some(
+          (later) =>
+            later.fullSource &&
+            later.outcome === `ok` &&
+            later.index > request.index &&
+            !later.released,
+        ),
+    )
+    if (!isDisposed() && !truncatePending && coveredBlockedLeases.length > 0) {
+      for (const request of coveredBlockedLeases) {
+        if (!observeRelease(request.released, request)) {
+          rejectAt(
+            `finite retirement after replay`,
+            new Error(
+              `no leak: request ${request.index} is still held after replay completed`,
+            ),
+          )
+        }
+      }
+      reached?.(`finite-retired-after-replay`)
+    }
     // The latest successful repair prefix, if no later authoritative read
     // has succeeded, must still be held.
     const repair = [...ledger]
@@ -2175,7 +2275,7 @@ async function checkAuthorityCase(
         continue
       }
       if (truncatePending) {
-        settleReplay()
+        if (!settleReplay()) return
         // Replay retirement can release leases that a later read in this
         // drain covers, so the held law is checked at each drain event.
         checkHeld(`after the drain's replay settles`)
@@ -2521,12 +2621,28 @@ async function checkAuthorityCase(
         case `truncate`:
           truncate()
           break
-        case `replaySucceeds`:
+        case `replaySucceeds`: {
           if (!replayPending()) break
+          // Answer acquisitions that joined replay before reporting success,
+          // including any continuation those answers start. Keep the same
+          // per-request held-law checkpoint that the drain uses.
+          for (let round = 0; ; round++) {
+            const request = currentReplayRequest()
+            if (!request || request.hung) break
+            reached?.(`current-acquisition-before-replay-success`)
+            if (round === 40)
+              rejectAt(
+                `replay acquisition fixed point`,
+                new Error(`replay acquisitions did not reach a fixed point`),
+              )
+            await settle(request, true)
+            checkHeld(`before replay completes after request ${request.index}`)
+          }
           settleReplay()
           graphPass()
           await flush()
           break
+        }
         case `replayFails`:
           if (replayPending()) {
             replayFailures++
@@ -2579,9 +2695,10 @@ async function checkAuthorityCase(
             loader.dispose()
           }
           break
-        // The provider never answers the oldest open request.
+        // The provider never answers the selected open request.
         case `hang`: {
-          const request = inflight()[0]
+          const open = inflight()
+          const request = command.newest ? open.at(-1) : open[0]
           if (request) {
             request.hung = true
             hungRequests++
@@ -2669,7 +2786,7 @@ async function checkAuthorityCase(
       const leaked = ledger.filter(
         (request) =>
           request.outcome === `ok` &&
-          !observeRelease(request.released) &&
+          !observeRelease(request.released, request) &&
           request.index >= replayOwnedBefore &&
           !replayCoverage.has(request) &&
           request.index < authority,
@@ -2679,9 +2796,11 @@ async function checkAuthorityCase(
         (request) =>
           request.hung && request.authoritative && request.index > authority,
       )
-      // A release during the retry can dispose the loader; it owes nothing more.
+      // Retirement waits for replay completion, even when the latest transport
+      // succeeded. A release during retry can also dispose the loader.
       if (
         !isDisposed() &&
+        !replayPending() &&
         authority >= 0 &&
         !unfinishedChain &&
         leaked.length > 0
@@ -2714,7 +2833,7 @@ async function checkAuthorityCase(
                   request.outcome === `ok`,
               ))),
       )
-      if (!isDisposed() && heldFailures.length > 0) {
+      if (!isDisposed() && !replayPending() && heldFailures.length > 0) {
         rejectAt(
           `ordered-source-loader-state-oracle.test.ts:2161`,
           new Error(
@@ -3619,6 +3738,403 @@ describe(`Ordered source request authority`, () => {
     },
   }
 
+  // A release starts replay, then an explicit loader retry starts a repair
+  // inside it. Its next prefix is still in flight when replay success is
+  // requested. Replay must wait for that acquisition before retiring leases.
+  // Source: https://github.com/TanStack/db/issues/2480
+  const replaySettlementRegression: AuthorityCase = {
+    ...ordinaryScenario,
+    indexed: false,
+    limit: 1,
+    settledFirst: true,
+    releaseFault: false,
+    syncRepair: false,
+    releaseTruncates: true,
+    releaseInvalidates: true,
+    history: [
+      { type: `settle`, pick: 0, ok: true },
+      { type: `settle`, pick: 0, ok: true },
+      { type: `move`, delta: -1 },
+      { type: `settleNewest` },
+      { type: `unexpressibleBoundary` },
+      { type: `settle`, pick: 0, ok: true },
+      { type: `replaySucceeds` },
+      { type: `timer` },
+    ],
+  }
+  const replaySettlementCase = fc.record({
+    delta: fc.constantFrom(-1 as const, 0 as const, 1 as const),
+    offset: fc.constantFrom(0 as const, 1 as const),
+    releaseFault: fc.boolean(),
+    releaseReenters: fc.boolean(),
+    suffix: fc.array(
+      fc.record({
+        type: fc.constantFrom(
+          `pass` as const,
+          `truncate` as const,
+          `replaySucceeds` as const,
+          `unexpressibleBoundary` as const,
+          `settleNewest` as const,
+          `timer` as const,
+        ),
+      }),
+      { maxLength: 8 },
+    ),
+  })
+  type ReplaySettlementCase =
+    typeof replaySettlementCase extends fc.Arbitrary<infer History>
+      ? History
+      : never
+  const pendingReplayCase: ReplaySettlementCase = {
+    delta: -1,
+    offset: 0,
+    releaseFault: false,
+    releaseReenters: false,
+    suffix: [],
+  }
+  async function driveReplaySettlement(
+    history: AuthorityCase,
+    observe: (checkpoint: string, value: unknown) => void,
+  ): Promise<void> {
+    const reached = new Set<string>()
+    await observeComparison(history, observe, () =>
+      checkAuthorityCase(history, (state) => {
+        if (state === `current-acquisition-before-replay-success`)
+          reached.add(state)
+      }),
+    )
+    for (const state of reached) observe(`reach`, state)
+  }
+  oracleProperty({
+    id: `ordered-loader.replay-settlement`,
+    law: {
+      statement: `Successful repair acquisitions stay held until a covering acquisition or replay succeeds.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Replay participants and failure.`,
+      limits: `Controlled loader calls and the shared request-ledger comparisons. The public window API defers moves behind replay; this component driver also exercises loader retries during replay.`,
+    },
+    owns: [
+      'src/collection/index.ts#createCollection',
+      'src/indexes/btree-index.ts',
+      'src/query/effect.ts#createEffect',
+      'src/query/live-query-collection.ts#createLiveQueryCollection',
+      'src/query/live/ordered-source-loader.ts',
+    ],
+    histories: {
+      arbitrary: replaySettlementCase,
+      runs: 100,
+      fixedSeeds: [1040058663],
+      states: [`current-acquisition-before-replay-success`],
+      fixed: [
+        {
+          name: `replay success requested while its replacement prefix is in flight`,
+          history: pendingReplayCase,
+        },
+      ],
+      constructed: [
+        {
+          name: `a pending replacement prefix before replay success with generated later work`,
+          enters: [`current-acquisition-before-replay-success`],
+          build: (base): ReplaySettlementCase => ({
+            ...pendingReplayCase,
+            suffix: base.suffix,
+          }),
+        },
+      ],
+    },
+    resolve: ({ delta, suffix, ...axes }): AuthorityCase => ({
+      ...replaySettlementRegression,
+      ...axes,
+      history: [
+        ...replaySettlementRegression.history.map((command) =>
+          command.type === `move` ? { ...command, delta } : command,
+        ),
+        ...suffix,
+      ],
+    }),
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: driveReplaySettlement,
+    check: (_history, observations, verdict) => {
+      // Every input retains the replay-success prefix. Its state is owed
+      // before generated later work, for constructed and random histories.
+      // Preserve a product-law failure before judging this grammar obligation.
+      if (verdict.kind === `violation`) return verdict
+      return observations.some(
+        ({ checkpoint, value }) =>
+          checkpoint === `reach` &&
+          value === `current-acquisition-before-replay-success`,
+      )
+        ? verdict
+        : {
+            kind: `violation`,
+            law: `replay settlement reach`,
+            checkpoint: `replay participation`,
+            difference: `history did not enter current-acquisition-before-replay-success`,
+          }
+    },
+    // The bound construction must pass unchanged. Removing replay success
+    // then runs the same driver without entering the state it promised.
+    calibrations: [
+      {
+        name: `rejects a construction without replay success`,
+        law: `replay settlement reach`,
+        difference: `current-acquisition-before-replay-success`,
+        history: {
+          constructed: `a pending replacement prefix before replay success with generated later work`,
+        },
+        driver: (history, observe) =>
+          driveReplaySettlement(
+            {
+              ...history,
+              history: history.history.filter(
+                ({ type }) => type !== `replaySucceeds`,
+              ),
+            },
+            observe,
+          ),
+      },
+    ],
+  })
+
+  // Transport success and replay completion are distinct checkpoints. This
+  // grammar reconstructs CI seed 332327919, then supersedes the blocked replay.
+  // The shared ledger checks retention before that truncate and retirement
+  // after its successor completes; neither observation reads loader fields.
+  const replayRetirementCase = fc.oneof(
+    fc.record({
+      end: fc.constantFrom(`complete` as const, `dispose` as const),
+      failedFinite: fc.constant(false),
+      limit: fc.constantFrom(1 as const, 2 as const),
+      offset: fc.constantFrom(0 as const, 1 as const),
+      releaseFault: fc.boolean(),
+      releaseReenters: fc.boolean(),
+    }),
+    // One row makes the bounded prefix produce its held tie. Wider starting
+    // windows grow a different prefix and do not establish this schedule.
+    fc.record({
+      end: fc.constantFrom(`complete` as const, `dispose` as const),
+      failedFinite: fc.constant(true),
+      limit: fc.constant(1 as const),
+      offset: fc.constant(0 as const),
+      releaseFault: fc.boolean(),
+      releaseReenters: fc.boolean(),
+    }),
+  )
+  type ReplayRetirementCase =
+    typeof replayRetirementCase extends fc.Arbitrary<infer History>
+      ? History
+      : never
+  const replayRetirementStates = [
+    `successful-finite-held-during-replay`,
+    `failed-finite-held-during-replay`,
+    `finite-retired-after-replay`,
+  ] as const
+  async function driveReplayRetirement(
+    history: AuthorityCase,
+    observe: (checkpoint: string, value: unknown) => void,
+    retainFailed = false,
+  ): Promise<void> {
+    const reached = new Set<string>()
+    await observeComparison(history, observe, () =>
+      checkAuthorityCase(
+        history,
+        (state) => {
+          if ((replayRetirementStates as ReadonlyArray<string>).includes(state))
+            reached.add(state)
+        },
+        undefined,
+        (released, request) =>
+          retainFailed && request.outcome === `failed` && request.superseded
+            ? false
+            : released,
+      ),
+    )
+    for (const state of reached) observe(`reach`, state)
+  }
+  oracleProperty({
+    id: `ordered-loader.replay-retirement`,
+    law: {
+      statement: `Covering retirement waits for active replay to complete; an explicit retry may replace failed demand.`,
+      authority: `query/live/ARCHITECTURE.md: Ordered requests, continuation, and recovery; Replay participants and failure.`,
+      limits: `Controlled loader and subscription boundary, including explicit loader retry during replay. No public window timing or real provider claim.`,
+    },
+    owns: ['src/query/live/ordered-source-loader.ts'],
+    histories: {
+      arbitrary: replayRetirementCase,
+      runs: 100,
+      fixedSeeds: [332327919],
+      states: [...replayRetirementStates],
+      constructed: [false, true].map((failedFinite) => ({
+        name: `${failedFinite ? `failed` : `successful`} finite lease during blocked replay`,
+        enters: [
+          failedFinite
+            ? `failed-finite-held-during-replay`
+            : `successful-finite-held-during-replay`,
+          `finite-retired-after-replay`,
+        ],
+        build: (base: ReplayRetirementCase): ReplayRetirementCase =>
+          failedFinite
+            ? {
+                ...base,
+                failedFinite: true,
+                limit: 1,
+                offset: 0,
+                end: `complete`,
+              }
+            : { ...base, failedFinite: false, end: `complete` },
+      })),
+    },
+    resolve: ({
+      failedFinite,
+      end,
+      ...axes
+    }: ReplayRetirementCase): AuthorityCase => ({
+      ...ordinaryScenario,
+      ...axes,
+      indexed: false,
+      settledFirst: failedFinite,
+      syncRepair: false,
+      needsMore: false,
+      releaseInvalidates: true,
+      history: failedFinite
+        ? [
+            { type: `settle`, pick: 0, ok: true },
+            { type: `truncate` },
+            { type: `move`, delta: 0 },
+            { type: `invalidate`, react: false },
+            { type: `move`, delta: 0 },
+            { type: `settleNewest` },
+            { type: `hang`, newest: true },
+            { type: `failOldest` },
+            { type: `settleNewest` },
+            ...(end === `dispose` ? [{ type: `dispose` as const }] : []),
+            { type: `truncate` },
+            { type: `replaySucceeds` },
+          ]
+        : [
+            { type: `truncate` },
+            { type: `move`, delta: -1 },
+            { type: `settle`, pick: 1, ok: true },
+            { type: `failOldestThrowingRecovery` },
+            { type: `hang` },
+            { type: `move`, delta: 0 },
+            { type: `settleNewest` },
+            ...(end === `dispose` ? [{ type: `dispose` as const }] : []),
+            { type: `truncate` },
+            { type: `replaySucceeds` },
+          ],
+    }),
+    model: (history, observations) => recordedComparison(history, observations),
+    driver: driveReplayRetirement,
+    check: (_history, observations, verdict) => {
+      if (verdict.kind === `violation`) return verdict
+      const required = [
+        _history.settledFirst
+          ? `failed-finite-held-during-replay`
+          : `successful-finite-held-during-replay`,
+        ...(_history.history.some(({ type }) => type === `dispose`)
+          ? []
+          : [`finite-retired-after-replay`]),
+      ]
+      const missing = required.find(
+        (state) =>
+          !observations.some(
+            (observation) =>
+              observation.checkpoint === `reach` && observation.value === state,
+          ),
+      )
+      return missing
+        ? {
+            kind: `violation`,
+            law: `replay retirement reach`,
+            checkpoint: `replay retirement participation`,
+            difference: `history did not enter ${missing}`,
+          }
+        : verdict
+    },
+    // Each builder must lose its own reach when its premise is omitted.
+    // Omitting only the successor replay preserves blocked retention while
+    // proving that the completed-retirement checkpoint is separately required.
+    calibrations: [
+      {
+        name: `rejects a superseded failed lease retained after replay`,
+        law: `finite retirement after replay`,
+        difference: `is still held after replay completed`,
+        history: { constructed: `failed finite lease during blocked replay` },
+        driver: (
+          history: AuthorityCase,
+          observe: (checkpoint: string, value: unknown) => void,
+        ) => driveReplayRetirement(history, observe, true),
+      },
+      ...[false, true].flatMap((failedFinite) => [
+        {
+          name: `rejects ${failedFinite ? `failed` : `successful`} construction without replay`,
+          law: `replay retirement reach`,
+          difference: failedFinite
+            ? `failed-finite-held-during-replay`
+            : `successful-finite-held-during-replay`,
+          history: {
+            constructed: `${failedFinite ? `failed` : `successful`} finite lease during blocked replay`,
+          },
+          driver: (
+            history: AuthorityCase,
+            observe: (checkpoint: string, value: unknown) => void,
+          ) =>
+            driveReplayRetirement(
+              {
+                ...history,
+                history: history.history.filter(
+                  ({ type }) => type !== `truncate`,
+                ),
+              },
+              observe,
+            ),
+        },
+        {
+          name: `rejects ${failedFinite ? `failed` : `successful`} construction without successor replay`,
+          law: `replay retirement reach`,
+          difference: `finite-retired-after-replay`,
+          history: {
+            constructed: `${failedFinite ? `failed` : `successful`} finite lease during blocked replay`,
+          },
+          driver: (
+            history: AuthorityCase,
+            observe: (checkpoint: string, value: unknown) => void,
+          ) =>
+            driveReplayRetirement(
+              {
+                ...history,
+                history: history.history.slice(0, -2),
+              },
+              observe,
+            ),
+        },
+      ]),
+    ],
+  })
+
+  // CI seed 332327919 ends while a current finite acquisition never answers.
+  // The full-source transport succeeds, but replay still owes that acquisition.
+  const blockedReplayRegression: AuthorityRegression = {
+    label: `keeps finite leases when a successful full-source transport leaves replay blocked`,
+    testCase: {
+      ...ordinaryScenario,
+      indexed: false,
+      limit: 1,
+      settledFirst: false,
+      releaseFault: false,
+      syncRepair: false,
+      needsMore: false,
+      releaseInvalidates: true,
+      history: [
+        { type: `truncate` },
+        { type: `move`, delta: -1 },
+        { type: `settle`, pick: 1, ok: true },
+        { type: `failOldestThrowingRecovery` },
+        { type: `hang` },
+      ],
+    },
+  }
+
   // The fixed regressions above use the authority helper directly. The
   // generated authority grammar maps its values without an unmapper, so it
   // cannot take them back; each replays through `checkAuthorityCase` under its
@@ -3641,6 +4157,7 @@ describe(`Ordered source request authority`, () => {
       supersededTieRegression,
       ...campaignRegressions,
       deferredRefillRegression,
+      blockedReplayRegression,
     ],
     label: ({ label }) => label,
     resolve: (regression) => ({ regression }),

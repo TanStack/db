@@ -88,6 +88,8 @@ export async function observeBaselineLifecycle(
   const baseline = baselineGate<void>()
   const underlying: Array<Promise<void> | true> = []
   const replacementReceipts: Array<Promise<void> | true> = []
+  const eventRow: HydrationLifecycleRow = { id: `3`, value: 4 }
+  let eventReceipt: Promise<void> | true | undefined
   let settled = 0
   let baselineCompleted = false
   let hydrateCalls = 0
@@ -132,6 +134,7 @@ export async function observeBaselineLifecycle(
         >[0],
       ) => {
         const old = run++ === 0
+        let wroteEvent = false
         const capability = params.metadata!.persistence!
         if (old)
           genuineBaseline = capability.hydrateBaseline().then(() => {
@@ -154,10 +157,22 @@ export async function observeBaselineLifecycle(
               },
             },
           },
+          write: (message) => {
+            params.write(message)
+            if (
+              !old &&
+              message.type !== `delete` &&
+              message.value.id === eventRow.id &&
+              message.value.value === eventRow.value
+            )
+              wroteEvent = true
+          },
           commit: (...args) => {
             const receipt = params.commit(...args)
             if (!old) {
               replacementReceipts.push(receipt)
+              if (wroteEvent) eventReceipt = receipt
+              wroteEvent = false
               return receipt
             }
             underlying.push(receipt)
@@ -328,9 +343,11 @@ export async function observeBaselineLifecycle(
       )
         reached.push(`replacement-omits-old`)
     }
-    const eventReceipt = replacementReceipts.length
-    await provider.event({ id: `3`, value: 4 })
-    await untilStartup(() => replacementReceipts.length > eventReceipt)
+    // An unrelated empty flush can commit before the provider delivers this
+    // event. Wait for the receipt containing its write, not the next receipt.
+    await provider.event(eventRow)
+    await untilStartup(() => eventReceipt !== undefined)
+    await eventReceipt
     await Promise.all(replacementReceipts)
     const afterEvent = publicSnapshot(await snapshot())
     observation = {

@@ -540,6 +540,11 @@ const ownerGroups: ReadonlyArray<
     `controlled node-sqlite`,
   ],
   [
+    `db-adapter-conformance/tests/persisted-baseline-checkpoint-oracle.test.ts`,
+    `adapter-conformance.persisted-baseline-lifecycle`,
+    `checkpoint`,
+  ],
+  [
     `powersync-db-collection/tests/persisted-baseline-lifecycle-oracle.test.ts`,
     `adapter-conformance.persisted-baseline-lifecycle.powersync`,
     `controlled node-sqlite`,
@@ -1496,7 +1501,7 @@ const ownerGroups: ReadonlyArray<
   [
     `db/tests/query/ordered-source-loader-state-oracle.test.ts`,
     `ordered-loader`,
-    `request-authority unproven-report replay-continuation retirement-invalidation retirement-receiver`,
+    `request-authority unproven-report replay-continuation replay-settlement replay-retirement retirement-invalidation retirement-receiver`,
   ],
   [
     `db-sqlite-persistence-core/tests/sqlite-core-adapter-cli-runtime.test.ts`,
